@@ -2,7 +2,6 @@
 #define IR_H
 
 #include "ast.h"
-#include "common.h"
 #include "lexer.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
