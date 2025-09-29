@@ -14,6 +14,7 @@
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
+#include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MathExtras.h>
 #include <llvm/Support/TargetSelect.h>
@@ -23,6 +24,7 @@
 #include <llvm/TargetParser/Host.h>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
 
 int globalVals = 0;
 
@@ -49,7 +51,7 @@ void IRGenerator::generate(const std::shared_ptr<Program> &node) {
       generateStructDeclaration(
           std::dynamic_pointer_cast<StructDeclaration>(decl));
     } else {
-      throwError("Unknown top-level declaration: " + decl->str());
+      error(node, "Unknown top-level declaration: " + decl->str());
     }
   }
 }
@@ -65,14 +67,14 @@ int IRGenerator::outputObjFile(const std::string &filename) {
   llvm::InitializeAllAsmParsers();
   llvm::InitializeAllAsmPrinters();
 
-  std::string error;
-  auto Target = llvm::TargetRegistry::lookupTarget(targetTriple, error);
+  std::string errorStr;
+  auto Target = llvm::TargetRegistry::lookupTarget(targetTriple, errorStr);
 
   // Print an error and exit if we couldn't find the requested target.
   // This generally occurs if we've forgotten to initialise the
   // TargetRegistry or we have a bogus target triple.
   if (!Target) {
-    llvm::errs() << error;
+    error(nullptr, "Failed to lookup target: " + errorStr);
     return 1;
   }
   auto CPU = "generic";
@@ -88,14 +90,14 @@ int IRGenerator::outputObjFile(const std::string &filename) {
   llvm::raw_fd_ostream dest(filename, ec, llvm::sys::fs::OF_None);
 
   if (ec) {
-    llvm::errs() << "Could not open file: " << ec.message();
+    error(nullptr, "Could not open file: " + ec.message());
     return 1;
   }
   llvm::legacy::PassManager pass;
   auto FileType = llvm::CodeGenFileType::ObjectFile;
 
   if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
-    llvm::errs() << "TargetMachine can't emit a file of this type";
+    error(nullptr, "TargetMachine can't emit a file of this type");
     return 1;
   }
 
@@ -110,14 +112,14 @@ void IRGenerator::printIR(const std::string &filename) {
     std::error_code ec;
     llvm::raw_fd_ostream out(filename, ec, llvm::sys::fs::OF_None);
     if (ec) {
-      throwError("Could not open file: " + ec.message());
+      error(nullptr, "Could not open file: " + ec.message());
     }
     m_module->print(out, nullptr);
   }
 }
 
-void IRGenerator::throwError(const std::string &msg) {
-  throw std::runtime_error(msg);
+void IRGenerator::error(ASTNodePtr node, const std::string &msg) {
+  m_errors.push_back(std::make_pair(node, msg));
 }
 
 llvm::Type *IRGenerator::getLLVMType(const std::shared_ptr<Type> &type) {
@@ -128,6 +130,10 @@ llvm::Type *IRGenerator::getLLVMType(const std::shared_ptr<Type> &type) {
     return llvm::Type::getInt64Ty(m_context);
   if (IS_INSTANCE(type, U8))
     return llvm::Type::getInt8Ty(m_context);
+  if (IS_INSTANCE(type, U32))
+    return llvm::Type::getInt32Ty(m_context);
+  if (IS_INSTANCE(type, U64))
+    return llvm::Type::getInt64Ty(m_context);
   if (IS_INSTANCE(type, F32))
     return llvm::Type::getFloatTy(m_context);
   if (IS_INSTANCE(type, F64))
@@ -144,7 +150,7 @@ llvm::Type *IRGenerator::getLLVMType(const std::shared_ptr<Type> &type) {
     if (it != m_structTypes.end()) {
       return it->second;
     } else {
-      throwError("Unknown struct type: " + structType->name);
+      error(nullptr, "Unknown struct type: " + structType->name);
     }
   }
   if (IS_INSTANCE(type, PointerType)) {
@@ -164,7 +170,12 @@ llvm::Type *IRGenerator::getLLVMType(const std::shared_ptr<Type> &type) {
     return llvm::FunctionType::get(getLLVMType(funcType->ret), paramTypes,
                                    funcType->variadic);
   }
-  throwError("Unsupported type: " + type->str());
+  if (!type) {
+    error(nullptr, "Type is null");
+    return nullptr;
+  } else {
+    error(nullptr, "Unsupported type: " + type->str());
+  }
   return nullptr;
 }
 
@@ -194,7 +205,7 @@ IRGenerator::generateAddress(const std::shared_ptr<Expression> &expr) {
     auto deref = std::dynamic_pointer_cast<Dereference>(expr);
     return generateExpression(deref->pointer, true);
   }
-  throwError("Expression is not an lvalue: " + expr->str());
+  error(expr, "Expression is not an lvalue: " + expr->str());
   return nullptr;
 }
 
@@ -235,8 +246,11 @@ IRGenerator::generateExpression(const std::shared_ptr<Expression> &expr,
     } else {
       return ptr;
     }
+  } else if (IS_INSTANCE(expr, MethodCall)) {
+    return generateMethodCall(std::dynamic_pointer_cast<MethodCall>(expr),
+                              loadValue);
   }
-  throwError("Unknown expression type");
+  error(expr, "Unknown expression type");
   return nullptr;
 }
 std::string llvmTypeToString(llvm::Type *ty) {
@@ -252,7 +266,7 @@ IRGenerator::generateCast(const std::shared_ptr<TypeCast> &typeCast,
   llvm::Value *val = generateExpression(typeCast->expr);
   llvm::Type *destType = getLLVMType(typeCast->target_type);
   if (!val || !destType) {
-    throwError("Invalid cast operation");
+    error(typeCast, "Invalid cast operation");
     return nullptr;
   }
   llvm::Type *srcType = val->getType();
@@ -286,8 +300,8 @@ IRGenerator::generateCast(const std::shared_ptr<TypeCast> &typeCast,
   } else if (srcType->isIntegerTy() && destType->isPointerTy()) {
     return m_builder.CreateIntToPtr(val, destType, "inttoptrtmp");
   } else {
-    throwError("Unsupported cast from " + llvmTypeToString(srcType) + " to " +
-               llvmTypeToString(destType));
+    error(typeCast, "Unsupported cast from " + llvmTypeToString(srcType) +
+                        " to " + llvmTypeToString(destType));
   }
   return nullptr;
 }
@@ -317,7 +331,7 @@ IRGenerator::generateStatement(const std::shared_ptr<Statement> &stmt) {
         std::dynamic_pointer_cast<ReturnStatement>(stmt));
   } else {
 
-    throwError("Unknown statement type: " + stmt->str());
+    error(stmt, "Unknown statement type: " + stmt->str());
   }
   return nullptr;
 }
@@ -339,8 +353,6 @@ llvm::Function *IRGenerator::generateFunction(
   if (!func->body)
     return function;
 
-  // Generate function body
-
   m_scopeStack.push_back(Scope(CUR_SCOPE));
 
   llvm::BasicBlock *entry =
@@ -357,6 +369,13 @@ llvm::Function *IRGenerator::generateFunction(
     idx++;
   }
   generateStatement(func->body);
+  if (m_builder.GetInsertBlock()->getTerminator() == nullptr) {
+    if (IS_INSTANCE(func->type->ret, Void)) {
+      m_builder.CreateRetVoid();
+    } else {
+      error(func, "Non-void function missing return: " + func->name);
+    }
+  }
 
   return function;
 }
@@ -372,150 +391,189 @@ void IRGenerator::generateVariableDeclaration(
       initVal = generateExpression(
           std::dynamic_pointer_cast<Expression>(varDecl->initializer));
     } else {
-      throwError("Unsupported initializer type");
+      error(varDecl, "Unsupported initializer type");
     }
     m_builder.CreateStore(initVal, alloca);
   }
 }
 
+void IRGenerator::generateStructMethods(
+    const std::shared_ptr<StructDeclaration> &structDecl) {
+  for (std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>>::iterator iter = structDecl->methods.begin();
+       iter != structDecl->methods.end(); ++iter) {
+    auto method = iter->second;
+    std::string mangledName = "__" + structDecl->name + "_" + method->name;
+    method->name = mangledName;
+    generateFunction(method);
+  }
+}
+
 void IRGenerator::generateStructDeclaration(
     const std::shared_ptr<StructDeclaration> &structDecl) {
-  std::vector<llvm::Type *> fieldTypes;
-  m_structTypes[structDecl->name] =
-      llvm::StructType::create(m_context, structDecl->name);
-  for (const auto &field : structDecl->fields) {
-    fieldTypes.push_back(getLLVMType(field.second));
-  }
+
   llvm::StructType *llvmStruct =
-      llvm::StructType::create(m_context, fieldTypes, structDecl->name);
+      llvm::StructType::create(m_context, structDecl->name);
+
   m_structTypes[structDecl->name] = llvmStruct;
+
+  std::vector<llvm::Type *> fieldTypes;
+  for (const auto &field : structDecl->fields) {
+    llvm::Type *ty = getLLVMType(field.second);
+    fieldTypes.push_back(ty);
+  }
+
+  llvmStruct->setBody(fieldTypes, /*packed=*/false);
+
+  generateStructMethods(structDecl);
 }
 
-llvm::Value *
-IRGenerator::generateBinaryOp(const std::shared_ptr<Expression> &left,
-                              const std::shared_ptr<Expression> &right,
-                              std::string op, bool loadValue) {
-  {
-    llvm::Value *l = generateExpression(left);
-    llvm::Value *r = generateExpression(right);
+llvm::Value *IRGenerator::generateBinaryOp(
+    const std::shared_ptr<Expression> &left,
+    const std::shared_ptr<Expression> &right,
+    std::string op, bool loadValue) {
 
-    llvm::Type *ty = l->getType();
+  if (!left || !right) {
+    error(nullptr, "Invalid binary operation: null operand expression");
+    return nullptr;
+  }
 
-    // Handle assignment separately
-    if (op == "=") {
-      llvm::Value *addr = generateAddress(left);
-      if (!addr) {
-        throwError("Left operand of assignment is not an lvalue");
-        return nullptr;
-      }
-      m_builder.CreateStore(r, addr);
-      return r;
-    }
+  llvm::Value *l = generateExpression(left);
+  llvm::Value *r = generateExpression(right);
 
-    // Map operator string to function
-    struct OpInfo {
-      std::function<llvm::Value *(llvm::Value *, llvm::Value *)> intOp;
-      std::function<llvm::Value *(llvm::Value *, llvm::Value *)> floatOp;
-    };
+  if (!l || !r) {
+    error(nullptr, "Failed to generate LLVM value for binary operands");
+    return nullptr;
+  }
 
-    static const std::map<std::string, OpInfo> ops = {
-        {"+",
-         {[this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateAdd(a, b, "addtmp");
-          },
-          [this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateFAdd(a, b, "faddtmp");
-          }}},
-        {"-",
-         {[this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateSub(a, b, "subtmp");
-          },
-          [this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateFSub(a, b, "fsubtmp");
-          }}},
-        {"*",
-         {[this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateMul(a, b, "multmp");
-          },
-          [this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateFMul(a, b, "fmultmp");
-          }}},
-        {"/",
-         {[this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateSDiv(a, b, "divtmp");
-          },
-          [this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateFDiv(a, b, "fdivtmp");
-          }}},
-        {"==",
-         {[this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateICmpEQ(a, b, "eqtmp");
-          },
-          [this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateFCmpUEQ(a, b, "feqtmp");
-          }}},
-        {"!=",
-         {[this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateICmpNE(a, b, "netmp");
-          },
-          [this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateFCmpUNE(a, b, "fnetmp");
-          }}},
-        {"<",
-         {[this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateICmpSLT(a, b, "lttmp");
-          },
-          [this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateFCmpULT(a, b, "flttmp");
-          }}},
-        {"<=",
-         {[this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateICmpSLE(a, b, "letmp");
-          },
-          [this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateFCmpULE(a, b, "fletmp");
-          }}},
-        {">",
-         {[this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateICmpSGT(a, b, "gttmp");
-          },
-          [this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateFCmpUGT(a, b, "fgttmp");
-          }}},
-        {">=",
-         {[this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateICmpSGE(a, b, "getmp");
-          },
-          [this](llvm::Value *a, llvm::Value *b) {
-            return m_builder.CreateFCmpUGE(a, b, "fgetmp");
-          }}},
-    };
+  llvm::Type *ty = l->getType();
+  if (!ty) {
+    error(left, "Left operand of binary op has no type");
+    return nullptr;
+  }
 
-    if (ty->isPointerTy()) {
-      // treat as integers
-      ty = llvm::Type::getInt64Ty(m_context);
-      l = m_builder.CreatePtrToInt(l, ty, "ptrtointtmp");
-      r = m_builder.CreatePtrToInt(r, ty, "ptrtointtmp");
-    }
-    auto it = ops.find(op);
-    if (it == ops.end()) {
-      throwError("Unsupported binary operator: " + op);
+  // Handle assignment separately
+  if (op == "=") {
+    llvm::Value *addr = generateAddress(left);
+    if (!addr) {
+      error(left, "Left operand of assignment is not an lvalue");
       return nullptr;
     }
+    m_builder.CreateStore(r, addr);
+    return r;
+  }
 
-    const OpInfo &info = it->second;
+  static const std::map<std::string, OpInfo> ops = {
+      {"+",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateAdd(a, b, "addtmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFAdd(a, b, "faddtmp");
+        }}},
+      {"-",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateSub(a, b, "subtmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFSub(a, b, "fsubtmp");
+        }}},
+      {"*",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateMul(a, b, "multmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFMul(a, b, "fmultmp");
+        }}},
+      {"/",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateSDiv(a, b, "divtmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFDiv(a, b, "fdivtmp");
+        }}},
+      {"==",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateICmpEQ(a, b, "eqtmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFCmpUEQ(a, b, "feqtmp");
+        }}},
+      {"!=",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateICmpNE(a, b, "netmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFCmpUNE(a, b, "fnetmp");
+        }}},
+      {"<",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateICmpSLT(a, b, "lttmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFCmpULT(a, b, "flttmp");
+        }}},
+      {"<=",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateICmpSLE(a, b, "letmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFCmpULE(a, b, "fletmp");
+        }}},
+      {">",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateICmpSGT(a, b, "gttmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFCmpUGT(a, b, "fgttmp");
+        }}},
+      {">=",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateICmpSGE(a, b, "getmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFCmpUGE(a, b, "fgetmp");
+        }}},
+  };
 
-    if (ty->isIntegerTy())
-      return info.intOp(l, r);
-    else if (ty->isFloatingPointTy())
-      return info.floatOp(l, r);
-    else {
-      throwError("Unsupported type for binary operator: " +
-                 llvmTypeToString(ty));
+  // Pointer handling → cast to integer
+  if (ty->isPointerTy()) {
+    ty = llvm::Type::getInt64Ty(m_context);
+    l = m_builder.CreatePtrToInt(l, ty, "ptrtoint_lhs");
+    r = m_builder.CreatePtrToInt(r, ty, "ptrtoint_rhs");
+    if (!l || !r) {
+      error(nullptr, "Failed to convert pointer operands to integer");
       return nullptr;
     }
   }
+
+  // Ensure both operands have the same type
+  if (l->getType() != r->getType()) {
+    error(nullptr, "Type mismatch in binary op: lhs=" +
+                       llvmTypeToString(l->getType()) +
+                       " rhs=" + llvmTypeToString(r->getType()));
+    return nullptr;
+  }
+
+  // Check operator support
+  auto it = ops.find(op);
+  if (it == ops.end()) {
+    error(right, "Unsupported binary operator: " + op);
+    return nullptr;
+  }
+
+  const OpInfo &info = it->second;
+
+  if (ty->isIntegerTy())
+    return info.intOp(l, r);
+  else if (ty->isFloatingPointTy())
+    return info.floatOp(l, r);
+  else {
+    error(right,
+          "Unsupported type for binary operator: " + llvmTypeToString(ty));
+    return nullptr;
+  }
 }
+
 llvm::Value *
 IRGenerator::generateUnaryOp(const std::shared_ptr<Expression> &operand,
                              std::string op, bool loadValue) {
@@ -529,7 +587,7 @@ IRGenerator::generateUnaryOp(const std::shared_ptr<Expression> &operand,
   } else if (op == "&") {
     return generateAddress(operand);
   }
-  throwError("Unsupported unary operator: " + op);
+  error(operand, "Unsupported unary operator: " + op);
   return nullptr;
 }
 
@@ -544,12 +602,18 @@ llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
   } else if (IS_INSTANCE(lit->lit_type, U8)) {
     return llvm::ConstantInt::get(m_context,
                                   llvm::APInt(8, std::get<int>(lit->value)));
+  } else if (IS_INSTANCE(lit->lit_type, U32)) {
+    return llvm::ConstantInt::get(m_context,
+                                  llvm::APInt(32, std::get<int>(lit->value)));
+  } else if (IS_INSTANCE(lit->lit_type, U64)) {
+    return llvm::ConstantInt::get(m_context,
+                                  llvm::APInt(64, std::get<int>(lit->value)));
   } else if (IS_INSTANCE(lit->lit_type, F32)) {
-    return llvm::ConstantFP::get(m_context,
-                                 llvm::APFloat(std::get<float>(lit->value)));
+    return llvm::ConstantFP::get(m_builder.getFloatTy(),
+                                 std::get<float>(lit->value));
   } else if (IS_INSTANCE(lit->lit_type, F64)) {
-    return llvm::ConstantFP::get(m_context,
-                                 llvm::APFloat(std::get<float>(lit->value)));
+    return llvm::ConstantFP::get(m_builder.getDoubleTy(),
+                                 std::get<float>(lit->value));
   } else if (IS_INSTANCE(lit->lit_type, BOOL)) {
     return llvm::ConstantInt::get(
         m_context, llvm::APInt(1, std::get<bool>(lit->value) ? 1 : 0));
@@ -568,7 +632,7 @@ llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
         return llvm::ConstantPointerNull::get(
             llvm::cast<llvm::PointerType>(getLLVMType(lit->lit_type)));
       } else {
-        throwError("Only null (0) is allowed as integer pointer literal");
+        error(lit, "Only null (0) is allowed as integer pointer literal");
       }
     } else if (std::holds_alternative<std::string>(lit->value)) {
       // String literal → create global string
@@ -587,10 +651,13 @@ llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
       return llvm::ConstantExpr::getGetElementPtr(strType, globalStr, indices,
                                                   true);
     } else {
-      throwError("Unsupported pointer literal value type");
+      error(lit, "Unsupported pointer literal value type");
     }
+  } else if (IS_INSTANCE(lit->lit_type, NullType)) {
+    return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(
+        getLLVMType(std::make_shared<PointerType>(std::make_shared<Void>()))));
   } else {
-    throwError("Unsupported literal type: " + lit->lit_type->str());
+    error(lit, "Unsupported literal type: " + lit->lit_type->str());
   }
   return nullptr;
 }
@@ -600,7 +667,7 @@ IRGenerator::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
                                bool loadValue) {
   auto *sym = CUR_SCOPE.get(varAccess->name);
   if (!sym) {
-    throwError("Unknown variable name: " + varAccess->name);
+    error(varAccess, "Unknown variable name: " + varAccess->name);
     return nullptr;
   }
 
@@ -613,25 +680,109 @@ IRGenerator::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
   return m_builder.CreateLoad(sym->type, v, varAccess->name);
 }
 
+llvm::Value *IRGenerator::generateMethodCall(const std::shared_ptr<MethodCall> &methodCall, bool loadValue) {
+  auto structAccess = methodCall->object;
+  llvm::Value *objPtr = generateAddress(std::static_pointer_cast<Expression>(structAccess));
+  if (!objPtr) {
+    error(structAccess, "Failed to generate address for method call object");
+    return nullptr;
+  }
+  auto structType = std::dynamic_pointer_cast<StructType>(structAccess->inferred_type);
+  if (!structType) {
+    auto ptrType = std::dynamic_pointer_cast<PointerType>(structAccess->inferred_type);
+    if (ptrType) {
+      structType = std::dynamic_pointer_cast<StructType>(ptrType->base);
+      // Update objPtr to load the pointer value
+      if (objPtr) {
+        objPtr = m_builder.CreateLoad(
+            llvm::PointerType::getUnqual(getLLVMType(ptrType->base)), objPtr,
+            "load_ptr_for_method");
+      }
+    }
+    if (!structType) {
+      error(structAccess, "Method call on non-pointer, non-struct type: " + structAccess->inferred_type->str());
+      return nullptr;
+    }
+  }
+  if (!structType) {
+    error(structAccess,
+          "Failed to determine struct type for method call");
+    return nullptr;
+  }
+  // Find the struct type
+  auto accessee = m_structTypes.find(structType->name);
+  if (accessee == m_structTypes.end()) {
+    error(structAccess, "Unknown struct type in method call: " + structType->name);
+    return nullptr;
+  }
+  // Mangle method name
+  std::string mangledName = "__" + structType->name + "_" + methodCall->method;
+  // Prepare arguments
+  std::vector<llvm::Value *> argsV;
+  argsV.push_back(objPtr); // 'this' pointer
+  for (const auto &arg : methodCall->args) {
+    argsV.push_back(generateExpression(arg));
+  }
+  llvm::Function *calleeValue = m_module->getFunction(mangledName);
+  if (!calleeValue) {
+    error(methodCall, "Unknown method: " + mangledName);
+    return nullptr;
+  }
+  return m_builder.CreateCall(calleeValue, argsV, "calltmp");
+}
+
 llvm::Value *
 IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
                               bool loadValue) {
+
   std::vector<llvm::Value *> argsV;
+
   for (const auto &arg : funcCall->args) {
     argsV.push_back(generateExpression(arg));
   }
-  llvm::Value *calleeValue = generateExpression(funcCall->func);
+
+  llvm::Value *calleeValue =
+      generateExpression(std::static_pointer_cast<Expression>(funcCall->func));
   if (!calleeValue) {
-    throwError("Unknown function referenced");
+    error(funcCall, "Failed to generate callee for function call");
     return nullptr;
   }
-  // Try to cast calleeValue to llvm::Function*
-  llvm::Function *calleeFunc = llvm::dyn_cast<llvm::Function>(calleeValue);
-  if (!calleeFunc) {
-    throwError("Callee is not a function: " + funcCall->func->str());
+
+  llvm::Type *calleeType = nullptr;
+
+  if (auto *func = llvm::dyn_cast<llvm::Function>(calleeValue)) {
+    // Direct call
+    return m_builder.CreateCall(func, argsV, "calltmp");
+  } else if (calleeValue->getType()->isPointerTy()) {
+    // Indirect call via function pointer
+    auto it = funcCall->func->inferred_type;
+    if (!IS_INSTANCE(it, PointerType)) {
+      error(funcCall,
+            "Callee is a pointer, but inferred type is not a pointer");
+      return nullptr;
+    }
+    auto ptrType = std::dynamic_pointer_cast<PointerType>(it);
+    if (!IS_INSTANCE(ptrType->base, FunctionType)) {
+      error(funcCall, "Callee is a pointer, but not to a function type");
+      return nullptr;
+    }
+    auto funcType = std::dynamic_pointer_cast<FunctionType>(ptrType->base);
+    calleeType = getLLVMType(funcType);
+
+    llvm::Type *elemTy = calleeType;
+
+    if (!llvm::isa<llvm::FunctionType>(elemTy)) {
+      error(funcCall, "Callee is a pointer, but not to a function type");
+      return nullptr;
+    }
+
+    auto *funcTy = llvm::cast<llvm::FunctionType>(elemTy);
+    return m_builder.CreateCall(funcTy, calleeValue, argsV, "calltmp");
+  } else {
+    error(funcCall, "Callee is not a function or function pointer: " +
+                        funcCall->func->str());
     return nullptr;
   }
-  return m_builder.CreateCall(calleeFunc, argsV, "calltmp");
 }
 
 llvm::Value *IRGenerator::generateOffsetAccess(
@@ -640,18 +791,18 @@ llvm::Value *IRGenerator::generateOffsetAccess(
   llvm::Value *basePtr = generateExpression(
       std::static_pointer_cast<Expression>(offsetAccess->base));
   if (!basePtr) {
-    throwError("Failed to generate base for offset access");
+    error(offsetAccess, "Failed to generate base for offset access");
     return nullptr;
   }
   llvm::Value *index = generateExpression(offsetAccess->index);
   if (!index) {
-    throwError("Failed to generate index for offset access");
+    error(offsetAccess->index, "Failed to generate index for offset access");
     return nullptr;
   }
   llvm::Type *resultType = getLLVMType(offsetAccess->inferred_type);
   if (!resultType) {
-    throwError("Unknown type for offset access: " +
-               offsetAccess->inferred_type->str());
+    error(offsetAccess, "Unknown type for offset access: " +
+                            offsetAccess->inferred_type->str());
     return nullptr;
   }
   // Gep instruction
@@ -666,63 +817,114 @@ llvm::Value *IRGenerator::generateOffsetAccess(
 
 llvm::Value *IRGenerator::generateFieldAccess(
     const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
+
+  if (!fieldAccess || !fieldAccess->base) {
+    error(nullptr, "Invalid field access: missing base expression");
+    return nullptr;
+  }
+
+  if (!fieldAccess->base->inferred_type) {
+    std::cout << "Field access base: " << fieldAccess->base->str() << "\n";
+    error(fieldAccess->base, "Base expression of field access has no inferred type");
+    return nullptr;
+  }
+
   llvm::Value *basePtr =
       generateAddress(std::static_pointer_cast<Expression>(fieldAccess->base));
-  auto structType =
+  if (!basePtr) {
+    error(fieldAccess->base, "Failed to generate address for field base");
+    return nullptr;
+  }
+
+  // Check if base type is a struct or pointer-to-struct
+  std::shared_ptr<StructType> structType =
       std::dynamic_pointer_cast<StructType>(fieldAccess->base->inferred_type);
+
   if (!structType) {
-    auto ptrType = std::dynamic_pointer_cast<PointerType>(
-        fieldAccess->base->inferred_type);
+    auto ptrType =
+        std::dynamic_pointer_cast<PointerType>(fieldAccess->base->inferred_type);
     if (ptrType) {
       structType = std::dynamic_pointer_cast<StructType>(ptrType->base);
-      // Update basePtr to load the pointer value
-      if (basePtr) {
+
+      if (!ptrType->base) {
+        error(fieldAccess->base,
+              "Pointer type in field access has no base type");
+        return nullptr;
+      }
+
+      if (structType) {
+        // Adjust basePtr to dereference the pointer
         basePtr = m_builder.CreateLoad(
             llvm::PointerType::getUnqual(getLLVMType(ptrType->base)), basePtr,
             "load_ptr_for_field");
+        if (!basePtr) {
+          error(fieldAccess->base,
+                "Failed to load pointer value for field access");
+          return nullptr;
+        }
       }
     }
+
     if (!structType) {
-      throwError("Field access on non-struct type: " +
-                 fieldAccess->base->inferred_type->str());
+      error(fieldAccess->base,
+            "Field access on non-struct type: " +
+                fieldAccess->base->inferred_type->str());
       return nullptr;
     }
   }
-  if (!basePtr) {
-    throwError("Failed to generate base for field access");
-    return nullptr;
-  }
-  if (!structType) {
-    throwError("Failed to determine struct type for field access");
-    return nullptr;
-  }
-  // Find the struct type
+
+  // Confirm struct type is registered in LLVM mapping
   auto accessee = m_structTypes.find(structType->name);
-  if (accessee == m_structTypes.end()) {
-    throwError("Unknown struct type in field access: " + structType->name);
+  if (accessee == m_structTypes.end() || !accessee->second) {
+    error(fieldAccess->base,
+          "Unknown or unregistered struct type in field access: " +
+              structType->name);
     return nullptr;
   }
+
   llvm::StructType *llvmStruct = accessee->second;
-  auto fieldName = fieldAccess->field;
+
+  // Validate field existence
+  const auto &fieldName = fieldAccess->field;
   int fieldIndex = structType->getFieldIndex(fieldName);
-  // Generate GEP
+  if (fieldIndex < 0) {
+    error(fieldAccess->base,
+          "Struct '" + structType->name +
+              "' has no field named '" + fieldName + "'");
+    return nullptr;
+  }
+
+  // Build GEP safely
   llvm::Value *gep = m_builder.CreateGEP(
       llvmStruct, basePtr,
       {llvm::ConstantInt::get(llvm::Type::getInt32Ty(m_context), 0),
        llvm::ConstantInt::get(llvm::Type::getInt32Ty(m_context), fieldIndex)},
       "field_access");
-  if (loadValue)
+
+  if (!gep) {
+    error(fieldAccess->base, "Failed to create GEP for field '" + fieldName +
+                                 "' in struct '" + structType->name + "'");
+    return nullptr;
+  }
+
+  if (loadValue) {
+    if (!fieldAccess->inferred_type) {
+      error(fieldAccess, "Field '" + fieldName +
+                             "' has no inferred type for load");
+      return nullptr;
+    }
     return m_builder.CreateLoad(getLLVMType(fieldAccess->inferred_type), gep,
                                 "load_field");
-  else
-    return gep;
+  }
+
+  return gep;
 }
 
 llvm::Value *IRGenerator::generateStructInitializer(
     const std::shared_ptr<StructInitializer> &structInit, bool loadValue) {
   auto it = m_structTypes.find(structInit->struct_type->name);
   if (it == m_structTypes.end()) {
-    throwError("Unknown struct type: " + structInit->struct_type->name);
+    error(structInit, "Unknown struct type: " + structInit->struct_type->name);
     return nullptr;
   }
   llvm::StructType *llvmStruct = it->second;

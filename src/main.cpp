@@ -13,7 +13,26 @@
 #include <llvm/Support/raw_ostream.h>
 #include <sstream>
 
+void prettyError(int line, int col, const std::string &msg,
+                 const std::string &source) {
+  std::istringstream srcStream(source);
+  std::string srcLine;
+  int currentLine = 1;
+
+  std::cout << "Error at line " << line << ", column " << col << ":\n";
+  while (std::getline(srcStream, srcLine)) {
+    if (currentLine == line) {
+      std::cout << srcLine << "\n";
+      std::cout << std::string(col - 1, ' ') << "^\n";
+      std::cout << msg << "\n";
+      return;
+    }
+    currentLine++;
+  }
+}
+
 int main(int argc, char **argv) {
+  std::cout << "Toy Compiler v0.1\n";
   llvm::InitLLVM X(argc, argv);
 
   // --- Define CLI options ---
@@ -34,41 +53,56 @@ int main(int argc, char **argv) {
   // --- Read source file ---
   std::ifstream file(inputFilename);
   if (!file) {
-    llvm::errs() << "Could not open file: " << inputFilename << "\n";
+    std::cerr << "Could not open file: " << inputFilename << "\n";
     return 1;
   }
   std::stringstream buffer;
   buffer << file.rdbuf();
   std::string src = buffer.str();
 
-  try {
-    Lexer lexer(src);
-    auto tokens = lexer.tokenize();
-    auto ast = parse(tokens);
-
-    auto typeChecker = TypeChecker();
-    typeChecker.check(ast);
-    if (!typeChecker.ok()) {
-      for (const auto &err : typeChecker.errors()) {
-        llvm::errs() << "Type error: " << err << "\n";
-      }
-      return 1;
+  Lexer lexer(src);
+  auto tokens = lexer.tokenize();
+  auto parser = Parser(tokens);
+  auto ast = parser.parse();
+  if (!parser.ok()) {
+    for (const auto &err : parser.errors()) {
+      prettyError(err.first.line, err.first.column, err.second, src);
     }
+    std::cout << "Parsing failed due to previous errors.\n";
+    return 1;
+  }
 
-    IRGenerator codegen("mainmod");
-    codegen.generate(ast);
+  auto typeChecker = TypeChecker();
+  typeChecker.check(ast);
+  if (!typeChecker.ok()) {
+    for (const auto &err : typeChecker.errors()) {
+      prettyError(err.first->line, err.first->col, err.second, src);
+    }
+    std::cout << "Type checking failed due to previous errors.\n";
+    return 1;
+  }
 
+  IRGenerator codegen("mainmod");
+  codegen.generate(ast);
+  if (!codegen.ok()) {
+    std::cout << codegen.errors().size() << " errors during code generation:\n";
+    for (const auto &err : codegen.errors()) {
+
+      prettyError(err.first ? err.first->line : -1,
+                  err.first ? err.first->col : -1, err.second, src);
+    }
+    std::cout << "Code generation failed due to previous errors.\n";
+    return 1;
+  }
+
+  if (codegen.ok()) {
     if (EmitIR) {
       codegen.printIR(outputFilename);
     } else {
       codegen.outputObjFile(outputFilename);
     }
-
-  } catch (const ParseError &e) {
-    llvm::errs() << "Parse error: " << e.what() << "\n";
-    return 1;
-  } catch (const std::exception &e) {
-    llvm::errs() << "Error: " << e.what() << "\n";
+  } else {
+    std::cerr << "Code generation failed due to previous errors.\n";
     return 1;
   }
 

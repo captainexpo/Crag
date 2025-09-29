@@ -39,6 +39,8 @@ std::string tokenTypeName(TokenType type) {
     return "FALSE";
   case TokenType::NULL_T:
     return "NULL_T";
+  case TokenType::QUESTION:
+    return "QUESTION";
   case TokenType::EQ:
     return "EQ";
   case TokenType::NEQ:
@@ -301,6 +303,9 @@ std::vector<Token> Lexer::tokenize() {
     else {
       char op = get();
       switch (op) {
+      case '?':
+        tokens.push_back({TokenType::QUESTION, "?", token_line, token_col});
+        break;
       case '=':
         tokens.push_back({TokenType::ASSIGN, "=", token_line, token_col});
         break;

@@ -1,4 +1,3 @@
-
 #include "parser.h"
 #include "ast.h"
 #include "lexer.h"
@@ -6,17 +5,18 @@
 #include <cstddef>
 #include <iostream>
 #include <memory>
+#include <unordered_map>
 
 Parser::Parser(const std::vector<Token> &tokens)
     : tokens(tokens), position(0) {}
 
-ParseError Parser::raiseError(const std::string &msg, const Token &token) {
+void Parser::error(const std::string &msg, const Token &token) {
   std::vector<Token> context_tokens;
   int start = std::max(0, (int)position - 3);
   int end = std::min((int)tokens.size(), (int)(position + 3));
   for (int i = start; i < end; ++i)
     context_tokens.push_back(tokens[i]);
-  return ParseError(msg, token, context_tokens);
+  m_errors.push_back(std::make_pair(token, msg));
 }
 
 // ---- Token helpers ----
@@ -48,7 +48,8 @@ Token Parser::consume(TokenType expected_type) {
     position++;
     return t;
   }
-  throw raiseError("Unexpected token", t);
+  error("Unexpected token", t);
+  return Token{TokenType::EOF_T, "", -1, -1};
 }
 
 void Parser::synchronize() {
@@ -63,24 +64,37 @@ void Parser::synchronize() {
 }
 
 // ---- Type parsing ----
-std::shared_ptr<Type> Parser::parse_type() {
+std::shared_ptr<Type> Parser::parse_type(bool top_level) {
   Token current = peek();
+  std::shared_ptr<Type> t = nullptr;
   switch (current.type) {
   case TokenType::ID:
     if (declared_structs.count(current.value)) {
       std::string name = consume(TokenType::ID).value;
-      return declared_structs[name];
+      t = declared_structs[name];
+      break;
     }
-    return parse_primitive_type();
+    t = parse_primitive_type();
+    break;
   case TokenType::STAR:
-    return parse_pointer_type();
+    t = parse_pointer_type();
+    break;
   case TokenType::LBRACKET:
-    return parse_array_type();
-  case TokenType::LPAREN:
-    return parse_function_type();
+    t = parse_array_type();
+    break;
+  case TokenType::FN:
+    t = parse_function_ptr_type();
+    break;
   default:
-    throw raiseError("Unexpected token in type", current);
+    error("Unexpected token in type", current);
+    return nullptr;
   }
+  if (top_level && peek().type == TokenType::QUESTION) {
+    consume(TokenType::QUESTION);
+    error("Nullable types not supported yet", current);
+    t->nullable = true;
+  }
+  return t;
 }
 
 std::shared_ptr<Type> Parser::parse_primitive_type() {
@@ -105,12 +119,17 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
     return std::make_shared<BOOL>();
   if (val == "void")
     return std::make_shared<Void>();
-  throw raiseError("Unknown primitive type " + val, peek());
+  error("Unknown primitive type " + val, peek());
+  return nullptr;
 }
 
 std::shared_ptr<Type> Parser::parse_pointer_type() {
   consume(TokenType::STAR);
-  return std::make_shared<PointerType>(parse_type());
+  if (peek().type == TokenType::CONST) {
+    consume(TokenType::CONST);
+    return std::make_shared<PointerType>(parse_type(false), true);
+  }
+  return std::make_shared<PointerType>(parse_type(false));
 }
 
 std::shared_ptr<Type> Parser::parse_array_type() {
@@ -122,7 +141,8 @@ std::shared_ptr<Type> Parser::parse_array_type() {
   return std::make_shared<ArrayType>(elem_type, size);
 }
 
-std::shared_ptr<FunctionType> Parser::parse_function_type() {
+std::shared_ptr<PointerType> Parser::parse_function_ptr_type() {
+  consume(TokenType::FN);
   consume(TokenType::LPAREN);
   std::vector<std::shared_ptr<Type>> param_types;
   bool variadic = false;
@@ -140,7 +160,8 @@ std::shared_ptr<FunctionType> Parser::parse_function_type() {
   consume(TokenType::RPAREN);
   consume(TokenType::ARROW);
   auto ret_type = parse_type();
-  return std::make_shared<FunctionType>(param_types, ret_type, variadic);
+  return std::make_shared<PointerType>(
+      std::make_shared<FunctionType>(param_types, ret_type, variadic));
 }
 
 // ---- Declarations ----
@@ -160,6 +181,7 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
 }
 
 std::shared_ptr<VariableDeclaration> Parser::parse_variable_declaration() {
+  Token start_token = peek(); // Store the start token for line and col
   bool is_const = match({TokenType::CONST});
   if (!is_const)
     consume(TokenType::LET);
@@ -169,17 +191,34 @@ std::shared_ptr<VariableDeclaration> Parser::parse_variable_declaration() {
   std::shared_ptr<ASTNode> initializer = nullptr;
   if (match({TokenType::ASSIGN}))
     initializer = parse_expression();
-  return std::make_shared<VariableDeclaration>(name, var_type, initializer);
+  var_type->is_const = is_const;
+  auto var_decl =
+      std::make_shared<VariableDeclaration>(name, var_type, initializer);
+  var_decl->line = start_token.line;
+  var_decl->col = start_token.column;
+  return var_decl;
 }
 
 std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
+  Token start_token = peek(); // Store the start token for line and col
   consume(TokenType::STRUCT);
   std::string name = consume(TokenType::ID).value;
   declared_structs[name] = std::make_shared<StructType>(
       name, std::vector<std::pair<std::string, std::shared_ptr<Type>>>{});
   consume(TokenType::LBRACE);
   std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
+  std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
   while (peek().type != TokenType::RBRACE) {
+    if (peek().type == TokenType::EOF_T) {
+      error("Unterminated struct declaration, expected '}'", peek());
+      break;
+    }
+    if (peek().type == TokenType::FN) {
+      std::shared_ptr<FunctionDeclaration> method =
+          parse_function_declaration();
+      methods.insert({method->name, method});
+      continue;
+    }
     std::string fname = consume(TokenType::ID).value;
     consume(TokenType::COLON);
     auto ftype = parse_type();
@@ -191,8 +230,14 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
   std::vector<std::pair<std::string, std::shared_ptr<Type>>> fmap;
   for (size_t i = 0; i < fields.size(); ++i)
     fmap.push_back({fields[i].first, fields[i].second});
-  declared_structs[name] = std::make_shared<StructType>(name, fmap);
-  return std::make_shared<StructDeclaration>(name, fields);
+  auto st = std::make_shared<StructType>(name, fmap);
+  st->methods = methods;
+  declared_structs[name] = st;
+  auto struct_decl = std::make_shared<StructDeclaration>(name, fields);
+  struct_decl->methods = methods;
+  struct_decl->line = start_token.line;
+  struct_decl->col = start_token.column;
+  return struct_decl;
 }
 
 // ---- Statements ----
@@ -232,11 +277,19 @@ std::shared_ptr<Statement> Parser::parse_statement(bool req_semi) {
 }
 
 std::shared_ptr<Block> Parser::parse_block() {
+  Token start_token = peek(); // Store the start token for line and col
   consume(TokenType::LBRACE);
   auto block = std::make_shared<Block>();
+  block->line = start_token.line;
+  block->col = start_token.column;
   try {
-    while (peek().type != TokenType::RBRACE)
+    while (peek().type != TokenType::RBRACE) {
       block->statements.push_back(parse_statement());
+      if (peek().type == TokenType::EOF_T) {
+        error("Unterminated block, expected '}'", peek());
+        break;
+      }
+    }
     consume(TokenType::RBRACE);
   } catch (const ParseError &e) {
     synchronize();
@@ -261,30 +314,60 @@ std::shared_ptr<Expression> Parser::parse_expression(int min_prec) {
 
 std::shared_ptr<Expression> Parser::parse_nud() {
   Token t = advance();
+  std::shared_ptr<Expression> expr;
+
   switch (t.type) {
   case TokenType::NUMBER: {
-    if (t.value.find('.') != std::string::npos)
-      return std::make_shared<Literal>(std::stof(t.value),
+    if (t.value.find('.') != std::string::npos) {
+      expr = std::make_shared<Literal>(std::stof(t.value),
                                        std::make_shared<F64>());
-    else
-      return std::make_shared<Literal>(std::stoi(t.value),
+    } else {
+      expr = std::make_shared<Literal>(std::stoi(t.value),
                                        std::make_shared<I32>());
+    }
+    expr->line = t.line;
+    expr->col = t.column;
+    return expr;
   }
-  case TokenType::TRUE:
-    return std::make_shared<Literal>(true, std::make_shared<BOOL>());
-  case TokenType::FALSE:
-    return std::make_shared<Literal>(false, std::make_shared<BOOL>());
+  case TokenType::TRUE: {
+    expr = std::make_shared<Literal>(true, std::make_shared<BOOL>());
+    expr->line = t.line;
+    expr->col = t.column;
+    return expr;
+  }
+  case TokenType::FALSE: {
+    expr = std::make_shared<Literal>(false, std::make_shared<BOOL>());
+    expr->line = t.line;
+    expr->col = t.column;
+    return expr;
+  }
   case TokenType::LPAREN: {
     auto expr = parse_expression();
     consume(TokenType::RPAREN);
     return expr;
   }
-  case TokenType::NULL_T:
-    return std::make_shared<Literal>(
-        0, std::make_shared<PointerType>(std::make_shared<U8>()));
-  case TokenType::STRING:
-    return std::make_shared<Literal>(
+  case TokenType::NULL_T: {
+    expr = std::make_shared<Literal>(0, std::make_shared<NullType>());
+    expr->line = t.line;
+    expr->col = t.column;
+    return expr;
+  }
+  case TokenType::STRING: {
+    expr = std::make_shared<Literal>(
         t.value, std::make_shared<PointerType>(std::make_shared<U8>()));
+    expr->line = t.line;
+    expr->col = t.column;
+    return expr;
+  }
+  case TokenType::CHAR: {
+    if (t.value.length() != 1)
+      error("Invalid char literal", t);
+    expr = std::make_shared<Literal>(static_cast<int>(t.value[0]),
+                                     std::make_shared<U8>());
+    expr->line = t.line;
+    expr->col = t.column;
+    return expr;
+  }
   case TokenType::ID: {
     std::string name = t.value;
     if (declared_structs.count(name)) {
@@ -298,9 +381,81 @@ std::shared_ptr<Expression> Parser::parse_nud() {
           consume(TokenType::COMMA);
       }
       consume(TokenType::RBRACE);
-      return std::make_shared<StructInitializer>(declared_structs[name],
+      expr = std::make_shared<StructInitializer>(declared_structs[name],
                                                  field_values);
-    } else if (match({TokenType::LPAREN})) {
+      expr->line = t.line;
+      expr->col = t.column;
+      return expr;
+    } else {
+      expr = std::make_shared<VarAccess>(name);
+      expr->line = t.line;
+      expr->col = t.column;
+      return expr;
+    }
+  }
+
+  default:
+    if (PREFIX_OPS.count(t.type)) {
+      auto right = parse_expression(get_precedence(t) + 1);
+      expr = std::make_shared<UnaryOperation>(t.value, right);
+      expr->line = t.line;
+      expr->col = t.column;
+      return expr;
+    }
+    error("Unexpected token in nud", t);
+    return nullptr;
+  }
+}
+
+std::shared_ptr<Expression>
+Parser::parse_led(std::shared_ptr<Expression> left) {
+  Token t = advance();
+  std::shared_ptr<Expression> expr;
+
+  if (OP_TOKENS.count(t.type)) {
+    switch (t.type) {
+    case TokenType::AS:
+    case TokenType::RE: {
+      auto target_type = parse_type();
+      expr = std::make_shared<TypeCast>(
+          left, target_type,
+          t.type == TokenType::RE ? CastType::Reinterperet : CastType::Normal);
+      expr->line = t.line;
+      expr->col = t.column;
+      return expr;
+    }
+    case TokenType::DOT: {
+      if (match({TokenType::STAR})) {
+        expr = std::make_shared<Dereference>(left);
+        expr->line = t.line;
+        expr->col = t.column;
+        return expr;
+      }
+      std::string field_name = consume(TokenType::ID).value;
+      expr = std::make_shared<FieldAccess>(left, field_name);
+      expr->line = t.line;
+      expr->col = t.column;
+      return expr;
+    }
+    default:
+      break;
+    }
+    auto right = parse_expression(get_precedence(t) + 1);
+    expr = std::make_shared<BinaryOperation>(left, t.value, right);
+    expr->line = t.line;
+    expr->col = t.column;
+    return expr;
+  } else if (POSTFIX_OPS.count(t.type)) {
+    switch (t.type) {
+    case TokenType::LBRACKET: {
+      auto index = parse_expression();
+      consume(TokenType::RBRACKET);
+      expr = std::make_shared<OffsetAccess>(left, index);
+      expr->line = t.line;
+      expr->col = t.column;
+      return expr;
+    }
+    case TokenType::LPAREN: {
       std::vector<std::shared_ptr<Expression>> args;
       if (peek().type != TokenType::RPAREN) {
         while (true) {
@@ -310,60 +465,21 @@ std::shared_ptr<Expression> Parser::parse_nud() {
         }
       }
       consume(TokenType::RPAREN);
-      return std::make_shared<FuncCall>(std::make_shared<VarAccess>(name),
-                                        args);
-    } else {
-      return std::make_shared<VarAccess>(name);
-    }
-  }
-
-  default:
-    if (PREFIX_OPS.count(t.type)) {
-      auto right = parse_expression(get_precedence(t) + 1);
-      return std::make_shared<UnaryOperation>(t.value, right);
-    }
-    throw raiseError("Unexpected token in nud", t);
-  }
-}
-
-std::shared_ptr<Expression>
-Parser::parse_led(std::shared_ptr<Expression> left) {
-  Token t = advance();
-  if (OP_TOKENS.count(t.type)) {
-    switch (t.type) {
-    case TokenType::AS:
-    case TokenType::RE: {
-      auto target_type = parse_type();
-      return std::make_shared<TypeCast>(
-          left, target_type,
-          t.type == TokenType::RE ? CastType::Reinterperet : CastType::Normal);
-    }
-    case TokenType::DOT: {
-      if (match({TokenType::STAR})) {
-        return std::make_shared<Dereference>(left);
+      if (auto fa = std::dynamic_pointer_cast<FieldAccess>(left)) {
+        expr = std::make_shared<MethodCall>(std::dynamic_pointer_cast<Expression>(fa->base), fa->field, args);
+      } else {
+        expr = std::make_shared<FuncCall>(left, args);
       }
-      std::string field_name = consume(TokenType::ID).value;
-      return std::make_shared<FieldAccess>(left, field_name);
+      expr->line = t.line;
+      expr->col = t.column;
+      return expr;
     }
     default:
-      break;
+      error("Unexpected postfix operator", t);
     }
-    auto right = parse_expression(get_precedence(t) + 1);
-    return std::make_shared<BinaryOperation>(left, t.value, right);
-  } else if (POSTFIX_OPS.count(t.type)) {
-    switch (t.type) {
-    case TokenType::LBRACKET: {
-      auto index = parse_expression();
-      consume(TokenType::RBRACKET);
-      auto field_access = std::make_shared<OffsetAccess>(left, index);
-      return field_access;
-    }
-    default:
-      throw raiseError("Unexpected postfix operator", t);
-    }
-    throw raiseError("Unexpected token in led", t);
   }
-  throw raiseError("Unexpected token in led", t);
+  error("Unexpected token in led", t);
+  return nullptr;
 }
 int Parser::get_precedence(const Token &token) const {
   switch (token.type) {
@@ -392,33 +508,47 @@ int Parser::get_precedence(const Token &token) const {
     return 50;
   case TokenType::LBRACKET:
     return 50;
+  case TokenType::LPAREN:
+    return 50;
   default:
     return -1;
   }
 }
 
 std::shared_ptr<IfStatement> Parser::parse_if_statement() {
+  Token start_token = peek(); // Store the start token for line and col
   consume(TokenType::IF);
   consume(TokenType::LPAREN);
   auto condition = parse_expression();
   consume(TokenType::RPAREN);
-  auto then_branch = parse_statement(false);
+  auto then_branch = parse_statement(peek().type != TokenType::LBRACE);
   std::shared_ptr<Statement> else_branch = nullptr;
   if (match({TokenType::ELSE}))
-    else_branch = parse_statement(false);
-  return std::make_shared<IfStatement>(condition, then_branch, else_branch);
+    else_branch = parse_statement(peek().type != TokenType::LBRACE);
+
+  auto if_stmt =
+      std::make_shared<IfStatement>(condition, then_branch, else_branch);
+  if_stmt->line = start_token.line;
+  if_stmt->col = start_token.column;
+  return if_stmt;
 }
 
 std::shared_ptr<WhileStatement> Parser::parse_while_statement() {
+  Token start_token = peek(); // Store the start token for line and col
   consume(TokenType::WHILE);
   consume(TokenType::LPAREN);
   auto condition = parse_expression();
   consume(TokenType::RPAREN);
-  auto body = parse_statement(false);
-  return std::make_shared<WhileStatement>(condition, body);
+  auto body = parse_statement(peek().type != TokenType::LBRACE);
+
+  auto while_stmt = std::make_shared<WhileStatement>(condition, body);
+  while_stmt->line = start_token.line;
+  while_stmt->col = start_token.column;
+  return while_stmt;
 }
 
 std::shared_ptr<ForStatement> Parser::parse_for_statement() {
+  Token start_token = peek(); // Store the start token for line and col
   consume(TokenType::FOR);
   consume(TokenType::LPAREN);
 
@@ -445,22 +575,35 @@ std::shared_ptr<ForStatement> Parser::parse_for_statement() {
   }
   consume(TokenType::RPAREN);
 
-  auto body = parse_statement();
-  return std::make_shared<ForStatement>(init, condition, increment, body);
+  auto body = parse_statement(peek().type != TokenType::LBRACE);
+  auto for_stmt =
+      std::make_shared<ForStatement>(init, condition, increment, body);
+  for_stmt->line = start_token.line;
+  for_stmt->col = start_token.column;
+  return for_stmt;
 }
 
 std::shared_ptr<ReturnStatement> Parser::parse_return_statement() {
+  Token start_token = peek(); // Store the start token for line and col
   consume(TokenType::RETURN);
   auto value = parse_expression();
-  return std::make_shared<ReturnStatement>(value);
+  auto return_stmt = std::make_shared<ReturnStatement>(value);
+  return_stmt->line = start_token.line;
+  return_stmt->col = start_token.column;
+  return return_stmt;
 }
 
 std::shared_ptr<ExpressionStatement> Parser::parse_expression_statement() {
+  Token start_token = peek(); // Store the start token for position
   auto expr = parse_expression();
-  return std::make_shared<ExpressionStatement>(expr);
+  auto expr_stmt = std::make_shared<ExpressionStatement>(expr);
+  expr_stmt->line = start_token.line;
+  expr_stmt->col = start_token.column;
+  return expr_stmt;
 }
 
 std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
+  Token start_token = peek(); // Store the start token for line and col
   consume(TokenType::FN);
   std::string name = consume(TokenType::ID).value;
   consume(TokenType::LPAREN);
@@ -498,8 +641,11 @@ std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
   } else {
     body = parse_statement();
   }
-  return std::make_shared<FunctionDeclaration>(name, func_type, param_names,
-                                               body);
+  auto func_decl =
+      std::make_shared<FunctionDeclaration>(name, func_type, param_names, body);
+  func_decl->line = start_token.line;
+  func_decl->col = start_token.column;
+  return func_decl;
 }
 
 std::vector<std::pair<std::string, std::shared_ptr<Type>>>
@@ -520,6 +666,10 @@ Parser::parse_parameter_def() {
 
 std::shared_ptr<Program> Parser::parse() {
   auto program = std::make_shared<Program>();
+  // Set line and col to 1,1 as it's the root of the AST
+  program->line = 1;
+  program->col = 1;
+
   while (peek().type != TokenType::EOF_T) {
     try {
       program->append(parse_declaration());
@@ -529,10 +679,4 @@ std::shared_ptr<Program> Parser::parse() {
     }
   }
   return program;
-}
-
-// ---- Top-level parse function ----
-std::shared_ptr<Program> parse(const std::vector<Token> &tokens) {
-  Parser p(tokens);
-  return p.parse();
 }

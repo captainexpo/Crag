@@ -38,6 +38,7 @@ enum class TokenType {
   CARET,
   SLASH,
   PERCENT,
+  QUESTION,
   AND,
   OR,
   NOT,

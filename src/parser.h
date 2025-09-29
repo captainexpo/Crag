@@ -40,8 +40,14 @@ public:
   Parser(const std::vector<Token> &tokens);
 
   std::shared_ptr<Program> parse();
+  bool ok() const { return m_errors.empty(); }
+  const std::vector<std::pair<Token, std::string>> &errors() const {
+    return m_errors;
+  }
 
 private:
+  std::vector<std::pair<Token, std::string>> m_errors; // Collected errors
+
   std::vector<Token> tokens;
   size_t position;
 
@@ -54,14 +60,14 @@ private:
   Token consume(TokenType expected_type);
   void synchronize();
 
-  ParseError raiseError(const std::string &msg, const Token &token);
+  void error(const std::string &msg, const Token &token);
 
   // Parsing methods
-  std::shared_ptr<Type> parse_type();
+  std::shared_ptr<Type> parse_type(bool top_level = true);
   std::shared_ptr<Type> parse_primitive_type();
   std::shared_ptr<Type> parse_pointer_type();
   std::shared_ptr<Type> parse_array_type();
-  std::shared_ptr<FunctionType> parse_function_type();
+  std::shared_ptr<PointerType> parse_function_ptr_type();
   std::vector<std::pair<std::string, std::shared_ptr<Type>>>
   parse_parameter_def();
 
@@ -93,9 +99,8 @@ private:
   const std::set<TokenType> PREFIX_OPS = {TokenType::BAND, TokenType::STAR,
                                           TokenType::MINUS, TokenType::NOT};
 
-  const std::set<TokenType> POSTFIX_OPS = {TokenType::LBRACKET};
+  const std::set<TokenType> POSTFIX_OPS = {TokenType::LBRACKET,
+                                           TokenType::LPAREN};
 };
-
-std::shared_ptr<Program> parse(const std::vector<Token> &tokens);
 
 #endif // PARSER_H

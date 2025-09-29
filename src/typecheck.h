@@ -9,6 +9,34 @@
 #include <unordered_map>
 #include <vector>
 
+enum class TypeKind {
+  Bool,
+  I32,
+  I64,
+  U8,
+  U32,
+  U64,
+  USize,
+  F32,
+  F64,
+  Pointer,
+  Struct,
+  Array,
+  Function,
+  Null,
+  Unknown
+};
+
+int typeRank(TypeKind k);
+
+TypeKind kindOf(const std::shared_ptr<Type> &t);
+
+struct CastResult {
+  std::shared_ptr<Type> type;
+  ExprPtr left;
+  ExprPtr right;
+};
+
 class TypeChecker {
 public:
   TypeChecker();
@@ -17,23 +45,29 @@ public:
   void check(const std::shared_ptr<Program> &node);
 
   // Errors collected during checking
-  const std::vector<std::string> &errors() const { return m_errors; }
+  const std::vector<std::pair<ASTNodePtr, std::string>> &errors() const {
+    return m_errors;
+  }
   bool ok() const { return m_errors.empty(); }
 
 private:
-  std::vector<std::string> m_errors; // Collected errors
+  std::vector<std::pair<ASTNodePtr, std::string>> m_errors; // Collected errors
 
   // Scope / symbol table: stack of name -> Type
   std::vector<std::unordered_map<std::string, std::shared_ptr<Type>>> m_scopes;
 
   // Struct/type registry for named structs and functions
   std::unordered_map<std::string, std::shared_ptr<StructType>> m_structs;
+  std::unordered_map<
+      std::string,
+      std::vector<std::pair<std::string, std::shared_ptr<FunctionDeclaration>>>>
+      m_struct_methods;
   std::unordered_map<std::string, std::shared_ptr<FunctionType>> m_functions;
 
   std::shared_ptr<Type> m_expected_return_type; // Current function return type
 
   // Error reporting
-  void error(const std::string &msg);
+  void error(ASTNodePtr node, const std::string &msg);
 
   // Scope helpers
   void pushScope();
@@ -47,7 +81,16 @@ private:
                   const std::shared_ptr<Type> &b) const;
   std::string typeName(const std::shared_ptr<Type> &t) const;
   std::shared_ptr<Type> resolveType(const std::shared_ptr<Type> &t) const;
-  // Node-specific checking/inference
+
+  bool canImplicitCast(const std::shared_ptr<Type> &from,
+                       const std::shared_ptr<Type> &to);
+  bool canExplicitCast(const std::shared_ptr<Type> &from,
+                       const std::shared_ptr<Type> &to);
+  CastResult unifyBinaryOperands(const ExprPtr &lhs,
+                                 const std::shared_ptr<Type> &lt,
+                                 const ExprPtr &rhs,
+                                 const std::shared_ptr<Type> &rt,
+                                 const ASTNodePtr &ctx);
   void checkNode(const std::shared_ptr<ASTNode> &node);
   void checkStatement(const std::shared_ptr<Statement> &stmt);
   std::shared_ptr<Type>
@@ -68,11 +111,11 @@ private:
   inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin);
   std::shared_ptr<Type> inferUnaryOp(const std::shared_ptr<UnaryOperation> &un);
   std::shared_ptr<Type> inferFuncCall(const std::shared_ptr<FuncCall> &call);
+  std::shared_ptr<Type> inferMethodCall(const std::shared_ptr<MethodCall> &mc);
   std::shared_ptr<Type>
   inferFieldAccess(const std::shared_ptr<FieldAccess> &fa);
   std::shared_ptr<Type>
   inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa);
-  std::shared_ptr<Type> inferCast(const std::shared_ptr<Cast> &c);
   std::shared_ptr<Type>
   inferStructInit(const std::shared_ptr<StructInitializer> &init);
 };

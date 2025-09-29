@@ -38,6 +38,12 @@ private:
   std::shared_ptr<Scope> m_parent;
 };
 
+// Map operator string to function
+struct OpInfo {
+  std::function<llvm::Value *(llvm::Value *, llvm::Value *)> intOp;
+  std::function<llvm::Value *(llvm::Value *, llvm::Value *)> floatOp;
+};
+
 class IRGenerator {
 public:
   IRGenerator(std::string module_name);
@@ -45,17 +51,24 @@ public:
   void printIR(const std::string &filename);
   int outputObjFile(const std::string &filename);
 
+  const std::vector<std::pair<ASTNodePtr, std::string>> &errors() const {
+    return m_errors;
+  }
+  bool ok() const { return m_errors.empty(); }
+
 private:
+  std::vector<std::pair<ASTNodePtr, std::string>> m_errors;
+
   llvm::LLVMContext m_context;
   std::unique_ptr<llvm::Module> m_module;
   llvm::IRBuilder<> m_builder;
 
   std::map<std::string, llvm::Value *> m_namedValues;
   std::map<std::string, llvm::StructType *> m_structTypes;
-
   std::vector<Scope> m_scopeStack;
 
-  void throwError(const std::string &msg);
+  void
+  error(ASTNodePtr node, const std::string &msg);
   llvm::Type *getLLVMType(const std::shared_ptr<Type> &type);
   llvm::Value *generateExpression(const std::shared_ptr<Expression> &expr,
                                   bool loadValue = true);
@@ -69,6 +82,8 @@ private:
       const std::shared_ptr<VariableDeclaration> &varDecl);
   void generateStructDeclaration(
       const std::shared_ptr<StructDeclaration> &structDecl);
+  void
+  generateStructMethods(const std::shared_ptr<StructDeclaration> &structDecl);
   llvm::Value *generateBinaryOp(const std::shared_ptr<Expression> &left,
                                 const std::shared_ptr<Expression> &right,
                                 std::string op, bool loadValue = true);
@@ -80,6 +95,8 @@ private:
                                  bool loadValue = true);
   llvm::Value *generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
                                 bool loadValue = true);
+  llvm::Value *generateMethodCall(const std::shared_ptr<MethodCall> &methodCall,
+                                  bool loadValue = true);
   llvm::Value *
   generateFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess,
                       bool loadValue = true);

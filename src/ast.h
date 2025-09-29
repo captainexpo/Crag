@@ -6,11 +6,15 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
 // ----------------- Type system -----------------
 struct Type {
+  bool nullable = false;
+  bool is_const = false;
+
   virtual ~Type() = default;
   virtual std::string str() const = 0;
 };
@@ -46,10 +50,15 @@ struct F64 : Type {
 struct BOOL : Type {
   std::string str() const override { return "BOOL"; }
 };
+struct NullType : Type {
+  std::string str() const override { return "Null"; }
+};
 
 struct PointerType : Type {
   std::shared_ptr<Type> base;
-  PointerType(std::shared_ptr<Type> b) : base(std::move(b)) {}
+  bool pointer_const = false;
+  PointerType(std::shared_ptr<Type> b, bool pc = false)
+      : base(std::move(b)), pointer_const(pc) {}
   std::string str() const override { return "*" + base->str(); }
 };
 
@@ -63,10 +72,13 @@ struct ArrayType : Type {
   }
 };
 
+struct FunctionDeclaration;
+
 struct StructType : Type {
   std::string name;
 
   std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
+  std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
   bool complete;
 
   std::shared_ptr<Type> getFieldType(const std::string &fname) const {
@@ -113,10 +125,22 @@ struct FunctionType : Type {
 };
 
 // ----------------- AST Nodes -----------------
-struct ASTNode {
 
-  std::shared_ptr<Type> inferred_type =
-      nullptr; // Type information for the node, generated during type checking
+struct ASTNode {
+  int line = 0;
+  int col = 0;
+  std::shared_ptr<Type> inferred_type = nullptr;
+
+  ASTNode() = default;
+  ASTNode(int l, int c) : line(l), col(c) {}
+
+  virtual ~ASTNode() = default;
+  virtual std::string str() const { return "ASTNode"; }
+
+  std::string locationStr() const {
+    return "(line " + std::to_string(line) + ", col " + std::to_string(col) +
+           ")";
+  }
 
   std::string toString() const {
     if (inferred_type) {
@@ -124,9 +148,6 @@ struct ASTNode {
     }
     return str();
   }
-
-  virtual ~ASTNode() = default;
-  virtual std::string str() const { return "ASTNode"; }
 };
 
 struct Statement : ASTNode {};
@@ -181,6 +202,7 @@ struct VariableDeclaration : Statement {
 struct StructDeclaration : ASTNode {
   std::string name;
   std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
+  std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
 
   std::pair<std::string, std::shared_ptr<Type>>
   getField(const std::string &fname) const {
@@ -200,14 +222,20 @@ struct StructDeclaration : ASTNode {
     for (const auto &field : fields) {
       result += field.first + ": " + field.second->str() + "; ";
     }
+    for (const auto &method : methods) {
+      result += "Method: " + method.first + "\n";
+      result += method.second->toString() + " ";
+    }
     result += "}";
+
     return result;
   }
 };
 
 // ----------------- Expressions -----------------
 
-enum class CastType { Normal, Reinterperet };
+enum class CastType { Normal,
+                      Reinterperet };
 
 struct TypeCast : Expression {
   ExprPtr expr;
@@ -243,6 +271,24 @@ struct FuncCall : Expression {
       : func(std::move(f)), args(std::move(a)) {}
   std::string str() const override {
     std::string result = "FuncCall(" + func->toString() + "(";
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (i > 0)
+        result += ", ";
+      result += args[i]->toString();
+    }
+    result += "))";
+    return result;
+  }
+};
+
+struct MethodCall : Expression {
+  ExprPtr object;
+  std::string method;
+  std::vector<ExprPtr> args;
+  MethodCall(ExprPtr o, std::string m, std::vector<ExprPtr> a)
+      : object(std::move(o)), method(std::move(m)), args(std::move(a)) {}
+  std::string str() const override {
+    std::string result = "MethodCall(" + object->toString() + "." + method + "(";
     for (size_t i = 0; i < args.size(); ++i) {
       if (i > 0)
         result += ", ";
@@ -319,16 +365,6 @@ struct Literal : Expression {
         },
         value);
     return "Literal(" + val_str + " : " + lit_type->str() + ")";
-  }
-};
-
-struct Cast : Expression {
-  ExprPtr operand;
-  std::shared_ptr<Type> target_type;
-  Cast(ExprPtr o, std::shared_ptr<Type> t)
-      : operand(std::move(o)), target_type(std::move(t)) {}
-  std::string str() const override {
-    return "Cast(" + operand->toString() + " as " + target_type->str() + ")";
   }
 };
 
