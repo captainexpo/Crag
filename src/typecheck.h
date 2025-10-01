@@ -58,6 +58,7 @@ private:
 
   // Struct/type registry for named structs and functions
   std::unordered_map<std::string, std::shared_ptr<StructType>> m_structs;
+  std::unordered_map<std::string, std::shared_ptr<EnumType>> m_enums;
   std::unordered_map<
       std::string,
       std::vector<std::pair<std::string, std::shared_ptr<FunctionDeclaration>>>>
@@ -86,6 +87,9 @@ private:
                        const std::shared_ptr<Type> &to);
   bool canExplicitCast(const std::shared_ptr<Type> &from,
                        const std::shared_ptr<Type> &to);
+
+  void performCast(ExprPtr &expr,
+                   const std::shared_ptr<Type> &to);
   CastResult unifyBinaryOperands(const ExprPtr &lhs,
                                  const std::shared_ptr<Type> &lt,
                                  const ExprPtr &rhs,
@@ -101,6 +105,7 @@ private:
   void
   checkVariableDeclaration(const std::shared_ptr<VariableDeclaration> &var);
   void checkStructDeclaration(const std::shared_ptr<StructDeclaration> &st);
+  void checkEnumDeclaration(const std::shared_ptr<EnumDeclaration> &en);
 
   // Expression helpers (small set; extend as needed)
   std::shared_ptr<Type> inferTypeCast(const std::shared_ptr<TypeCast> &tc);

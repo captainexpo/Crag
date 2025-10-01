@@ -65,6 +65,7 @@ private:
 
   std::map<std::string, llvm::Value *> m_namedValues;
   std::map<std::string, llvm::StructType *> m_structTypes;
+  std::map<std::string, std::shared_ptr<EnumType>> m_enumTypes;
   std::vector<Scope> m_scopeStack;
 
   void
@@ -82,6 +83,8 @@ private:
       const std::shared_ptr<VariableDeclaration> &varDecl);
   void generateStructDeclaration(
       const std::shared_ptr<StructDeclaration> &structDecl);
+  void generateEnumDeclaration(
+      const std::shared_ptr<EnumDeclaration> &enumDecl);
   void
   generateStructMethods(const std::shared_ptr<StructDeclaration> &structDecl);
   llvm::Value *generateBinaryOp(const std::shared_ptr<Expression> &left,
@@ -93,6 +96,8 @@ private:
                                bool loadValue = true);
   llvm::Value *generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
                                  bool loadValue = true);
+  llvm::Value *generateEnumAccess(const std::shared_ptr<EnumAccess> &enumAccess,
+                                  bool loadValue = true);
   llvm::Value *generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
                                 bool loadValue = true);
   llvm::Value *generateMethodCall(const std::shared_ptr<MethodCall> &methodCall,

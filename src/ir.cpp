@@ -23,7 +23,6 @@
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/TargetParser/Host.h>
 #include <memory>
-#include <stdexcept>
 #include <unordered_map>
 
 int globalVals = 0;
@@ -44,15 +43,25 @@ void IRGenerator::generate(const std::shared_ptr<Program> &node) {
   for (const auto &decl : node->declarations) {
     if (IS_INSTANCE(decl, FunctionDeclaration)) {
       generateFunction(std::dynamic_pointer_cast<FunctionDeclaration>(decl));
-    } else if (IS_INSTANCE(decl, VariableDeclaration)) {
+      continue;
+    }
+    if (IS_INSTANCE(decl, VariableDeclaration)) {
       generateVariableDeclaration(
           std::dynamic_pointer_cast<VariableDeclaration>(decl));
-    } else if (IS_INSTANCE(decl, StructDeclaration)) {
+      continue;
+    }
+    if (IS_INSTANCE(decl, StructDeclaration)) {
       generateStructDeclaration(
           std::dynamic_pointer_cast<StructDeclaration>(decl));
-    } else {
-      error(node, "Unknown top-level declaration: " + decl->str());
+      continue;
     }
+    if (IS_INSTANCE(decl, EnumDeclaration)) {
+      generateEnumDeclaration(
+          std::dynamic_pointer_cast<EnumDeclaration>(decl));
+      continue;
+    }
+
+    error(node, "Unknown top-level declaration: " + decl->str());
   }
 }
 
@@ -223,6 +232,9 @@ IRGenerator::generateExpression(const std::shared_ptr<Expression> &expr,
   } else if (IS_INSTANCE(expr, VarAccess)) {
     return generateVarAccess(std::dynamic_pointer_cast<VarAccess>(expr),
                              loadValue);
+  } else if (IS_INSTANCE(expr, EnumAccess)) {
+    return generateEnumAccess(std::dynamic_pointer_cast<EnumAccess>(expr),
+                              loadValue);
   } else if (IS_INSTANCE(expr, FuncCall)) {
     return generateFuncCall(std::dynamic_pointer_cast<FuncCall>(expr),
                             loadValue);
@@ -425,6 +437,13 @@ void IRGenerator::generateStructDeclaration(
   llvmStruct->setBody(fieldTypes, /*packed=*/false);
 
   generateStructMethods(structDecl);
+}
+
+void IRGenerator::generateEnumDeclaration(
+    const std::shared_ptr<EnumDeclaration> &enumDecl) {
+  // No actual code-gen here, just putting the type in global scope
+  m_enumTypes[enumDecl->name] =
+      std::dynamic_pointer_cast<EnumType>(enumDecl->inferred_type);
 }
 
 llvm::Value *IRGenerator::generateBinaryOp(
@@ -678,6 +697,23 @@ IRGenerator::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
   if (!loadValue)
     return v;
   return m_builder.CreateLoad(sym->type, v, varAccess->name);
+}
+
+llvm::Value *IRGenerator::generateEnumAccess(const std::shared_ptr<EnumAccess> &enumAccess, bool loadValue) {
+  auto it = m_enumTypes.find(enumAccess->enum_name);
+  if (it == m_enumTypes.end()) {
+    error(enumAccess, "Unknown enum type: " + enumAccess->enum_name);
+    return nullptr;
+  }
+  auto enumType = it->second;
+  auto valIt = enumType->variant_map.find(enumAccess->variant);
+  if (valIt == enumType->variant_map.end()) {
+    error(enumAccess, "Unknown enum variant: " + enumAccess->variant);
+    return nullptr;
+  }
+  std::shared_ptr<Literal> literal = valIt->second;
+  // Assuming enums are represented as i32
+  return generateLiteral(literal, loadValue);
 }
 
 llvm::Value *IRGenerator::generateMethodCall(const std::shared_ptr<MethodCall> &methodCall, bool loadValue) {

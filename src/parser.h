@@ -13,25 +13,12 @@
 #include <vector>
 
 class ParseError : public std::exception {
-  std::string message;
-
 public:
-  ParseError(const std::string &msg, const Token &token,
-             const std::vector<Token> &context_tokens) {
-    message = "[line " + std::to_string(token.line) + ", col " +
-              std::to_string(token.column) + "] " + msg + "\n";
-    message += "Token: '" + token.value + "' (type " +
-               tokenTypeName(token.type) + ")\n";
-    message += "Context:\n";
-    for (size_t i = 0; i < context_tokens.size(); ++i) {
-      message += "  " + tokenTypeName(context_tokens[i].type) + " '" +
-                 context_tokens[i].value + "'";
-      if (context_tokens[i].value == token.value)
-        message += " <- here";
-      message += "\n";
-    }
-  }
+  std::string message;
+  int line;
+  int col;
 
+  ParseError(std::string m, int l, int c) : message(m), line(l), col(c) {}
   const char *what() const noexcept override { return message.c_str(); }
 };
 
@@ -41,17 +28,18 @@ public:
 
   std::shared_ptr<Program> parse();
   bool ok() const { return m_errors.empty(); }
-  const std::vector<std::pair<Token, std::string>> &errors() const {
+  const std::vector<ParseError> &errors() const {
     return m_errors;
   }
 
 private:
-  std::vector<std::pair<Token, std::string>> m_errors; // Collected errors
+  std::vector<ParseError> m_errors; // Collected errors
 
   std::vector<Token> tokens;
   size_t position;
 
   std::map<std::string, std::shared_ptr<StructType>> declared_structs;
+  std::map<std::string, std::shared_ptr<EnumDeclaration>> declared_enums;
 
   // Helper methods
   Token peek() const;
@@ -60,7 +48,7 @@ private:
   Token consume(TokenType expected_type);
   void synchronize();
 
-  void error(const std::string &msg, const Token &token);
+  void error(const std::string &msg, const Token &token, bool throw_now_and_exit = false);
 
   // Parsing methods
   std::shared_ptr<Type> parse_type(bool top_level = true);
@@ -74,6 +62,7 @@ private:
   std::shared_ptr<ASTNode> parse_declaration();
   std::shared_ptr<FunctionDeclaration> parse_function_declaration();
   std::shared_ptr<StructDeclaration> parse_struct_declaration();
+  std::shared_ptr<EnumDeclaration> parse_enum_declaration();
   std::shared_ptr<VariableDeclaration> parse_variable_declaration();
 
   std::shared_ptr<Statement> parse_statement(bool req_semi = true);
@@ -91,10 +80,23 @@ private:
 
   // Operator categories
   const std::set<TokenType> OP_TOKENS = {
-      TokenType::ASSIGN, TokenType::PLUS,  TokenType::MINUS, TokenType::STAR,
-      TokenType::SLASH,  TokenType::CARET, TokenType::EQ,    TokenType::NEQ,
-      TokenType::LT,     TokenType::LE,    TokenType::GT,    TokenType::GE,
-      TokenType::DOT,    TokenType::AS,    TokenType::RE};
+      TokenType::ASSIGN,
+      TokenType::PLUS,
+      TokenType::MINUS,
+      TokenType::STAR,
+      TokenType::SLASH,
+      TokenType::CARET,
+      TokenType::EQ,
+      TokenType::NEQ,
+      TokenType::LT,
+      TokenType::LE,
+      TokenType::GT,
+      TokenType::GE,
+      TokenType::DOT,
+      TokenType::AS,
+      TokenType::RE,
+      TokenType::DOUBLE_COLON,
+  };
 
   const std::set<TokenType> PREFIX_OPS = {TokenType::BAND, TokenType::STAR,
                                           TokenType::MINUS, TokenType::NOT};

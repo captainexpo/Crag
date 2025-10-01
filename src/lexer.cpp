@@ -128,14 +128,7 @@ std::string tokenTypeName(TokenType type) {
   }
 }
 Lexer::Lexer(const std::string &src) : code(src) {
-  keywords = {{"fn", TokenType::FN},         {"return", TokenType::RETURN},
-              {"if", TokenType::IF},         {"else", TokenType::ELSE},
-              {"while", TokenType::WHILE},   {"for", TokenType::FOR},
-              {"let", TokenType::LET},       {"const", TokenType::CONST},
-              {"struct", TokenType::STRUCT}, {"enum", TokenType::ENUM},
-              {"true", TokenType::TRUE},     {"false", TokenType::FALSE},
-              {"null", TokenType::NULL_T},   {"as", TokenType::AS},
-              {"re", TokenType::RE}};
+  keywords = {{"fn", TokenType::FN}, {"return", TokenType::RETURN}, {"if", TokenType::IF}, {"else", TokenType::ELSE}, {"while", TokenType::WHILE}, {"for", TokenType::FOR}, {"let", TokenType::LET}, {"const", TokenType::CONST}, {"struct", TokenType::STRUCT}, {"enum", TokenType::ENUM}, {"true", TokenType::TRUE}, {"false", TokenType::FALSE}, {"null", TokenType::NULL_T}, {"as", TokenType::AS}, {"re", TokenType::RE}};
 }
 
 char Lexer::peek() const { return pos < code.size() ? code[pos] : '\0'; }
@@ -300,6 +293,8 @@ std::vector<Token> Lexer::tokenize() {
       tokens.push_back({TokenType::ARROW, "->", token_line, token_col});
     else if (match("..."))
       tokens.push_back({TokenType::TRIPLE_DOT, "...", token_line, token_col});
+    else if (match("::"))
+      tokens.push_back({TokenType::DOUBLE_COLON, "::", token_line, token_col});
     else {
       char op = get();
       switch (op) {

@@ -170,68 +170,6 @@ struct Program : ASTNode {
   }
 };
 
-struct FunctionDeclaration : ASTNode {
-  std::string name;
-  std::shared_ptr<FunctionType> type;
-  std::vector<std::string> param_names;
-  std::shared_ptr<Statement> body;
-
-  FunctionDeclaration(std::string n, std::shared_ptr<FunctionType> t,
-                      std::vector<std::string> params,
-                      std::shared_ptr<Statement> b)
-      : name(std::move(n)), type(std::move(t)), param_names(std::move(params)),
-        body(std::move(b)) {}
-  std::string str() const override {
-    return "FunctionDeclaration(" + type->str() + ", " + name + "){" +
-           (body ? body->toString() : " ;") + "}";
-  }
-};
-
-struct VariableDeclaration : Statement {
-  std::string name;
-  std::shared_ptr<Type> var_type;
-  ASTNodePtr initializer;
-
-  VariableDeclaration(std::string n, std::shared_ptr<Type> t, ASTNodePtr i)
-      : name(std::move(n)), var_type(std::move(t)), initializer(std::move(i)) {}
-  std::string str() const override {
-    return "VariableDeclaration(" + name + " : " + var_type->str() + ")";
-  }
-};
-
-struct StructDeclaration : ASTNode {
-  std::string name;
-  std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
-  std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
-
-  std::pair<std::string, std::shared_ptr<Type>>
-  getField(const std::string &fname) const {
-    for (const auto &field : fields) {
-      if (field.first == fname)
-        return field;
-    }
-    return {"", nullptr};
-  }
-
-  StructDeclaration(
-      std::string n,
-      std::vector<std::pair<std::string, std::shared_ptr<Type>>> f)
-      : name(std::move(n)), fields(std::move(f)) {}
-  std::string str() const override {
-    std::string result = "StructDeclaration(" + name + ") { ";
-    for (const auto &field : fields) {
-      result += field.first + ": " + field.second->str() + "; ";
-    }
-    for (const auto &method : methods) {
-      result += "Method: " + method.first + "\n";
-      result += method.second->toString() + " ";
-    }
-    result += "}";
-
-    return result;
-  }
-};
-
 // ----------------- Expressions -----------------
 
 enum class CastType { Normal,
@@ -254,6 +192,13 @@ struct VarAccess : Expression {
   std::string name;
   VarAccess(std::string n) : name(std::move(n)) {}
   std::string str() const override { return "VarAccess(" + name + ")"; }
+};
+
+struct EnumAccess : Expression {
+  std::string enum_name;
+  std::string variant;
+  EnumAccess(std::string n, std::string v) : enum_name(n), variant(std::move(v)) {}
+  std::string str() const override { return "EnumAccess(" + enum_name + "::" + variant + ")"; }
 };
 
 struct Dereference : Expression {
@@ -474,6 +419,101 @@ struct Assignment : Statement {
       : target(std::move(t)), value(std::move(v)) {}
   std::string str() const override {
     return "Assignment(" + target->toString() + " = " + value->toString() + ")";
+  }
+};
+
+struct FunctionDeclaration : ASTNode {
+  std::string name;
+  std::shared_ptr<FunctionType> type;
+  std::vector<std::string> param_names;
+  std::shared_ptr<Statement> body;
+
+  FunctionDeclaration(std::string n, std::shared_ptr<FunctionType> t,
+                      std::vector<std::string> params,
+                      std::shared_ptr<Statement> b)
+      : name(std::move(n)), type(std::move(t)), param_names(std::move(params)),
+        body(std::move(b)) {}
+  std::string str() const override {
+    return "FunctionDeclaration(" + type->str() + ", " + name + "){" +
+           (body ? body->toString() : " ;") + "}";
+  }
+};
+
+struct VariableDeclaration : Statement {
+  std::string name;
+  std::shared_ptr<Type> var_type;
+  ASTNodePtr initializer;
+
+  VariableDeclaration(std::string n, std::shared_ptr<Type> t, ASTNodePtr i)
+      : name(std::move(n)), var_type(std::move(t)), initializer(std::move(i)) {}
+  std::string str() const override {
+    return "VariableDeclaration(" + name + " : " + var_type->str() + ")";
+  }
+};
+
+struct EnumType : Type {
+  std::string name;
+  std::shared_ptr<Type> base_type;
+  std::unordered_map<std::string, std::shared_ptr<Literal>> variant_map;
+
+  EnumType(std::string n, std::shared_ptr<Type> b)
+      : name(std::move(n)), base_type(std::move(b)) {}
+
+  void addVariant(const std::string &variant, std::shared_ptr<Literal> value) {
+    variant_map[variant] = std::move(value);
+  }
+  std::string str() const override { return "Enum " + name; }
+};
+
+struct EnumDeclaration : ASTNode {
+  std::string name;
+  std::shared_ptr<Type> type;
+  std::unordered_map<std::string, std::shared_ptr<Literal>> variants;
+
+  EnumDeclaration(std::string n,
+                  std::shared_ptr<Type> t,
+                  std::unordered_map<std::string, std::shared_ptr<Literal>> v)
+      : name(std::move(n)), type(std::move(t)), variants(std::move(v)) {}
+  std::string str() const override {
+    std::string result = "EnumDeclaration(" + name + ") { ";
+    for (const auto &variant : variants) {
+      result += variant.first + ": " + variant.second->toString() + "; ";
+    }
+    result += "}";
+    return result;
+  }
+};
+
+struct StructDeclaration : ASTNode {
+  std::string name;
+  std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
+  std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
+
+  std::pair<std::string, std::shared_ptr<Type>>
+  getField(const std::string &fname) const {
+    for (const auto &field : fields) {
+      if (field.first == fname)
+        return field;
+    }
+    return {"", nullptr};
+  }
+
+  StructDeclaration(
+      std::string n,
+      std::vector<std::pair<std::string, std::shared_ptr<Type>>> f)
+      : name(std::move(n)), fields(std::move(f)) {}
+  std::string str() const override {
+    std::string result = "StructDeclaration(" + name + ") { ";
+    for (const auto &field : fields) {
+      result += field.first + ": " + field.second->str() + "; ";
+    }
+    for (const auto &method : methods) {
+      result += "Method: " + method.first + "\n";
+      result += method.second->toString() + " ";
+    }
+    result += "}";
+
+    return result;
   }
 };
 

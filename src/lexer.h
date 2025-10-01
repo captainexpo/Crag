@@ -58,6 +58,7 @@ enum class TokenType {
 
   // Delimiters
   TRIPLE_DOT,
+  DOUBLE_COLON,
   LPAREN,
   RPAREN,
   LBRACE,

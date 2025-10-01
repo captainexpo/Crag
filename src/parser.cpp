@@ -6,17 +6,21 @@
 #include <iostream>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 Parser::Parser(const std::vector<Token> &tokens)
     : tokens(tokens), position(0) {}
 
-void Parser::error(const std::string &msg, const Token &token) {
+void Parser::error(const std::string &msg, const Token &token, bool throw_now_and_exit) {
   std::vector<Token> context_tokens;
   int start = std::max(0, (int)position - 3);
   int end = std::min((int)tokens.size(), (int)(position + 3));
   for (int i = start; i < end; ++i)
     context_tokens.push_back(tokens[i]);
-  m_errors.push_back(std::make_pair(token, msg));
+  m_errors.push_back(ParseError(msg, token.line, token.column));
+
+  if (throw_now_and_exit)
+    throw ParseError(msg, token.line, token.column);
 }
 
 // ---- Token helpers ----
@@ -48,7 +52,7 @@ Token Parser::consume(TokenType expected_type) {
     position++;
     return t;
   }
-  error("Unexpected token", t);
+  error("Unexpected token: " + t.value, t, true);
   return Token{TokenType::EOF_T, "", -1, -1};
 }
 
@@ -72,6 +76,11 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
     if (declared_structs.count(current.value)) {
       std::string name = consume(TokenType::ID).value;
       t = declared_structs[name];
+      break;
+    }
+    if (declared_enums.count(current.value)) {
+      std::string name = consume(TokenType::ID).value;
+      t = declared_enums[name]->type;
       break;
     }
     t = parse_primitive_type();
@@ -166,6 +175,7 @@ std::shared_ptr<PointerType> Parser::parse_function_ptr_type() {
 
 // ---- Declarations ----
 std::shared_ptr<ASTNode> Parser::parse_declaration() {
+  std::cout << "Parsing declaration at token: " << peek().value << "\n";
   Token t = peek();
   switch (t.type) {
   case TokenType::FN:
@@ -175,8 +185,11 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
     return parse_variable_declaration();
   case TokenType::STRUCT:
     return parse_struct_declaration();
+  case TokenType::ENUM:
+    return parse_enum_declaration();
   default:
-    return parse_statement();
+    error("Unexpected token in declaration", t, true);
+    return nullptr;
   }
 }
 
@@ -199,6 +212,62 @@ std::shared_ptr<VariableDeclaration> Parser::parse_variable_declaration() {
   return var_decl;
 }
 
+std::shared_ptr<EnumDeclaration> Parser::parse_enum_declaration() {
+  std::shared_ptr<Type> enum_type = std::make_shared<I32>();
+  Token start_token = peek(); // Store the start token for line and col
+  consume(TokenType::ENUM);
+  std::string name = consume(TokenType::ID).value;
+  if (match({TokenType::LPAREN})) {
+    enum_type = parse_type();
+    consume(TokenType::RPAREN);
+  }
+  consume(TokenType::LBRACE);
+  std::unordered_map<std::string, std::shared_ptr<Literal>> variant_map;
+  std::shared_ptr<Literal> last_literal = nullptr;
+  while (peek().type != TokenType::RBRACE) {
+    std::cout << "Parsing enum variant at token: " << peek().value << "\n";
+    if (peek().type == TokenType::EOF_T) {
+      error("Unterminated enum declaration, expected '}'", peek());
+      break;
+    }
+    std::string vname = consume(TokenType::ID).value;
+    if (match({TokenType::ASSIGN})) {
+      auto val = parse_expression();
+      if (auto lit = std::dynamic_pointer_cast<Literal>(val)) {
+        lit->lit_type = enum_type;
+        variant_map.insert({vname, lit});
+      } else {
+        error("Enum variant value must be a literal", peek());
+      }
+    } else {
+      // Auto-assign value
+      if (!last_literal) {
+        error("First enum variant must have an explicit value", peek());
+        continue;
+      }
+      if (auto ilit = std::dynamic_pointer_cast<Literal>(last_literal)) {
+        if (auto ival = std::get_if<int>(&ilit->value)) {
+          auto new_lit = std::make_shared<Literal>((*ival) + 1, enum_type);
+          variant_map.insert({vname, new_lit});
+          last_literal = new_lit;
+        } else {
+          error("Enum auto-assigned values must be integers", peek());
+        }
+      } else {
+        error("Enum auto-assigned values must be integers", peek());
+      }
+    }
+    last_literal = variant_map[vname];
+    if (peek().type == TokenType::COMMA)
+      consume(TokenType::COMMA);
+  }
+  consume(TokenType::RBRACE);
+  auto enum_decl = std::make_shared<EnumDeclaration>(name, enum_type, variant_map);
+  enum_decl->line = start_token.line;
+  enum_decl->col = start_token.column;
+  declared_enums[name] = enum_decl;
+  return enum_decl;
+}
 std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
   Token start_token = peek(); // Store the start token for line and col
   consume(TokenType::STRUCT);
@@ -437,6 +506,19 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
       expr->col = t.column;
       return expr;
     }
+    case TokenType::DOUBLE_COLON: {
+      // Enum/Module access (Modules not implemented yet)
+      std::string variant_name = consume(TokenType::ID).value;
+      auto enum_base = std::dynamic_pointer_cast<VarAccess>(left);
+      if (!enum_base) {
+        error("Left side of :: must be an enum name", t);
+        return nullptr;
+      }
+      expr = std::make_shared<EnumAccess>(enum_base->name, variant_name);
+      expr->line = t.line;
+      expr->col = t.column;
+      return expr;
+    }
     default:
       break;
     }
@@ -505,6 +587,8 @@ int Parser::get_precedence(const Token &token) const {
   case TokenType::CARET:
     return 30;
   case TokenType::DOT:
+    return 50;
+  case TokenType::DOUBLE_COLON:
     return 50;
   case TokenType::LBRACKET:
     return 50;
@@ -671,12 +755,7 @@ std::shared_ptr<Program> Parser::parse() {
   program->col = 1;
 
   while (peek().type != TokenType::EOF_T) {
-    try {
-      program->append(parse_declaration());
-    } catch (const ParseError &e) {
-      std::cerr << "Parse error: " << e.what() << "\n";
-      synchronize();
-    }
+    program->append(parse_declaration());
   }
   return program;
 }

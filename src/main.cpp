@@ -19,20 +19,21 @@ void prettyError(int line, int col, const std::string &msg,
   std::string srcLine;
   int currentLine = 1;
 
-  std::cout << "Error at line " << line << ", column " << col << ":\n";
   while (std::getline(srcStream, srcLine)) {
     if (currentLine == line) {
       std::cout << srcLine << "\n";
       std::cout << std::string(col - 1, ' ') << "^\n";
-      std::cout << msg << "\n";
+      std::cout << "Error at " << line << ":" << col << " - " << msg << "\n";
       return;
     }
     currentLine++;
   }
 }
 
+#define PRGM_NAME "Toy Compiler"
+
 int main(int argc, char **argv) {
-  std::cout << "Toy Compiler v0.1\n";
+  std::cout << PRGM_NAME << " v0.1\n";
   llvm::InitLLVM X(argc, argv);
 
   // --- Define CLI options ---
@@ -48,7 +49,7 @@ int main(int argc, char **argv) {
       "emit-ir", llvm::cl::desc("Emit LLVM IR instead of object code"),
       llvm::cl::init(false));
 
-  llvm::cl::ParseCommandLineOptions(argc, argv, "Toy compiler\n");
+  llvm::cl::ParseCommandLineOptions(argc, argv, std::string(PRGM_NAME) + "\n");
 
   // --- Read source file ---
   std::ifstream file(inputFilename);
@@ -63,10 +64,17 @@ int main(int argc, char **argv) {
   Lexer lexer(src);
   auto tokens = lexer.tokenize();
   auto parser = Parser(tokens);
-  auto ast = parser.parse();
+  std::shared_ptr<Program> ast;
+  try {
+    ast = parser.parse();
+  } catch (const ParseError &e) {
+    prettyError(e.line, e.col, e.message, src);
+    std::cout << "Parsing failed due to previous errors.\n";
+    return 1;
+  }
   if (!parser.ok()) {
     for (const auto &err : parser.errors()) {
-      prettyError(err.first.line, err.first.column, err.second, src);
+      prettyError(err.line, err.col, err.message, src);
     }
     std::cout << "Parsing failed due to previous errors.\n";
     return 1;

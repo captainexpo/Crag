@@ -327,13 +327,21 @@ void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
     return;
   if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(node)) {
     checkFunctionDeclaration(fd);
-  } else if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(node)) {
-    checkVariableDeclaration(vd);
-  } else if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(node)) {
-    checkStructDeclaration(sd);
-  } else {
-    // Unknown top-level node type -- ignore or emit a warning
+    return;
   }
+  if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(node)) {
+    checkVariableDeclaration(vd);
+    return;
+  }
+  if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(node)) {
+    checkStructDeclaration(sd);
+    return;
+  }
+  if (auto ed = std::dynamic_pointer_cast<EnumDeclaration>(node)) {
+    checkEnumDeclaration(ed);
+    return;
+  }
+  error(node, "Unsupported top-level declaration");
 }
 
 void TypeChecker::checkStructDeclaration(
@@ -341,6 +349,21 @@ void TypeChecker::checkStructDeclaration(
   // Already registered the struct type in check(); nothing else to do for
   // now.
   (void)st;
+}
+
+void TypeChecker::checkEnumDeclaration(
+    const std::shared_ptr<EnumDeclaration> &en) {
+  if (!en->type) {
+    error(en, "Enum " + en->name + " has no base type");
+    return;
+  }
+  auto et = std::make_shared<EnumType>(en->name, en->type);
+  for (const auto &v : en->variants) {
+    et->addVariant(v.first, v.second);
+  }
+  m_enums[en->name] = et;
+  en->inferred_type = et;
+  insertSymbol(en->name, et);
 }
 
 void TypeChecker::checkFunctionDeclaration(
@@ -537,6 +560,8 @@ TypeChecker::inferExpression(const std::shared_ptr<Expression> &expr) {
     return inferDereference(d);
   if (auto mc = std::dynamic_pointer_cast<MethodCall>(expr))
     return inferMethodCall(mc);
+  if (auto ea = std::dynamic_pointer_cast<EnumAccess>(expr))
+    return ea->inferred_type = resolveType(m_enums[ea->enum_name]->base_type);
   // Unknown expression kind
   error(expr, "Type inference: unhandled expression type: " + expr->str());
   return nullptr;
@@ -594,7 +619,7 @@ TypeChecker::inferTypeCast(const std::shared_ptr<TypeCast> &tc) {
     return tc->target_type;
   }
   auto isNumeric = [](const std::shared_ptr<Type> &t) {
-    return dynamic_cast<I32 *>(t.get()) || dynamic_cast<I64 *>(t.get()) ||
+    return dynamic_cast<U8 *>(t.get()) || dynamic_cast<I32 *>(t.get()) || dynamic_cast<I64 *>(t.get()) ||
            dynamic_cast<F32 *>(t.get()) || dynamic_cast<F64 *>(t.get()) ||
            dynamic_cast<U32 *>(t.get()) || dynamic_cast<U64 *>(t.get()) ||
            dynamic_cast<USize *>(t.get());
