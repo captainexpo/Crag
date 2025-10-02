@@ -789,13 +789,10 @@ llvm::Value *IRGenerator::generateMethodCall(const std::shared_ptr<MethodCall> &
   }
   return m_builder.CreateCall(calleeValue, argsV, "calltmp");
 }
-
 llvm::Value *
 IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
                               bool loadValue) {
-
   std::vector<llvm::Value *> argsV;
-
   for (const auto &arg : funcCall->args) {
     argsV.push_back(generateExpression(arg));
   }
@@ -807,17 +804,16 @@ IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     return nullptr;
   }
 
-  llvm::Type *calleeType = nullptr;
+  llvm::FunctionType *funcTy = nullptr;
 
   if (auto *func = llvm::dyn_cast<llvm::Function>(calleeValue)) {
-    // Direct call
-    return m_builder.CreateCall(func, argsV, "calltmp");
+    // Direct function
+    funcTy = func->getFunctionType();
   } else if (calleeValue->getType()->isPointerTy()) {
     // Indirect call via function pointer
     auto it = funcCall->func->inferred_type;
     if (!IS_INSTANCE(it, PointerType)) {
-      error(funcCall,
-            "Callee is a pointer, but inferred type is not a pointer");
+      error(funcCall, "Callee is a pointer, but inferred type is not a pointer");
       return nullptr;
     }
     auto ptrType = std::dynamic_pointer_cast<PointerType>(it);
@@ -826,26 +822,33 @@ IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
       return nullptr;
     }
     auto funcType = std::dynamic_pointer_cast<FunctionType>(ptrType->base);
-    calleeType = getLLVMType(funcType);
-
-    llvm::Type *elemTy = calleeType;
-
-    if (!llvm::isa<llvm::FunctionType>(elemTy)) {
-      error(funcCall, "Callee is a pointer, but not to a function type");
-      return nullptr;
-    }
-
-    auto *funcTy = llvm::cast<llvm::FunctionType>(elemTy);
-    // Handle varargs: promote i1, i8, i16 to i32 and f32 to f64
-    std::cout << "Function call to " << funcCall->func->str() << " with " << argsV.size() << " args\n";
-    return m_builder.CreateCall(funcTy, calleeValue, argsV, "calltmp");
+    funcTy = llvm::cast<llvm::FunctionType>(getLLVMType(funcType));
   } else {
     error(funcCall, "Callee is not a function or function pointer: " +
                         funcCall->func->str());
     return nullptr;
   }
-}
 
+  // Apply default argument promotions for varargs
+  if (funcTy->isVarArg()) {
+    unsigned numFixedArgs = funcTy->getNumParams();
+    for (size_t i = numFixedArgs; i < argsV.size(); ++i) {
+      llvm::Value *arg = argsV[i];
+      if (!arg) {
+        error(funcCall, "Null argument value for vararg " + std::to_string(i));
+        return nullptr;
+      }
+      llvm::Type *ty = arg->getType();
+      if (ty->isIntegerTy(1) || ty->isIntegerTy(8) || ty->isIntegerTy(16)) {
+        argsV[i] = m_builder.CreateZExt(arg, llvm::Type::getInt32Ty(m_context));
+      } else if (ty->isFloatTy()) {
+        argsV[i] = m_builder.CreateFPExt(arg, llvm::Type::getDoubleTy(m_context));
+      }
+    }
+  }
+
+  return m_builder.CreateCall(funcTy, calleeValue, argsV, "calltmp");
+}
 llvm::Value *IRGenerator::generateOffsetAccess(
     const std::shared_ptr<OffsetAccess> &offsetAccess, bool loadValue) {
 

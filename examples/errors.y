@@ -24,6 +24,8 @@ fn divide(a: i32, b: i32) -> i32!MyError {
 
 fn main(argc: i32, argv: **u8) -> i32 {
   let result: i32!MyError = divide(10, atoi(argv[1]));
+  printf("Attempting to divide 10 by %s\n", argv[1]);
+  printf("Errored: %d\n", result.is_err);
   if (result.is_err) {
     printf("Error occurred: %s\n", myErrorToString(result.err));
     return 1;
