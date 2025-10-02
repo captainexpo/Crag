@@ -12,9 +12,11 @@
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
+#include <llvm/IR/Value.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MathExtras.h>
 #include <llvm/Support/TargetSelect.h>
@@ -178,6 +180,18 @@ llvm::Type *IRGenerator::getLLVMType(const std::shared_ptr<Type> &type) {
     }
     return llvm::FunctionType::get(getLLVMType(funcType->ret), paramTypes,
                                    funcType->variadic);
+  }
+  if (IS_INSTANCE(type, ErrorUnionType)) {
+    auto eut = std::dynamic_pointer_cast<ErrorUnionType>(type);
+    // Represent as a struct { valueType, errorType, isError (i1) }
+    std::vector<llvm::Type *> elements = {
+        getLLVMType(eut->valueType), getLLVMType(eut->errorType),
+        llvm::Type::getInt1Ty(m_context)};
+    auto st = llvm::StructType::get(m_context, elements);
+    return st;
+  }
+  if (IS_INSTANCE(type, EnumType)) {
+    return getLLVMType(std::dynamic_pointer_cast<EnumType>(type)->base_type);
   }
   if (!type) {
     error(nullptr, "Type is null");
@@ -380,6 +394,13 @@ llvm::Function *IRGenerator::generateFunction(
                   func->type->params[idx]);
     idx++;
   }
+
+  if (IS_INSTANCE(func->type->ret, ErrorUnionType)) {
+    m_error_union_return_type =
+        std::dynamic_pointer_cast<ErrorUnionType>(func->type->ret);
+  } else {
+    m_error_union_return_type = nullptr;
+  }
   generateStatement(func->body);
   if (m_builder.GetInsertBlock()->getTerminator() == nullptr) {
     if (IS_INSTANCE(func->type->ret, Void)) {
@@ -388,7 +409,9 @@ llvm::Function *IRGenerator::generateFunction(
       error(func, "Non-void function missing return: " + func->name);
     }
   }
-
+  m_error_union_return_type = nullptr;
+  // Validate the generated code, checking for consistency.
+  llvm::verifyFunction(*function);
   return function;
 }
 void IRGenerator::generateVariableDeclaration(
@@ -813,6 +836,8 @@ IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     }
 
     auto *funcTy = llvm::cast<llvm::FunctionType>(elemTy);
+    // Handle varargs: promote i1, i8, i16 to i32 and f32 to f64
+    std::cout << "Function call to " << funcCall->func->str() << " with " << argsV.size() << " args\n";
     return m_builder.CreateCall(funcTy, calleeValue, argsV, "calltmp");
   } else {
     error(funcCall, "Callee is not a function or function pointer: " +
@@ -860,7 +885,6 @@ llvm::Value *IRGenerator::generateFieldAccess(
   }
 
   if (!fieldAccess->base->inferred_type) {
-    std::cout << "Field access base: " << fieldAccess->base->str() << "\n";
     error(fieldAccess->base, "Base expression of field access has no inferred type");
     return nullptr;
   }
@@ -872,6 +896,39 @@ llvm::Value *IRGenerator::generateFieldAccess(
     return nullptr;
   }
 
+  if (auto eu_type = std::dynamic_pointer_cast<ErrorUnionType>(fieldAccess->base->inferred_type)) {
+    llvm::StructType *euStructType =
+        llvm::cast<llvm::StructType>(getLLVMType(eu_type));
+
+    if (fieldAccess->field == "ok") {
+      // Return index 0
+      llvm::Type *ok_type = getLLVMType(eu_type->valueType);
+      auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 0, "error_union_ok_access");
+      return loadValue
+                 ? m_builder.CreateLoad(ok_type, gep, "load_error_union_ok")
+                 : gep;
+
+    } else if (fieldAccess->field == "err") {
+      // Return index 1
+      llvm::Type *err_type = getLLVMType(eu_type->errorType);
+      auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 1, "error_union_err_access");
+      return loadValue
+                 ? m_builder.CreateLoad(err_type, gep, "load_error_union_err")
+                 : gep;
+
+    } else if (fieldAccess->field == "is_err") {
+      // Return index 2
+      llvm::Type *bool_type = llvm::Type::getInt1Ty(m_context);
+      auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 2, "error_union_is_err_access");
+      return loadValue
+                 ? m_builder.CreateLoad(bool_type, gep, "load_error_union_is_err")
+                 : gep;
+
+    } else {
+      error(fieldAccess, "Unknown field on error union: " + fieldAccess->field);
+      return nullptr;
+    }
+  }
   // Check if base type is a struct or pointer-to-struct
   std::shared_ptr<StructType> structType =
       std::dynamic_pointer_cast<StructType>(fieldAccess->base->inferred_type);
@@ -1079,6 +1136,45 @@ llvm::Value *IRGenerator::generateForStatement(
 llvm::Value *IRGenerator::generateReturnStatement(
     const std::shared_ptr<ReturnStatement> &retStmt) {
   auto retVal = generateExpression(retStmt->value);
+  if (m_error_union_return_type != nullptr) {
+    // should return error union struct
+    llvm::Value *okVal = nullptr;
+    llvm::Value *errVal = nullptr;
+
+    llvm::Value *withTag = nullptr;
+
+    llvm::StructType *errUnionStruct = llvm ::
+        cast<llvm::StructType>(getLLVMType(m_error_union_return_type));
+    llvm::Value *undefVal = llvm::UndefValue::get(errUnionStruct);
+
+    if (retStmt->is_error) {
+      errVal = retVal;
+      okVal = llvm::Constant::getNullValue(getLLVMType(m_error_union_return_type->valueType));
+      // Create the struct for error return
+      // {okType, errType, i1 (is_error, should be true)}
+      auto withOk = m_builder.CreateInsertValue(undefVal, okVal, 0);
+
+      auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1);
+      withTag = m_builder.CreateInsertValue(withErr,
+                                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(m_context), 1),
+                                            2);
+
+    } else {
+      okVal = retVal;
+      errVal = llvm::Constant::getNullValue(getLLVMType(m_error_union_return_type->errorType));
+
+      // Create the struct for ok return
+      // {okType, errType, i1 (is_error, should be false)}
+      auto withOk = m_builder.CreateInsertValue(undefVal, okVal, 0);
+
+      auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1);
+      withTag = m_builder.CreateInsertValue(withErr,
+                                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(m_context), 0),
+                                            2);
+    }
+    retVal = withTag;
+  }
+
   auto retInstr = m_builder.CreateRet(retVal);
   return retInstr;
 }

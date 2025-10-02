@@ -72,6 +72,16 @@ struct ArrayType : Type {
   }
 };
 
+struct ErrorUnionType : Type {
+  std::shared_ptr<Type> valueType;
+  std::shared_ptr<Type> errorType;
+  ErrorUnionType(std::shared_ptr<Type> v, std::shared_ptr<Type> e)
+      : valueType(std::move(v)), errorType(std::move(e)) {}
+  std::string str() const override {
+    return "Result<" + valueType->str() + ", " + errorType->str() + ">";
+  }
+};
+
 struct FunctionDeclaration;
 
 struct StructType : Type {
@@ -398,6 +408,7 @@ struct WhileStatement : Statement {
 
 struct ReturnStatement : Statement {
   ExprPtr value;
+  bool is_error = false; // For error unions, set outside of constructor
   ReturnStatement(ExprPtr v) : value(std::move(v)) {}
   std::string str() const override {
     return "ReturnStatement(" + (value ? value->toString() : "void") + ")";
@@ -467,13 +478,14 @@ struct EnumType : Type {
 
 struct EnumDeclaration : ASTNode {
   std::string name;
-  std::shared_ptr<Type> type;
+  std::shared_ptr<Type> base_type;
+  std::shared_ptr<EnumType> enum_type; // Set after declaration
   std::unordered_map<std::string, std::shared_ptr<Literal>> variants;
 
   EnumDeclaration(std::string n,
                   std::shared_ptr<Type> t,
                   std::unordered_map<std::string, std::shared_ptr<Literal>> v)
-      : name(std::move(n)), type(std::move(t)), variants(std::move(v)) {}
+      : name(std::move(n)), base_type(std::move(t)), variants(std::move(v)) {}
   std::string str() const override {
     std::string result = "EnumDeclaration(" + name + ") { ";
     for (const auto &variant : variants) {

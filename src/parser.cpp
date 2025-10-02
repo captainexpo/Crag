@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <iostream>
+#include <llvm/IR/Intrinsics.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -80,7 +81,7 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
     }
     if (declared_enums.count(current.value)) {
       std::string name = consume(TokenType::ID).value;
-      t = declared_enums[name]->type;
+      t = declared_enums[name]->enum_type;
       break;
     }
     t = parse_primitive_type();
@@ -102,6 +103,11 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
     consume(TokenType::QUESTION);
     error("Nullable types not supported yet", current);
     t->nullable = true;
+  }
+  if (peek().type == TokenType::BANG) {
+    consume(TokenType::BANG);
+    auto error_type = parse_type();
+    return std::make_shared<ErrorUnionType>(t, error_type);
   }
   return t;
 }
@@ -175,7 +181,6 @@ std::shared_ptr<PointerType> Parser::parse_function_ptr_type() {
 
 // ---- Declarations ----
 std::shared_ptr<ASTNode> Parser::parse_declaration() {
-  std::cout << "Parsing declaration at token: " << peek().value << "\n";
   Token t = peek();
   switch (t.type) {
   case TokenType::FN:
@@ -225,7 +230,6 @@ std::shared_ptr<EnumDeclaration> Parser::parse_enum_declaration() {
   std::unordered_map<std::string, std::shared_ptr<Literal>> variant_map;
   std::shared_ptr<Literal> last_literal = nullptr;
   while (peek().type != TokenType::RBRACE) {
-    std::cout << "Parsing enum variant at token: " << peek().value << "\n";
     if (peek().type == TokenType::EOF_T) {
       error("Unterminated enum declaration, expected '}'", peek());
       break;
@@ -263,6 +267,7 @@ std::shared_ptr<EnumDeclaration> Parser::parse_enum_declaration() {
   }
   consume(TokenType::RBRACE);
   auto enum_decl = std::make_shared<EnumDeclaration>(name, enum_type, variant_map);
+  enum_decl->enum_type = std::make_shared<EnumType>(name, enum_type);
   enum_decl->line = start_token.line;
   enum_decl->col = start_token.column;
   declared_enums[name] = enum_decl;
@@ -670,10 +675,16 @@ std::shared_ptr<ForStatement> Parser::parse_for_statement() {
 std::shared_ptr<ReturnStatement> Parser::parse_return_statement() {
   Token start_token = peek(); // Store the start token for line and col
   consume(TokenType::RETURN);
+  bool is_error_return = false;
+  if (peek().type == TokenType::BANG) {
+    consume(TokenType::BANG);
+    is_error_return = true;
+  }
   auto value = parse_expression();
   auto return_stmt = std::make_shared<ReturnStatement>(value);
   return_stmt->line = start_token.line;
   return_stmt->col = start_token.column;
+  return_stmt->is_error = is_error_return;
   return return_stmt;
 }
 

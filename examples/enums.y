@@ -1,5 +1,5 @@
-import "linked_list.y"
-import "std.y"
+fn printf(fmt: *const u8, ...) -> i32;
+
 
 enum EnumCode(i32) {
     A = 1,

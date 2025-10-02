@@ -41,7 +41,7 @@ enum class TokenType {
   QUESTION,
   AND,
   OR,
-  NOT,
+  BANG,
   BAND,
   BOR,
   BXOR,

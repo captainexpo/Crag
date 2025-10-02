@@ -8,6 +8,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_ostream.h"
+#include <memory>
 
 class Scope {
 public:
@@ -67,6 +68,8 @@ private:
   std::map<std::string, llvm::StructType *> m_structTypes;
   std::map<std::string, std::shared_ptr<EnumType>> m_enumTypes;
   std::vector<Scope> m_scopeStack;
+
+  std::shared_ptr<ErrorUnionType> m_error_union_return_type = nullptr;
 
   void
   error(ASTNodePtr node, const std::string &msg);

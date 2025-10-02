@@ -353,11 +353,11 @@ void TypeChecker::checkStructDeclaration(
 
 void TypeChecker::checkEnumDeclaration(
     const std::shared_ptr<EnumDeclaration> &en) {
-  if (!en->type) {
+  if (!en->base_type) {
     error(en, "Enum " + en->name + " has no base type");
     return;
   }
-  auto et = std::make_shared<EnumType>(en->name, en->type);
+  auto et = en->enum_type;
   for (const auto &v : en->variants) {
     et->addVariant(v.first, v.second);
   }
@@ -479,6 +479,29 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
         error(ret, "Return without value in non-void function");
       } else {
         auto t = inferExpression(ret->value);
+        if (ret->is_error) { // Returning an error from the function (oh no!)
+          if (!dynamic_cast<ErrorUnionType *>(m_expected_return_type.get())) {
+            error(ret, "Return type mismatch: expected " +
+                           typeName(m_expected_return_type) +
+                           " but got error return");
+          }
+          auto exp_error = dynamic_cast<ErrorUnionType *>(
+              m_expected_return_type.get());
+          if (!typeEquals(t, exp_error->errorType)) {
+            error(ret, "Return type mismatch: expected " +
+                           typeName(exp_error->errorType) + " but got " +
+                           typeName(t));
+          }
+          return;
+        }
+        if (auto expected_error = std::dynamic_pointer_cast<ErrorUnionType>(m_expected_return_type)) {
+          if (!typeEquals(t, expected_error->valueType)) {
+            error(ret, "Return type mismatch: expected " +
+                           typeName(expected_error->valueType) + " but got " +
+                           typeName(t));
+          }
+          return;
+        }
         if (!t || !typeEquals(t, m_expected_return_type)) {
           error(ret, "Return type mismatch: expected " +
                          typeName(m_expected_return_type) + " but got " +
@@ -534,8 +557,6 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
 // Expression inference — return inferred type or nullptr if error/unhandled
 std::shared_ptr<Type>
 TypeChecker::inferExpression(const std::shared_ptr<Expression> &expr) {
-  std::cout << "Inferring type for expr: " << expr->toString() << " at "
-            << expr->line << ":" << expr->col << std::endl;
   if (!expr)
     return nullptr;
   if (auto va = std::dynamic_pointer_cast<VarAccess>(expr))
@@ -561,7 +582,7 @@ TypeChecker::inferExpression(const std::shared_ptr<Expression> &expr) {
   if (auto mc = std::dynamic_pointer_cast<MethodCall>(expr))
     return inferMethodCall(mc);
   if (auto ea = std::dynamic_pointer_cast<EnumAccess>(expr))
-    return ea->inferred_type = resolveType(m_enums[ea->enum_name]->base_type);
+    return ea->inferred_type = resolveType(m_enums[ea->enum_name]);
   // Unknown expression kind
   error(expr, "Type inference: unhandled expression type: " + expr->str());
   return nullptr;
@@ -867,6 +888,31 @@ TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call) {
   return ftype->ret;
 }
 
+std::shared_ptr<Type> TypeChecker::inferErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
+  auto base = inferExpression(std::dynamic_pointer_cast<Expression>(fa->base));
+  if (!base)
+    return nullptr;
+  auto eut = std::dynamic_pointer_cast<ErrorUnionType>(base);
+  if (!eut) {
+    error(fa, "Error union field access on non-error-union type: " + typeName(base));
+    return nullptr;
+  }
+  if (fa->field == "err") {
+    fa->inferred_type = resolveType(eut->errorType);
+    return eut->errorType;
+  }
+  if (fa->field == "ok") {
+    fa->inferred_type = resolveType(eut->valueType);
+    return eut->valueType;
+  }
+  if (fa->field == "is_err") {
+    fa->inferred_type = std::make_shared<BOOL>();
+    return fa->inferred_type;
+  }
+  error(fa, "Error union has no field " + fa->field);
+  return nullptr;
+}
+
 std::shared_ptr<Type>
 TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
   // base could be expression or ASTNode
@@ -880,6 +926,10 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
       if (pt)
         st = std::dynamic_pointer_cast<StructType>(resolveType(pt->base));
       if (!pt) {
+        auto eut = std::dynamic_pointer_cast<ErrorUnionType>(bt);
+        if (eut) {
+          return inferErrorUnionFieldAccess(fa);
+        }
         error(fa, "Field access on non-struct type: " + typeName(bt));
         return nullptr;
       }
@@ -889,9 +939,6 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
       error(fa, fa->str() + " has no field " + fa->field);
       return nullptr;
     }
-    std::cout << "Resolved field access " << fa->str() << " to type "
-              << ft->str() << "\n";
-    std::cout << "Line: " << fa->line << " Col: " << fa->col << "\n";
     fa->inferred_type = resolveType(ft);
     return ft;
   }

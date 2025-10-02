@@ -69,7 +69,7 @@ std::string tokenTypeName(TokenType type) {
     return "AND";
   case TokenType::OR:
     return "OR";
-  case TokenType::NOT:
+  case TokenType::BANG:
     return "NOT";
   case TokenType::BAND:
     return "BAND";
@@ -326,7 +326,7 @@ std::vector<Token> Lexer::tokenize() {
         tokens.push_back({TokenType::GT, ">", token_line, token_col});
         break;
       case '!':
-        tokens.push_back({TokenType::NOT, "!", token_line, token_col});
+        tokens.push_back({TokenType::BANG, "!", token_line, token_col});
         break;
       case '&':
         tokens.push_back({TokenType::BAND, "&", token_line, token_col});

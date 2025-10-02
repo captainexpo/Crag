@@ -119,6 +119,8 @@ private:
   std::shared_ptr<Type> inferMethodCall(const std::shared_ptr<MethodCall> &mc);
   std::shared_ptr<Type>
   inferFieldAccess(const std::shared_ptr<FieldAccess> &fa);
+
+  std::shared_ptr<Type> inferErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fa);
   std::shared_ptr<Type>
   inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa);
   std::shared_ptr<Type>

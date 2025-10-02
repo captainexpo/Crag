@@ -99,7 +99,7 @@ private:
   };
 
   const std::set<TokenType> PREFIX_OPS = {TokenType::BAND, TokenType::STAR,
-                                          TokenType::MINUS, TokenType::NOT};
+                                          TokenType::MINUS, TokenType::BANG};
 
   const std::set<TokenType> POSTFIX_OPS = {TokenType::LBRACKET,
                                            TokenType::LPAREN};
