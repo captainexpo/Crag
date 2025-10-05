@@ -11,127 +11,324 @@
 #include <vector>
 
 // ----------------- Type system -----------------
+
+enum class TypeKind {
+  Bool,
+  I32,
+  I64,
+  U8,
+  U32,
+  U64,
+  USize,
+  F32,
+  F64,
+  Pointer,
+  Struct,
+  Array,
+  Function,
+  Null,
+  Void,
+  Enum,
+  Unknown,
+
+  // Categorical types
+  Numeric,
+  Any, // Any type
+
+};
+
 struct Type {
+
   bool nullable = false;
   bool is_const = false;
 
+  virtual TypeKind kind() const { return TypeKind::Unknown; }
+
   virtual ~Type() = default;
   virtual std::string str() const = 0;
+
+  virtual bool equals(const std::shared_ptr<Type> &other) const = 0;
+
+  virtual bool isNumeric() const { return false; }
+  virtual bool isInteger() const { return false; }
+  virtual bool isUnsigned() const { return false; }
+  virtual bool isSigned() const { return false; }
+  virtual bool isFloating() const { return false; }
+
+  virtual int numericRank() const { return -1; }
 };
 
 struct Void : Type {
+  TypeKind kind() const override { return TypeKind::Void; }
   std::string str() const override { return "Void"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::Void;
+  }
 };
 
 struct U8 : Type {
+  TypeKind kind() const override { return TypeKind::U8; }
   std::string str() const override { return "U8"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::U8;
+  }
+  bool isNumeric() const override { return true; }
+  bool isInteger() const override { return true; }
+  bool isUnsigned() const override { return true; }
+  int numericRank() const override { return 0; }
 };
+
 struct U32 : Type {
+  TypeKind kind() const override { return TypeKind::U32; }
   std::string str() const override { return "U32"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::U32;
+  }
+  bool isNumeric() const override { return true; }
+  bool isInteger() const override { return true; }
+  bool isUnsigned() const override { return true; }
+  int numericRank() const override { return 1; }
 };
+
 struct U64 : Type {
+  TypeKind kind() const override { return TypeKind::U64; }
   std::string str() const override { return "U64"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::U64;
+  }
+  bool isNumeric() const override { return true; }
+  bool isInteger() const override { return true; }
+  bool isUnsigned() const override { return true; }
+  int numericRank() const override { return 2; }
 };
+
 struct USize : Type {
+  TypeKind kind() const override { return TypeKind::USize; }
   std::string str() const override { return "USize"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::USize;
+  }
+  bool isNumeric() const override { return true; }
+  bool isInteger() const override { return true; }
+  bool isUnsigned() const override { return true; }
+  int numericRank() const override { return 2; } // usually same as U64
 };
+
 struct I32 : Type {
+  TypeKind kind() const override { return TypeKind::I32; }
   std::string str() const override { return "I32"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::I32;
+  }
+  bool isNumeric() const override { return true; }
+  bool isInteger() const override { return true; }
+  bool isSigned() const override { return true; }
+  int numericRank() const override { return 1; }
 };
+
 struct I64 : Type {
+  TypeKind kind() const override { return TypeKind::I64; }
   std::string str() const override { return "I64"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::I64;
+  }
+  bool isNumeric() const override { return true; }
+  bool isInteger() const override { return true; }
+  bool isSigned() const override { return true; }
+  int numericRank() const override { return 2; }
 };
+
 struct F32 : Type {
+  TypeKind kind() const override { return TypeKind::F32; }
   std::string str() const override { return "F32"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::F32;
+  }
+  bool isNumeric() const override { return true; }
+  bool isFloating() const override { return true; }
+  int numericRank() const override { return 3; }
 };
+
 struct F64 : Type {
+  TypeKind kind() const override { return TypeKind::F64; }
   std::string str() const override { return "F64"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::F64;
+  }
+  bool isNumeric() const override { return true; }
+  bool isFloating() const override { return true; }
+  int numericRank() const override { return 4; }
 };
-struct BOOL : Type {
+
+struct Boolean : Type {
+  TypeKind kind() const override { return TypeKind::Bool; }
   std::string str() const override { return "BOOL"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::Bool;
+  }
+  int numericRank() const override { return 0; } // optional: treat as lowest
 };
+
 struct NullType : Type {
+  TypeKind kind() const override { return TypeKind::Null; }
   std::string str() const override { return "Null"; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    return other->kind() == TypeKind::Null;
+  }
 };
 
 struct PointerType : Type {
+  TypeKind kind() const override { return TypeKind::Pointer; }
   std::shared_ptr<Type> base;
   bool pointer_const = false;
+
   PointerType(std::shared_ptr<Type> b, bool pc = false)
       : base(std::move(b)), pointer_const(pc) {}
-  std::string str() const override { return "*" + base->str(); }
+
+  std::string str() const override {
+    return (pointer_const ? "const *" : "*") + base->str();
+  }
+
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    auto o = dynamic_cast<PointerType *>(other.get());
+    if (!o)
+      return false;
+    return pointer_const == o->pointer_const && base->equals(o->base);
+  }
 };
 
 struct ArrayType : Type {
+  TypeKind kind() const override { return TypeKind::Array; }
   std::shared_ptr<Type> base;
   int length;
+
   ArrayType(std::shared_ptr<Type> b, int len)
       : base(std::move(b)), length(len) {}
+
   std::string str() const override {
     return "[" + std::to_string(length) + "]" + base->str();
+  }
+
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    auto o = dynamic_cast<ArrayType *>(other.get());
+    if (!o)
+      return false;
+    return length == o->length && base->equals(o->base);
   }
 };
 
 struct ErrorUnionType : Type {
+  TypeKind kind() const override { return TypeKind::Unknown; } // or a new TypeKind::ErrorUnion
   std::shared_ptr<Type> valueType;
   std::shared_ptr<Type> errorType;
+
   ErrorUnionType(std::shared_ptr<Type> v, std::shared_ptr<Type> e)
       : valueType(std::move(v)), errorType(std::move(e)) {}
+
   std::string str() const override {
     return "Result<" + valueType->str() + ", " + errorType->str() + ">";
+  }
+
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    auto o = dynamic_cast<ErrorUnionType *>(other.get());
+    if (!o)
+      return false;
+    return valueType->equals(o->valueType) &&
+           errorType->equals(o->errorType);
   }
 };
 
 struct FunctionDeclaration;
 
 struct StructType : Type {
+  TypeKind kind() const override { return TypeKind::Struct; }
   std::string name;
-
   std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
   std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
   bool complete;
 
+  StructType(std::string n,
+             std::vector<std::pair<std::string, std::shared_ptr<Type>>> f)
+      : name(std::move(n)), fields(std::move(f)), complete(true) {}
+
+  StructType(std::string n) : name(std::move(n)), fields(), complete(false) {}
+
   std::shared_ptr<Type> getFieldType(const std::string &fname) const {
-    for (const auto &field : fields) {
+    for (const auto &field : fields)
       if (field.first == fname)
         return field.second;
-    }
     return nullptr;
   }
+
+  int getFieldIndex(const std::string &fname) const {
+    for (size_t i = 0; i < fields.size(); ++i)
+      if (fields[i].first == fname)
+        return static_cast<int>(i);
+    return -1;
+  }
+
   void setFields(
       const std::vector<std::pair<std::string, std::shared_ptr<Type>>> &f) {
     fields = f;
     complete = true;
   }
-  int getFieldIndex(const std::string &fname) const {
-    for (size_t i = 0; i < fields.size(); ++i) {
-      if (fields[i].first == fname)
-        return static_cast<int>(i);
-    }
-    return -1;
-  }
-  StructType(std::string n,
-             std::vector<std::pair<std::string, std::shared_ptr<Type>>> f)
-      : name(std::move(n)), fields(std::move(f)), complete(true) {}
-  StructType(std::string n) : name(std::move(n)), fields(), complete(false) {}
+
   std::string str() const override {
     std::string result = "Struct " + name + " { ";
-    for (const auto &field : fields) {
+    for (const auto &field : fields)
       result += field.first + ", ";
-    }
     result += "}";
     return result;
+  }
+
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    auto o = dynamic_cast<StructType *>(other.get());
+    if (!o)
+      return false;
+    return name == o->name;
+    // optional: deep field comparison if you want structural typing
   }
 };
 
 struct FunctionType : Type {
+  TypeKind kind() const override { return TypeKind::Function; }
   std::vector<std::shared_ptr<Type>> params;
   std::shared_ptr<Type> ret;
   bool variadic;
-  FunctionType(std::vector<std::shared_ptr<Type>> p, std::shared_ptr<Type> r,
+
+  FunctionType(std::vector<std::shared_ptr<Type>> p,
+               std::shared_ptr<Type> r,
                bool v = false)
       : params(std::move(p)), ret(std::move(r)), variadic(v) {}
-  std::string str() const override { return "fn(...) -> " + ret->str(); }
+
+  std::string str() const override {
+    std::string result = "fn(";
+    for (size_t i = 0; i < params.size(); ++i) {
+      result += params[i]->str();
+      if (i + 1 < params.size())
+        result += ", ";
+    }
+    if (variadic)
+      result += "...";
+    result += ") -> " + ret->str();
+    return result;
+  }
+
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    auto o = dynamic_cast<FunctionType *>(other.get());
+    if (!o)
+      return false;
+    if (variadic != o->variadic)
+      return false;
+    if (!ret->equals(o->ret))
+      return false;
+    if (params.size() != o->params.size())
+      return false;
+    for (size_t i = 0; i < params.size(); ++i)
+      if (!params[i]->equals(o->params[i]))
+        return false;
+    return true;
+  }
 };
 
 // ----------------- AST Nodes -----------------
@@ -454,6 +651,7 @@ struct VariableDeclaration : Statement {
   std::string name;
   std::shared_ptr<Type> var_type;
   ASTNodePtr initializer;
+  bool is_const = false;
 
   VariableDeclaration(std::string n, std::shared_ptr<Type> t, ASTNodePtr i)
       : name(std::move(n)), var_type(std::move(t)), initializer(std::move(i)) {}
@@ -463,6 +661,7 @@ struct VariableDeclaration : Statement {
 };
 
 struct EnumType : Type {
+  TypeKind kind() const override { return TypeKind::Enum; }
   std::string name;
   std::shared_ptr<Type> base_type;
   std::unordered_map<std::string, std::shared_ptr<Literal>> variant_map;
@@ -474,6 +673,12 @@ struct EnumType : Type {
     variant_map[variant] = std::move(value);
   }
   std::string str() const override { return "Enum " + name; }
+  bool equals(const std::shared_ptr<Type> &other) const override {
+    auto o = dynamic_cast<EnumType *>(other.get());
+    if (!o)
+      return false;
+    return name == o->name;
+  }
 };
 
 struct EnumDeclaration : ASTNode {

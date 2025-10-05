@@ -9,28 +9,6 @@
 #include <unordered_map>
 #include <vector>
 
-enum class TypeKind {
-  Bool,
-  I32,
-  I64,
-  U8,
-  U32,
-  U64,
-  USize,
-  F32,
-  F64,
-  Pointer,
-  Struct,
-  Array,
-  Function,
-  Null,
-  Unknown
-};
-
-int typeRank(TypeKind k);
-
-TypeKind kindOf(const std::shared_ptr<Type> &t);
-
 struct CastResult {
   std::shared_ptr<Type> type;
   ExprPtr left;
@@ -67,6 +45,8 @@ private:
 
   std::shared_ptr<Type> m_expected_return_type; // Current function return type
 
+  std::vector<std::shared_ptr<Type>> m_expected_types; // Stack of expected types
+
   // Error reporting
   void error(ASTNodePtr node, const std::string &msg);
 
@@ -78,8 +58,7 @@ private:
   lookupSymbol(const std::string &name) const;
 
   // Type helpers
-  bool typeEquals(const std::shared_ptr<Type> &a,
-                  const std::shared_ptr<Type> &b) const;
+
   std::string typeName(const std::shared_ptr<Type> &t) const;
   std::shared_ptr<Type> resolveType(const std::shared_ptr<Type> &t) const;
 
@@ -88,13 +67,6 @@ private:
   bool canExplicitCast(const std::shared_ptr<Type> &from,
                        const std::shared_ptr<Type> &to);
 
-  void performCast(ExprPtr &expr,
-                   const std::shared_ptr<Type> &to);
-  CastResult unifyBinaryOperands(const ExprPtr &lhs,
-                                 const std::shared_ptr<Type> &lt,
-                                 const ExprPtr &rhs,
-                                 const std::shared_ptr<Type> &rt,
-                                 const ASTNodePtr &ctx);
   void checkNode(const std::shared_ptr<ASTNode> &node);
   void checkStatement(const std::shared_ptr<Statement> &stmt);
   std::shared_ptr<Type>

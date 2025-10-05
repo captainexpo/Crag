@@ -1,0 +1,89 @@
+fn printf(fmt: *const u8, ...) -> i32;
+fn malloc(size: usize) -> *void;
+fn free(ptr: *u8) -> void;
+fn memcpy(dest: *u8, src: *const u8, n: usize) -> *u8;
+fn exit(code: i32) -> void;
+
+enum ArrayListError(i32) {
+  IndexOutOfBounds = 0,
+}
+
+struct ArrayList {
+  ptr: *i32,
+  len: usize,
+  cap: usize,
+
+  fn init(self: *ArrayList, cap: usize) -> void {
+    self.ptr = malloc(cap * 4) re *i32; 
+    self.len = 0 ;
+    self.cap = cap;
+  }
+
+  fn push(self: *ArrayList, value: i32) -> void {
+    if (self.len >= self.cap) {
+      let new_cap: usize = self.cap * 2;
+      let new_ptr: *i32 = malloc(new_cap * 4) as *i32;
+      memcpy(new_ptr re *u8, self.ptr re *u8, self.len * 4);
+      free(self.ptr re *u8);
+      self.ptr = new_ptr;
+      self.cap = new_cap;
+    }
+    self.ptr[self.len] = value;
+    self.len = self.len + 1;
+  }
+
+  fn get(self: *ArrayList, idx: usize) -> i32!ArrayListError {
+    if (idx >= self.len) {
+      return! ArrayListError::IndexOutOfBounds;
+    }
+    return self.ptr[idx];
+  }
+
+  fn set(self: *ArrayList, idx: usize, value: i32) -> i32!ArrayListError {
+    if (idx >= self.len) {
+      return! ArrayListError::IndexOutOfBounds;
+    }
+    self.ptr[idx] = value;
+    return 0;
+  }
+
+  fn deinit(self: *ArrayList) -> void {
+    free(self.ptr re *u8);
+    self.ptr = null;
+    self.len = 0 ;
+    self.cap = 0 ;
+  }
+}
+
+fn unwrap_or_exit(val: i32!ArrayListError, msg: *const u8, idx: i32) -> i32 {
+  if (val.is_err) {
+    printf("%s (index=%d): %d\n", msg, idx, val.err);
+    exit(1); 
+  }
+  return val.ok;
+}
+
+fn main(argc: i32, argv: **u8) -> i32 {
+  let list: ArrayList = ArrayList { ptr: null, len: 0 , cap: 0 };
+  list.init(4 );
+
+  for (let i: i32 = 0; i < 10; i = i + 1) {
+    list.push(i * 10);
+  }
+
+  for (let j: usize = 0; j < list.len; j = j + 1) {
+    let val: i32!ArrayListError = list.get(j);
+    printf("list[%d] = %d\n", j , unwrap_or_exit(val, "Error getting value", j )); 
+  }
+
+  let result: i32!ArrayListError = list.set(5 , 1234);
+  if (result.is_err) {
+    printf("ArrayListError setting value: %d\n", result.err );
+    list.deinit();
+    return 1;
+  }
+  printf("After set: list[5] = %d\n", unwrap_or_exit(list.get(5), "Error getting value after set", 5)); 
+
+  list.deinit();
+  return 0;
+}

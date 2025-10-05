@@ -33,7 +33,6 @@ void prettyError(int line, int col, const std::string &msg,
 #define PRGM_NAME "Toy Compiler"
 
 int main(int argc, char **argv) {
-  std::cout << PRGM_NAME << " v0.1\n";
   llvm::InitLLVM X(argc, argv);
 
   // --- Define CLI options ---
@@ -95,7 +94,6 @@ int main(int argc, char **argv) {
   if (!codegen.ok()) {
     std::cout << codegen.errors().size() << " errors during code generation:\n";
     for (const auto &err : codegen.errors()) {
-
       prettyError(err.first ? err.first->line : -1,
                   err.first ? err.first->col : -1, err.second, src);
     }

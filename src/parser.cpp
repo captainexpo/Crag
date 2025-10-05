@@ -131,7 +131,7 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
   if (val == "f64")
     return std::make_shared<F64>();
   if (val == "bool")
-    return std::make_shared<BOOL>();
+    return std::make_shared<Boolean>();
   if (val == "void")
     return std::make_shared<Void>();
   error("Unknown primitive type " + val, peek());
@@ -204,14 +204,17 @@ std::shared_ptr<VariableDeclaration> Parser::parse_variable_declaration() {
   if (!is_const)
     consume(TokenType::LET);
   std::string name = consume(TokenType::ID).value;
-  consume(TokenType::COLON);
-  auto var_type = parse_type();
+  std::shared_ptr<Type> var_type = nullptr;
+  if (!(peek().type == TokenType::SEMICOLON || peek().type == TokenType::ASSIGN)) {
+    consume(TokenType::COLON);
+    var_type = parse_type();
+  }
   std::shared_ptr<ASTNode> initializer = nullptr;
   if (match({TokenType::ASSIGN}))
     initializer = parse_expression();
-  var_type->is_const = is_const;
   auto var_decl =
       std::make_shared<VariableDeclaration>(name, var_type, initializer);
+  var_decl->is_const = is_const;
   var_decl->line = start_token.line;
   var_decl->col = start_token.column;
   return var_decl;
@@ -404,13 +407,13 @@ std::shared_ptr<Expression> Parser::parse_nud() {
     return expr;
   }
   case TokenType::TRUE: {
-    expr = std::make_shared<Literal>(true, std::make_shared<BOOL>());
+    expr = std::make_shared<Literal>(true, std::make_shared<Boolean>());
     expr->line = t.line;
     expr->col = t.column;
     return expr;
   }
   case TokenType::FALSE: {
-    expr = std::make_shared<Literal>(false, std::make_shared<BOOL>());
+    expr = std::make_shared<Literal>(false, std::make_shared<Boolean>());
     expr->line = t.line;
     expr->col = t.column;
     return expr;
@@ -679,6 +682,13 @@ std::shared_ptr<ReturnStatement> Parser::parse_return_statement() {
   if (peek().type == TokenType::BANG) {
     consume(TokenType::BANG);
     is_error_return = true;
+  }
+  if (peek().type == TokenType::SEMICOLON) {
+    auto return_stmt = std::make_shared<ReturnStatement>(nullptr);
+    return_stmt->line = start_token.line;
+    return_stmt->col = start_token.column;
+    return_stmt->is_error = is_error_return;
+    return return_stmt;
   }
   auto value = parse_expression();
   auto return_stmt = std::make_shared<ReturnStatement>(value);

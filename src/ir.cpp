@@ -149,7 +149,7 @@ llvm::Type *IRGenerator::getLLVMType(const std::shared_ptr<Type> &type) {
     return llvm::Type::getFloatTy(m_context);
   if (IS_INSTANCE(type, F64))
     return llvm::Type::getDoubleTy(m_context);
-  if (IS_INSTANCE(type, BOOL))
+  if (IS_INSTANCE(type, Boolean))
     return llvm::Type::getInt1Ty(m_context);
   if (IS_INSTANCE(type, Void))
     return llvm::Type::getVoidTy(m_context);
@@ -276,7 +276,7 @@ IRGenerator::generateExpression(const std::shared_ptr<Expression> &expr,
     return generateMethodCall(std::dynamic_pointer_cast<MethodCall>(expr),
                               loadValue);
   }
-  error(expr, "Unknown expression type");
+  error(expr, "Unknown expression type: " + expr->str());
   return nullptr;
 }
 std::string llvmTypeToString(llvm::Type *ty) {
@@ -656,7 +656,7 @@ llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
   } else if (IS_INSTANCE(lit->lit_type, F64)) {
     return llvm::ConstantFP::get(m_builder.getDoubleTy(),
                                  std::get<float>(lit->value));
-  } else if (IS_INSTANCE(lit->lit_type, BOOL)) {
+  } else if (IS_INSTANCE(lit->lit_type, Boolean)) {
     return llvm::ConstantInt::get(
         m_context, llvm::APInt(1, std::get<bool>(lit->value) ? 1 : 0));
   } else if (IS_INSTANCE(lit->lit_type, Void)) {
@@ -1138,6 +1138,10 @@ llvm::Value *IRGenerator::generateForStatement(
 
 llvm::Value *IRGenerator::generateReturnStatement(
     const std::shared_ptr<ReturnStatement> &retStmt) {
+  if (retStmt->value == nullptr) {
+    auto retInstr = m_builder.CreateRetVoid();
+    return retInstr;
+  }
   auto retVal = generateExpression(retStmt->value);
   if (m_error_union_return_type != nullptr) {
     // should return error union struct
@@ -1155,12 +1159,12 @@ llvm::Value *IRGenerator::generateReturnStatement(
       okVal = llvm::Constant::getNullValue(getLLVMType(m_error_union_return_type->valueType));
       // Create the struct for error return
       // {okType, errType, i1 (is_error, should be true)}
-      auto withOk = m_builder.CreateInsertValue(undefVal, okVal, 0);
+      auto withOk = m_builder.CreateInsertValue(undefVal, okVal, 0, "insert_ok");
 
-      auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1);
+      auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1, "insert_err");
       withTag = m_builder.CreateInsertValue(withErr,
                                             llvm::ConstantInt::get(llvm::Type::getInt1Ty(m_context), 1),
-                                            2);
+                                            2, "insert_is_err");
 
     } else {
       okVal = retVal;
@@ -1168,12 +1172,12 @@ llvm::Value *IRGenerator::generateReturnStatement(
 
       // Create the struct for ok return
       // {okType, errType, i1 (is_error, should be false)}
-      auto withOk = m_builder.CreateInsertValue(undefVal, okVal, 0);
+      auto withOk = m_builder.CreateInsertValue(undefVal, okVal, 0, "insert_ok");
 
-      auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1);
+      auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1, "insert_err");
       withTag = m_builder.CreateInsertValue(withErr,
                                             llvm::ConstantInt::get(llvm::Type::getInt1Ty(m_context), 0),
-                                            2);
+                                            2, "insert_is_err");
     }
     retVal = withTag;
   }

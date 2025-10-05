@@ -4,87 +4,6 @@
 #include <memory>
 #include <typeinfo>
 
-int typeRank(TypeKind k) {
-  switch (k) {
-  case TypeKind::U8:
-    return 1;
-  case TypeKind::I32:
-    return 2;
-  case TypeKind::U32:
-    return 3;
-  case TypeKind::I64:
-    return 4;
-  case TypeKind::U64:
-    return 5;
-  case TypeKind::USize:
-    return 6;
-  case TypeKind::F32:
-    return 7;
-  case TypeKind::F64:
-    return 8;
-  default:
-    return -1;
-  }
-}
-
-TypeKind kindOf(const std::shared_ptr<Type> &t) {
-  if (!t)
-    return TypeKind::Unknown;
-  if (dynamic_cast<BOOL *>(t.get()))
-    return TypeKind::Bool;
-  if (dynamic_cast<I32 *>(t.get()))
-    return TypeKind::I32;
-  if (dynamic_cast<I64 *>(t.get()))
-    return TypeKind::I64;
-  if (dynamic_cast<U8 *>(t.get()))
-    return TypeKind::U8;
-  if (dynamic_cast<U32 *>(t.get()))
-    return TypeKind::U32;
-  if (dynamic_cast<U64 *>(t.get()))
-    return TypeKind::U64;
-  if (dynamic_cast<USize *>(t.get()))
-    return TypeKind::USize;
-  if (dynamic_cast<F32 *>(t.get()))
-    return TypeKind::F32;
-  if (dynamic_cast<F64 *>(t.get()))
-    return TypeKind::F64;
-  if (dynamic_cast<PointerType *>(t.get()))
-    return TypeKind::Pointer;
-  if (dynamic_cast<ArrayType *>(t.get()))
-    return TypeKind::Array;
-  if (dynamic_cast<StructType *>(t.get()))
-    return TypeKind::Struct;
-  if (dynamic_cast<FunctionType *>(t.get()))
-    return TypeKind::Function;
-  if (dynamic_cast<NullType *>(t.get()))
-    return TypeKind::Null;
-  return TypeKind::Unknown;
-}
-
-int numericRank(TypeKind k) {
-  switch (k) {
-  case TypeKind::U8:
-    return 1;
-  case TypeKind::I32:
-    return 2;
-  case TypeKind::U32:
-    return 3;
-  case TypeKind::I64:
-    return 4;
-  case TypeKind::U64:
-    return 5;
-  case TypeKind::USize:
-    return 6;
-  case TypeKind::F32:
-    return 7;
-  case TypeKind::F64:
-    return 8;
-  default:
-    return -1;
-  }
-}
-bool isNumeric(TypeKind k) { return numericRank(k) >= 0; }
-
 TypeChecker::TypeChecker() { pushScope(); }
 
 void TypeChecker::error(ASTNodePtr node, const std::string &msg) {
@@ -123,36 +42,45 @@ bool TypeChecker::canImplicitCast(const std::shared_ptr<Type> &from,
                                   const std::shared_ptr<Type> &to) {
   if (!from || !to)
     return false;
-  if (typeEquals(from, to))
+  if (from->equals(to))
     return true;
 
-  TypeKind fk = kindOf(from), tk = kindOf(to);
-
-  // null → pointer
-  if (fk == TypeKind::Null && tk == TypeKind::Pointer)
+  if (from->isNumeric() && to->isNumeric())
     return true;
 
-  // numeric promotion (only widening allowed)
-  if (isNumeric(fk) && isNumeric(tk)) {
-    return numericRank(fk) <= numericRank(tk);
-  }
+  TypeKind from_tk = from->kind();
+  TypeKind to_tk = to->kind();
 
-  // pointer → void* (modeled as U8* in your code)
-  if (fk == TypeKind::Pointer && tk == TypeKind::Pointer) {
-    auto fromPtr = std::dynamic_pointer_cast<PointerType>(from);
-    auto toPtr = std::dynamic_pointer_cast<PointerType>(to);
-    if (!fromPtr || !toPtr)
+  // Null -> pointer
+  if (from_tk == TypeKind::Null && to_tk == TypeKind::Pointer)
+    return true;
+
+  // Pointer -> pointer
+  if (from_tk == TypeKind::Pointer && to_tk == TypeKind::Pointer) {
+    auto to_ptr = dynamic_cast<PointerType *>(to.get());
+    auto from_ptr = dynamic_cast<PointerType *>(from.get());
+    if (!to_ptr || !from_ptr)
       return false;
-    if (dynamic_cast<U8 *>(toPtr->base.get()))
-      return true;
-  }
 
-  // array → pointer decay
-  if (fk == TypeKind::Array && tk == TypeKind::Pointer) {
-    auto arr = std::dynamic_pointer_cast<ArrayType>(from);
-    auto toPtr = std::dynamic_pointer_cast<PointerType>(to);
-    if (arr && toPtr && typeEquals(arr->base, toPtr->base))
+    // case 1: identical base type, same or added const
+    if (from_ptr->base->equals(to_ptr->base)) {
+      // Allow adding const, but not removing it
+      if (from_ptr->pointer_const && !to_ptr->pointer_const)
+        return false;
       return true;
+    }
+
+    // case 2: pointer to void (erasure)
+    if (to_ptr->base->kind() == TypeKind::Void)
+      return true;
+
+    // case 3: pointer to const void (adding const and erasing type)
+    if (to_ptr->base->kind() == TypeKind::Void && to_ptr->pointer_const)
+      return true;
+
+    // case 4: from const void* -> any pointer  ❌ (disallowed)
+    if (from_ptr->base->kind() == TypeKind::Void)
+      return false;
   }
 
   return false;
@@ -161,80 +89,21 @@ bool TypeChecker::canExplicitCast(const std::shared_ptr<Type> &from,
                                   const std::shared_ptr<Type> &to) {
   if (!from || !to)
     return false;
-  if (typeEquals(from, to))
+  if (from->equals(to))
     return true;
-
-  TypeKind fk = kindOf(from), tk = kindOf(to);
-
-  // Any numeric ↔ any numeric
-  if (isNumeric(fk) && isNumeric(tk))
+  if (from->isNumeric() && to->isNumeric())
     return true;
-
-  // null ↔ pointer
-  if (fk == TypeKind::Null && tk == TypeKind::Pointer)
+  TypeKind from_tk = from->kind();
+  TypeKind to_tk = from->kind();
+  if (from_tk == TypeKind::Null && to_tk == TypeKind::Pointer)
     return true;
-  if (fk == TypeKind::Pointer && tk == TypeKind::Null)
+  if (from_tk == TypeKind::Pointer && to_tk == TypeKind::Pointer)
     return true;
-
-  // pointer ↔ pointer (reinterpret)
-  if (fk == TypeKind::Pointer && tk == TypeKind::Pointer)
+  if ((from_tk == TypeKind::Pointer && to_tk == TypeKind::USize) ||
+      (from_tk == TypeKind::USize && to_tk == TypeKind::Pointer))
     return true;
-
-  // array ↔ pointer
-  if ((fk == TypeKind::Array && tk == TypeKind::Pointer) ||
-      (fk == TypeKind::Pointer && tk == TypeKind::Array)) {
-    return true;
-  }
-
-  // function pointer casts
-  if (fk == TypeKind::Pointer && tk == TypeKind::Function)
-    return true;
-  if (fk == TypeKind::Function && tk == TypeKind::Pointer)
-    return true;
-
   return false;
 }
-
-bool TypeChecker::typeEquals(const std::shared_ptr<Type> &a,
-                             const std::shared_ptr<Type> &b) const {
-  if (!a || !b)
-    return false;
-  if (dynamic_cast<NullType *>(a.get())) {
-    return dynamic_cast<PointerType *>(b.get()) != nullptr;
-  }
-  if (dynamic_cast<NullType *>(b.get())) {
-    return dynamic_cast<PointerType *>(a.get()) != nullptr;
-  }
-  if (typeid(*a) != typeid(*b))
-    return false;
-  if (auto pa = dynamic_cast<PointerType *>(a.get())) {
-    auto pb = dynamic_cast<PointerType *>(b.get());
-    return typeEquals(pa->base, pb->base);
-  }
-  if (auto aa = dynamic_cast<ArrayType *>(a.get())) {
-    auto ab = dynamic_cast<ArrayType *>(b.get());
-    return aa->length == ab->length && typeEquals(aa->base, ab->base);
-  }
-  if (auto sa = dynamic_cast<StructType *>(a.get())) {
-    auto sb = dynamic_cast<StructType *>(b.get());
-    return sa->name == sb->name;
-  }
-  if (auto fa = dynamic_cast<FunctionType *>(a.get())) {
-    auto fb = dynamic_cast<FunctionType *>(b.get());
-    if (!typeEquals(fa->ret, fb->ret))
-      return false;
-    if (fa->params.size() != fb->params.size())
-      return false;
-    for (size_t i = 0; i < fa->params.size(); ++i)
-      if (!typeEquals(fa->params[i], fb->params[i]))
-        return false;
-    return fa->variadic == fb->variadic;
-  }
-
-  // primitive types: if dynamic type matches, consider equal
-  return true;
-}
-
 std::string TypeChecker::typeName(const std::shared_ptr<Type> &t) const {
   return t ? t->str() : "<unknown>";
 }
@@ -243,6 +112,7 @@ std::shared_ptr<Type>
 TypeChecker::resolveType(const std::shared_ptr<Type> &t) const {
   if (!t)
     return nullptr;
+
   if (auto st = std::dynamic_pointer_cast<StructType>(t)) {
     auto it = m_structs.find(st->name);
     if (it != m_structs.end())
@@ -294,6 +164,19 @@ void TypeChecker::check(const std::shared_ptr<Program> &node) {
     } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
       m_functions[fd->name] = fd->type;
       insertSymbol(fd->name, fd->type);
+    } else if (auto en = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
+      if (!en->base_type) {
+        error(en, "Enum " + en->name + " has no base type");
+        return;
+      }
+      auto et = en->enum_type;
+      for (const auto &v : en->variants) {
+        et->addVariant(v.first, v.second);
+      }
+
+      m_enums[en->name] = et;
+      en->inferred_type = et;
+      insertSymbol(en->name, et);
     }
   }
 
@@ -353,17 +236,6 @@ void TypeChecker::checkStructDeclaration(
 
 void TypeChecker::checkEnumDeclaration(
     const std::shared_ptr<EnumDeclaration> &en) {
-  if (!en->base_type) {
-    error(en, "Enum " + en->name + " has no base type");
-    return;
-  }
-  auto et = en->enum_type;
-  for (const auto &v : en->variants) {
-    et->addVariant(v.first, v.second);
-  }
-  m_enums[en->name] = et;
-  en->inferred_type = et;
-  insertSymbol(en->name, et);
 }
 
 void TypeChecker::checkFunctionDeclaration(
@@ -404,18 +276,20 @@ void TypeChecker::checkVariableDeclaration(
     auto init_type = resolveType(inferExpression(expr));
 
     if (!var->var_type) {
-      var->var_type = init_type; // TODO: decide if this is allowed
+      var->var_type = init_type; // Type inference
     }
+    var->var_type->is_const = var->is_const;
 
     if (!init_type) {
+      std::cerr << "DEBUG: init = " << init->toString() << "\n";
       error(init, "Failed to infer type of initializer for variable " + name);
       goto end;
     }
 
-    if (!typeEquals(init_type, var->var_type)) {
+    if (!init_type->equals(var->var_type)) {
       if (canImplicitCast(init_type, var->var_type)) {
-        init =
-            std::make_shared<TypeCast>(expr, var->var_type, CastType::Normal);
+        var->initializer = std::make_shared<TypeCast>(expr, var->var_type,
+                                                      CastType::Normal);
       } else if (canExplicitCast(init_type, var->var_type)) {
         error(init, "Explicit cast needed in initializer for variable " + name +
                         ": cannot implicitly convert " + typeName(init_type) +
@@ -430,7 +304,7 @@ void TypeChecker::checkVariableDeclaration(
     }
   } else if (auto si = std::dynamic_pointer_cast<StructInitializer>(init)) {
     auto t = inferStructInit(si);
-    if (!t || !typeEquals(t, var->var_type)) {
+    if (!t || !t->equals(var->var_type)) {
       error(init, "Type mismatch in initializer for variable " + name);
       goto end;
     }
@@ -457,7 +331,7 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
   }
   if (auto iff = std::dynamic_pointer_cast<IfStatement>(stmt)) {
     auto t = inferExpression(iff->condition);
-    if (!t || !dynamic_cast<BOOL *>(t.get())) {
+    if (!t || !dynamic_cast<Boolean *>(t.get())) {
       error(iff->condition,
             "Condition in if-statement is not boolean: got " + typeName(t));
     }
@@ -467,8 +341,9 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
     return;
   }
   if (auto ret = std::dynamic_pointer_cast<ReturnStatement>(stmt)) {
+    std::shared_ptr<Type> ret_inferred = nullptr;
     if (ret->value) {
-      inferExpression(ret->value);
+      ret_inferred = inferExpression(ret->value);
     }
     if (!m_expected_return_type) {
       if (ret->value) {
@@ -476,9 +351,14 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
       }
     } else {
       if (!ret->value) {
-        error(ret, "Return without value in non-void function");
+        if (!dynamic_cast<Void *>(m_expected_return_type.get())) {
+          error(ret, "Return type mismatch: expected " +
+                         typeName(m_expected_return_type) +
+                         " but got void return");
+        }
       } else {
-        auto t = inferExpression(ret->value);
+
+        auto t = resolveType(ret_inferred);
         if (ret->is_error) { // Returning an error from the function (oh no!)
           if (!dynamic_cast<ErrorUnionType *>(m_expected_return_type.get())) {
             error(ret, "Return type mismatch: expected " +
@@ -487,7 +367,7 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
           }
           auto exp_error = dynamic_cast<ErrorUnionType *>(
               m_expected_return_type.get());
-          if (!typeEquals(t, exp_error->errorType)) {
+          if (!t->equals(exp_error->errorType)) {
             error(ret, "Return type mismatch: expected " +
                            typeName(exp_error->errorType) + " but got " +
                            typeName(t));
@@ -495,14 +375,14 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
           return;
         }
         if (auto expected_error = std::dynamic_pointer_cast<ErrorUnionType>(m_expected_return_type)) {
-          if (!typeEquals(t, expected_error->valueType)) {
+          if (!t->equals(expected_error->valueType)) {
             error(ret, "Return type mismatch: expected " +
                            typeName(expected_error->valueType) + " but got " +
                            typeName(t));
           }
           return;
         }
-        if (!t || !typeEquals(t, m_expected_return_type)) {
+        if (!t || !t->equals(m_expected_return_type)) {
           error(ret, "Return type mismatch: expected " +
                          typeName(m_expected_return_type) + " but got " +
                          typeName(t));
@@ -524,25 +404,33 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
     auto rt = inferExpression(asg->value);
     if (!lt || !rt)
       return;
-    if (!typeEquals(lt, rt)) {
+    if (!lt->equals(rt)) {
+      if (canImplicitCast(rt, lt)) {
+        asg->value = std::make_shared<TypeCast>(asg->value, lt, CastType::Normal);
+        return;
+      }
+
       error(asg,
             "Assignment type mismatch: " + typeName(lt) + " = " + typeName(rt));
     }
     return;
   }
   if (auto forst = std::dynamic_pointer_cast<ForStatement>(stmt)) {
-    if (forst->init)
+    if (forst->init) {
       checkStatement(forst->init);
-    if (forst->condition)
+    }
+    if (forst->condition) {
       inferExpression(forst->condition);
-    if (forst->increment)
+    }
+    if (forst->increment) {
       checkStatement(forst->increment);
+    }
     checkStatement(forst->body);
     return;
   }
   if (auto wh = std::dynamic_pointer_cast<WhileStatement>(stmt)) {
     auto t = inferExpression(wh->condition);
-    if (!t || !dynamic_cast<BOOL *>(t.get())) {
+    if (!t || !dynamic_cast<Boolean *>(t.get())) {
       error(wh->condition,
             "Condition in while-statement is not boolean: got " + typeName(t));
     }
@@ -550,8 +438,7 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
     return;
   }
 
-  // fallback -- unhandled statement type
-  (void)stmt;
+  error(stmt, "Unsupported statement type");
 }
 
 // Expression inference — return inferred type or nullptr if error/unhandled
@@ -581,46 +468,14 @@ TypeChecker::inferExpression(const std::shared_ptr<Expression> &expr) {
     return inferDereference(d);
   if (auto mc = std::dynamic_pointer_cast<MethodCall>(expr))
     return inferMethodCall(mc);
-  if (auto ea = std::dynamic_pointer_cast<EnumAccess>(expr))
-    return ea->inferred_type = resolveType(m_enums[ea->enum_name]);
+  if (auto ea = std::dynamic_pointer_cast<EnumAccess>(expr)) {
+    auto res = resolveType(m_enums[ea->enum_name]);
+    ea->inferred_type = res;
+    return res;
+  }
   // Unknown expression kind
   error(expr, "Type inference: unhandled expression type: " + expr->str());
   return nullptr;
-}
-
-CastResult TypeChecker::unifyBinaryOperands(const ExprPtr &lhs,
-                                            const std::shared_ptr<Type> &lt,
-                                            const ExprPtr &rhs,
-                                            const std::shared_ptr<Type> &rt,
-                                            const ASTNodePtr &ctx) {
-  CastResult result;
-  result.left = lhs;
-  result.right = rhs;
-
-  // Exact match, no casts needed
-  if (typeEquals(lt, rt)) {
-    result.type = lt;
-    return result;
-  }
-
-  // If left can be promoted to right
-  if (canImplicitCast(lt, rt)) {
-    result.left = std::make_shared<TypeCast>(lhs, rt, CastType::Normal);
-    result.type = rt;
-    return result;
-  }
-
-  // If right can be promoted to left
-  if (canImplicitCast(rt, lt)) {
-    result.right = std::make_shared<TypeCast>(rhs, lt, CastType::Normal);
-    result.type = lt;
-    return result;
-  }
-
-  // Error: no valid promotion
-  error(ctx, "Cannot unify binary operands: " + typeName(lt) + " vs " +
-                 typeName(rt));
-  return result;
 }
 
 std::shared_ptr<Type>
@@ -634,18 +489,7 @@ TypeChecker::inferTypeCast(const std::shared_ptr<TypeCast> &tc) {
   auto ot = inferExpression(tc->expr);
   if (!ot)
     return nullptr;
-  // naive rule: allow cast if types are the same or both numeric types
-  if (typeEquals(ot, tc->target_type)) {
-    tc->inferred_type = resolveType(tc->target_type);
-    return tc->target_type;
-  }
-  auto isNumeric = [](const std::shared_ptr<Type> &t) {
-    return dynamic_cast<U8 *>(t.get()) || dynamic_cast<I32 *>(t.get()) || dynamic_cast<I64 *>(t.get()) ||
-           dynamic_cast<F32 *>(t.get()) || dynamic_cast<F64 *>(t.get()) ||
-           dynamic_cast<U32 *>(t.get()) || dynamic_cast<U64 *>(t.get()) ||
-           dynamic_cast<USize *>(t.get());
-  };
-  if (isNumeric(ot) && isNumeric(tc->target_type)) {
+  if (canExplicitCast(ot, tc->target_type)) {
     tc->inferred_type = resolveType(tc->target_type);
     return tc->target_type;
   }
@@ -667,7 +511,12 @@ TypeChecker::inferVarAccess(const std::shared_ptr<VarAccess> &v) {
 
 std::shared_ptr<Type>
 TypeChecker::inferLiteral(const std::shared_ptr<Literal> &lit) {
-  lit->inferred_type = resolveType(lit->lit_type);
+  auto preType = resolveType(lit->lit_type);
+  if (!preType) {
+    error(lit, "Unknown literal type");
+    return nullptr;
+  }
+  lit->inferred_type = preType;
   return lit->lit_type;
 }
 
@@ -681,11 +530,23 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
   // simple numeric ops
   if (bin->op == "+" || bin->op == "-" || bin->op == "*" || bin->op == "/") {
 
-    if (isNumeric(kindOf(lt)) && isNumeric(kindOf(rt))) {
-      auto unified = unifyBinaryOperands(bin->left, lt, bin->right, rt, bin);
-      bin->left = unified.left;
-      bin->right = unified.right;
-      return unified.type;
+    if (!lt->isNumeric() || !rt->isNumeric()) {
+      error(bin, "Arithmetic operators require numeric operands: got " +
+                     typeName(lt) + " " + bin->op + " " + typeName(rt));
+      return nullptr;
+    }
+    if (!lt->equals(rt)) {
+      // try implicit cast of right to left
+      if (canImplicitCast(rt, lt)) {
+        bin->right = std::make_shared<TypeCast>(bin->right, lt, CastType::Normal);
+      } else if (canImplicitCast(lt, rt)) {
+        bin->left = std::make_shared<TypeCast>(bin->left, rt, CastType::Normal);
+        lt = rt;
+      } else {
+        error(bin, "Arithmetic operator type mismatch: " + typeName(lt) + " " +
+                       bin->op + " " + typeName(rt));
+        return nullptr;
+      }
     }
     bin->inferred_type = resolveType(lt);
     return lt;
@@ -694,12 +555,12 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
   // comparisons -> BOOL
   if (bin->op == "==" || bin->op == "!=" || bin->op == "<" || bin->op == ">" ||
       bin->op == "<=" || bin->op == ">=") {
-    if (!typeEquals(lt, rt)) {
+    if (!lt->equals(rt)) {
       error(bin, "Comparison operands must have same type: " + typeName(lt) +
                      " vs " + typeName(rt));
       return nullptr;
     }
-    auto b = std::make_shared<BOOL>();
+    auto b = std::make_shared<Boolean>();
     bin->inferred_type = resolveType(b);
     return b;
   }
@@ -734,7 +595,12 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
         return nullptr;
       }
     }
-    if (!typeEquals(lt, rt)) {
+    if (!lt->equals(rt)) {
+      if (canImplicitCast(rt, lt)) {
+        bin->right = std::make_shared<TypeCast>(bin->right, lt, CastType::Normal);
+        bin->inferred_type = resolveType(lt);
+        return lt;
+      }
       error(bin,
             "Assignment type mismatch: " + typeName(lt) + " = " + typeName(rt));
       return nullptr;
@@ -759,7 +625,7 @@ TypeChecker::inferUnaryOp(const std::shared_ptr<UnaryOperation> &un) {
     return ot;
   }
   if (un->op == "!") {
-    if (!dynamic_cast<BOOL *>(ot.get())) {
+    if (!dynamic_cast<Boolean *>(ot.get())) {
       error(un, "Logical not expects boolean operand, got " + typeName(ot));
       return nullptr;
     }
@@ -823,13 +689,17 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
   size_t n = ftype->params.size();
   for (size_t i = 0; i < mc->args.size(); ++i) {
     auto at = inferExpression(mc->args[i]);
+
     if (!at)
       error(mc, "Failed to infer type of method call argument " +
                     std::to_string(i));
-    if (i + 1 < ftype->params.size() && !typeEquals(at, ftype->params[i + 1])) {
-      error(mc, "Method call argument " + std::to_string(i) +
-                    " type mismatch: expected " + typeName(ftype->params[i + 1]) +
-                    " got " + typeName(at));
+    if (i + 1 < ftype->params.size() && !at->equals(ftype->params[i + 1])) {
+      if (canImplicitCast(at, ftype->params[i + 1])) {
+        mc->args[i] = std::make_shared<TypeCast>(mc->args[i], ftype->params[i + 1], CastType::Normal);
+      } else
+        error(mc, "Method call argument " + std::to_string(i) +
+                      " type mismatch: expected " + typeName(ftype->params[i + 1]) +
+                      " got " + typeName(at));
     }
   }
   mc->inferred_type = resolveType(ftype->ret);
@@ -877,10 +747,13 @@ TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call) {
       error(call, "Failed to infer type of function call argument " +
                       std::to_string(i));
 
-    if (i < ftype->params.size() && !typeEquals(at, ftype->params[i])) {
-      error(call, "Function call argument " + std::to_string(i) +
-                      " type mismatch: expected " + typeName(ftype->params[i]) +
-                      " got " + typeName(at));
+    if (i < ftype->params.size() && !at->equals(ftype->params[i])) {
+      if (canImplicitCast(at, ftype->params[i])) {
+        call->args[i] = std::make_shared<TypeCast>(call->args[i], ftype->params[i], CastType::Normal);
+      } else
+        error(call, "Function call argument " + std::to_string(i) +
+                        " type mismatch: expected " + typeName(ftype->params[i]) +
+                        " got " + typeName(at));
     }
   }
 
@@ -906,7 +779,7 @@ std::shared_ptr<Type> TypeChecker::inferErrorUnionFieldAccess(const std::shared_
     return eut->valueType;
   }
   if (fa->field == "is_err") {
-    fa->inferred_type = std::make_shared<BOOL>();
+    fa->inferred_type = std::make_shared<Boolean>();
     return fa->inferred_type;
   }
   error(fa, "Error union has no field " + fa->field);
@@ -951,16 +824,13 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
   // base could be expression or ASTNode
   if (auto baseExpr = std::dynamic_pointer_cast<Expression>(oa->base)) {
     auto bt = inferExpression(baseExpr);
+    inferExpression(oa->index);
     if (!bt)
       return nullptr;
     if (auto at = std::dynamic_pointer_cast<ArrayType>(bt)) {
       auto idxt = inferExpression(oa->index);
       if (!idxt)
         return nullptr;
-      // naive: index must be integer type (I32/I64/USize/U32/U64 etc.) - here
-      // we only check it's numeric/integer by checking type name contains "I"
-      // or "U" or "USize" For now, accept any integer-like literal types —
-      // better logic can be added.
       oa->inferred_type = resolveType(at->base);
       return at->base;
     }
@@ -981,28 +851,36 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
 
 std::shared_ptr<Type>
 TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init) {
-  // ensure struct type exists (it should, as it's shared_ptr<StructType>)
   auto st = init->struct_type;
   if (!st) {
     error(init, "Struct initializer has no struct type");
     return nullptr;
   }
-  // check fields are present and types match
 
   for (auto &p : init->field_values) {
     auto ft = resolveType(st->getFieldType(p.first));
     if (ft == nullptr) {
+      std::cerr << "DEBUG: struct fields:\n";
+      for (const auto &f : st->fields) {
+        std::cerr << "  " << f.first << ": " << f.second->str() << "\n";
+      }
+      std::cerr << "Struct " + st->name + " has no field " + p.first << "\n";
       error(init, "Struct " + st->name + " has no field " + p.first);
       return nullptr;
     }
     auto vt = inferExpression(p.second);
     if (!vt)
       return nullptr;
-    if (!typeEquals(vt, ft)) {
-      error(init, "Struct " + st->name + " field " + p.first +
-                      " type mismatch: expected " + typeName(ft) + " got " +
-                      typeName(vt));
-      return nullptr;
+    if (!vt->equals(ft)) {
+      if (canImplicitCast(vt, ft)) {
+        p.second = std::make_shared<TypeCast>(p.second, ft, CastType::Normal);
+      } else {
+        error(init, "Struct " + st->name + " field " + p.first +
+                        " type mismatch: expected " + typeName(ft) + " got " +
+                        typeName(vt));
+        std::cerr << "DEBUG: field " << p.first << " vt = " << vt->str() << "\n";
+        return nullptr;
+      }
     }
   }
   init->inferred_type = resolveType(st);
