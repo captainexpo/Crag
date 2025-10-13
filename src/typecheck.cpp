@@ -85,8 +85,8 @@ bool TypeChecker::canImplicitCast(const std::shared_ptr<Type> &from,
 
   return false;
 }
-bool TypeChecker::canExplicitCast(const std::shared_ptr<Type> &from,
-                                  const std::shared_ptr<Type> &to) {
+bool canExplicitCast(const std::shared_ptr<Type> &from,
+                     const std::shared_ptr<Type> &to) {
   if (!from || !to)
     return false;
   if (from->equals(to))
@@ -103,6 +103,62 @@ bool TypeChecker::canExplicitCast(const std::shared_ptr<Type> &from,
       (from_tk == TypeKind::USize && to_tk == TypeKind::Pointer))
     return true;
   return false;
+}
+std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
+                                  const std::shared_ptr<Type> &to) {
+  if (!from || !to)
+    return nullptr;
+  if (from->equals(to))
+    return to;
+
+  if (from->isNumeric() && to->isNumeric()) {
+    // Promote to the higher rank type
+    if (from->numericRank() >= to->numericRank())
+      return from;
+    return to;
+  }
+
+  TypeKind from_tk = from->kind();
+  TypeKind to_tk = to->kind();
+
+  // Null -> pointer
+  if (from_tk == TypeKind::Null && to_tk == TypeKind::Pointer)
+    return to;
+
+  // Pointer -> pointer
+  if (from_tk == TypeKind::Pointer && to_tk == TypeKind::Pointer) {
+    auto to_ptr = dynamic_cast<PointerType *>(to.get());
+    auto from_ptr = dynamic_cast<PointerType *>(from.get());
+    if (!to_ptr || !from_ptr)
+      return nullptr;
+
+    // case 1: identical base type, same or added const
+    if (from_ptr->base->equals(to_ptr->base)) {
+      // Allow adding const, but not removing it
+      if (from_ptr->pointer_const && !to_ptr->pointer_const)
+        return nullptr;
+      return to;
+    }
+
+    // case 2: pointer to void (erasure)
+    if (to_ptr->base->kind() == TypeKind::Void)
+      return to;
+
+    // case 3: pointer to const void (adding const and erasing type)
+    if (to_ptr->base->kind() == TypeKind::Void && to_ptr->pointer_const)
+      return to;
+
+    // case 4: from const void* -> any pointer  ❌ (disallowed)
+    if (from_ptr->base->kind() == TypeKind::Void)
+      return nullptr;
+  }
+
+  // Pointer <-> usize
+  if ((from_tk == TypeKind::Pointer && to_tk == TypeKind::USize) ||
+      (from_tk == TypeKind::USize && to_tk == TypeKind::Pointer))
+    return to;
+
+  return nullptr;
 }
 std::string TypeChecker::typeName(const std::shared_ptr<Type> &t) const {
   return t ? t->str() : "<unknown>";
@@ -269,10 +325,36 @@ void TypeChecker::checkVariableDeclaration(
   const std::string &name = var->name;
   auto init = var->initializer;
 
+  bool is_global = m_scopes.size() == 1;
+
   if (!init)
     goto end;
 
   if (auto expr = std::dynamic_pointer_cast<Expression>(init)) {
+    if (is_global && var->is_const && init) {
+      // Global variable initializer must be a constant expression
+      std::optional<std::shared_ptr<VariableDeclaration>> const_val = m_const_eval.evaluateVariableDeclaration(var);
+      if (!m_const_eval.ok()) {
+        for (const auto &e : m_const_eval.errors()) {
+          error(e.first, e.second);
+        }
+        goto end;
+      }
+      if (const_val && const_val->get()->initializer) {
+        std::cout << "DEBUG: Const evaluated global " << name << " = "
+                  << const_val->get()->initializer->toString() << "\n";
+        var->initializer = const_val->get()->initializer;
+        expr = std::dynamic_pointer_cast<Expression>(var->initializer);
+      } else {
+        error(var, "Failed to evaluate constant initializer for variable " + name);
+        goto end;
+      }
+    } else if (is_global && init) {
+      error(var, "Global variable " + name +
+                     " must be declared const if it has an initializer");
+      goto end;
+    }
+
     auto init_type = resolveType(inferExpression(expr));
 
     if (!var->var_type) {
@@ -317,6 +399,9 @@ end:
   if (!insertSymbol(name, var->var_type)) {
     error(var, "Duplicate variable declaration: " + name);
   }
+  std::cout << "DEBUG: Declared variable " << name << " : "
+            << typeName(var->var_type) << (var->is_const ? " const" : "")
+            << (init ? (" = " + init->toString()) : "") << "\n";
 }
 
 void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {

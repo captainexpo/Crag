@@ -1,8 +1,10 @@
 
-#include "ir.h"
+#include "codegen.h"
+#include "const_eval.h"
 #include "lexer.h"
 #include "parser.h"
 #include "typecheck.h"
+
 #include <fstream>
 #include <iostream>
 #include <sstream>

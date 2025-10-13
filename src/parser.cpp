@@ -186,8 +186,11 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
   case TokenType::FN:
     return parse_function_declaration();
   case TokenType::LET:
-  case TokenType::CONST:
-    return parse_variable_declaration();
+  case TokenType::CONST: {
+    auto vd = parse_variable_declaration();
+    consume(TokenType::SEMICOLON);
+    return vd;
+  }
   case TokenType::STRUCT:
     return parse_struct_declaration();
   case TokenType::ENUM:
@@ -253,7 +256,7 @@ std::shared_ptr<EnumDeclaration> Parser::parse_enum_declaration() {
         continue;
       }
       if (auto ilit = std::dynamic_pointer_cast<Literal>(last_literal)) {
-        if (auto ival = std::get_if<int>(&ilit->value)) {
+        if (auto ival = std::get_if<int64_t>(&ilit->value)) {
           auto new_lit = std::make_shared<Literal>((*ival) + 1, enum_type);
           variant_map.insert({vname, new_lit});
           last_literal = new_lit;

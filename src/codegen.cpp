@@ -1,4 +1,4 @@
-#include "ir.h"
+#include "codegen.h"
 #include "ast.h"
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
@@ -316,8 +316,14 @@ IRGenerator::generateCast(const std::shared_ptr<TypeCast> &typeCast,
       return m_builder.CreateFPTrunc(val, destType, "fptrunctmp");
     }
   } else if (srcType->isIntegerTy() && destType->isFloatingPointTy()) {
+    if (typeCast->expr->inferred_type->isUnsigned()) {
+      return m_builder.CreateUIToFP(val, destType, "uitofptmp");
+    }
     return m_builder.CreateSIToFP(val, destType, "sitofptmp");
   } else if (srcType->isFloatingPointTy() && destType->isIntegerTy()) {
+    if (typeCast->target_type->isUnsigned()) {
+      return m_builder.CreateFPToUI(val, destType, "fptouitmp");
+    }
     return m_builder.CreateFPToSI(val, destType, "fptositmp");
   } else if (srcType->isPointerTy() && destType->isPointerTy()) {
     return m_builder.CreateBitCast(val, destType, "ptrcasttmp");
@@ -416,6 +422,35 @@ llvm::Function *IRGenerator::generateFunction(
 }
 void IRGenerator::generateVariableDeclaration(
     const std::shared_ptr<VariableDeclaration> &varDecl) {
+
+  bool is_global = m_scopeStack.size() == 1;
+
+  if (is_global) {
+    llvm::Type *varType = getLLVMType(varDecl->var_type);
+    llvm::Constant *initVal = nullptr;
+    if (varDecl->initializer) {
+      if (IS_INSTANCE(varDecl->initializer, Expression)) {
+        llvm::Value *initValV = generateExpression(
+            std::dynamic_pointer_cast<Expression>(varDecl->initializer));
+        if (llvm::isa<llvm::Constant>(initValV)) {
+          initVal = llvm::cast<llvm::Constant>(initValV);
+        } else {
+          error(varDecl, "Global variable initializer must be a constant");
+          initVal = llvm::Constant::getNullValue(varType);
+        }
+      } else {
+        error(varDecl, "Unsupported initializer type");
+        initVal = llvm::Constant::getNullValue(varType);
+      }
+    } else {
+      initVal = llvm::Constant::getNullValue(varType);
+    }
+    llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
+        *m_module, varType, varDecl->is_const,
+        llvm::GlobalValue::ExternalLinkage, initVal, varDecl->name);
+    CUR_SCOPE.set(varDecl->name, gVar, varType, varDecl->var_type);
+    return;
+  }
 
   llvm::Type *varType = getLLVMType(varDecl->var_type);
   llvm::Value *alloca = m_builder.CreateAlloca(varType, nullptr, varDecl->name);
@@ -635,27 +670,28 @@ IRGenerator::generateUnaryOp(const std::shared_ptr<Expression> &operand,
 
 llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
                                           bool loadValue) {
+
   if (IS_INSTANCE(lit->lit_type, I32)) {
     return llvm::ConstantInt::get(m_context,
-                                  llvm::APInt(32, std::get<int>(lit->value)));
+                                  llvm::APInt(32, std::get<int64_t>(lit->value)));
   } else if (IS_INSTANCE(lit->lit_type, I64)) {
     return llvm::ConstantInt::get(m_context,
-                                  llvm::APInt(64, std::get<int>(lit->value)));
+                                  llvm::APInt(64, std::get<int64_t>(lit->value)));
   } else if (IS_INSTANCE(lit->lit_type, U8)) {
     return llvm::ConstantInt::get(m_context,
-                                  llvm::APInt(8, std::get<int>(lit->value)));
+                                  llvm::APInt(8, std::get<int64_t>(lit->value)));
   } else if (IS_INSTANCE(lit->lit_type, U32)) {
     return llvm::ConstantInt::get(m_context,
-                                  llvm::APInt(32, std::get<int>(lit->value)));
+                                  llvm::APInt(32, std::get<int64_t>(lit->value)));
   } else if (IS_INSTANCE(lit->lit_type, U64)) {
     return llvm::ConstantInt::get(m_context,
-                                  llvm::APInt(64, std::get<int>(lit->value)));
+                                  llvm::APInt(64, std::get<int64_t>(lit->value)));
   } else if (IS_INSTANCE(lit->lit_type, F32)) {
     return llvm::ConstantFP::get(m_builder.getFloatTy(),
-                                 std::get<float>(lit->value));
+                                 std::get<double>(lit->value));
   } else if (IS_INSTANCE(lit->lit_type, F64)) {
     return llvm::ConstantFP::get(m_builder.getDoubleTy(),
-                                 std::get<float>(lit->value));
+                                 std::get<double>(lit->value));
   } else if (IS_INSTANCE(lit->lit_type, Boolean)) {
     return llvm::ConstantInt::get(
         m_context, llvm::APInt(1, std::get<bool>(lit->value) ? 1 : 0));
@@ -665,10 +701,10 @@ llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
     return llvm::ConstantInt::get(
         m_context,
         llvm::APInt(64,
-                    std::get<int>(lit->value))); // Assuming 64-bit for USize
+                    std::get<int64_t>(lit->value))); // Assuming 64-bit for USize
   } else if (IS_INSTANCE(lit->lit_type, PointerType)) {
-    if (std::holds_alternative<int>(lit->value)) {
-      int intVal = std::get<int>(lit->value);
+    if (std::holds_alternative<int64_t>(lit->value)) {
+      int intVal = std::get<int64_t>(lit->value);
       if (intVal == 0) {
         // Null pointer literal
         return llvm::ConstantPointerNull::get(

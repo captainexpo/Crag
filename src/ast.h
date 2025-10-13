@@ -1,6 +1,7 @@
 #ifndef AST_H
 #define AST_H
 
+#include <cstdint>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -35,6 +36,33 @@ enum class TypeKind {
   Numeric,
   Any, // Any type
 
+};
+
+struct ASTVisitor {
+  virtual void visit(struct Program &) {}
+  virtual void visit(struct BinaryOperation &) {}
+  virtual void visit(struct Literal &) {}
+  virtual void visit(struct FuncCall &) {}
+  virtual void visit(struct StructDeclaration &) {}
+  virtual void visit(struct EnumDeclaration &) {}
+  virtual void visit(struct VariableDeclaration &) {}
+  virtual void visit(struct VarAccess &) {}
+  virtual void visit(struct Assignment &) {}
+  virtual void visit(struct IfStatement &) {}
+  virtual void visit(struct ForStatement &) {}
+  virtual void visit(struct WhileStatement &) {}
+  virtual void visit(struct ReturnStatement &) {}
+  virtual void visit(struct Block &) {}
+  virtual void visit(struct TypeCast &) {}
+  virtual void visit(struct FieldAccess &) {}
+  virtual void visit(struct OffsetAccess &) {}
+  virtual void visit(struct MethodCall &) {}
+  virtual void visit(struct Dereference &) {}
+  virtual void visit(struct UnaryOperation &) {}
+  virtual void visit(struct StructInitializer &) {}
+  virtual void visit(struct FunctionDeclaration &) {}
+  virtual void visit(struct ExpressionStatement &) {}
+  virtual void visit(struct EnumAccess &) {}
 };
 
 struct Type {
@@ -333,6 +361,33 @@ struct FunctionType : Type {
 
 // ----------------- AST Nodes -----------------
 
+enum class NodeKind {
+  Program,
+  BinaryOp,
+  Literal,
+  FuncCall,
+  StructDecl,
+  EnumDecl,
+  VarDecl,
+  VarAccess,
+  Assignment,
+  IfStmt,
+  ForStmt,
+  WhileStmt,
+  ReturnStmt,
+  Block,
+  TypeCast,
+  FieldAccess,
+  OffsetAccess,
+  MethodCall,
+  Dereference,
+  UnaryOp,
+  StructInit,
+  FunctionDecl,
+  ExpressionStatement,
+  Unknown
+};
+
 struct ASTNode {
   int line = 0;
   int col = 0;
@@ -343,6 +398,8 @@ struct ASTNode {
 
   virtual ~ASTNode() = default;
   virtual std::string str() const { return "ASTNode"; }
+  virtual NodeKind kind() const { return NodeKind::Unknown; }
+  virtual void accept(ASTVisitor &v);
 
   std::string locationStr() const {
     return "(line " + std::to_string(line) + ", col " + std::to_string(col) +
@@ -375,6 +432,8 @@ struct Program : ASTNode {
     }
     return result;
   }
+  NodeKind kind() const override { return NodeKind::Program; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 // ----------------- Expressions -----------------
@@ -393,12 +452,16 @@ struct TypeCast : Expression {
            (cast_type == CastType::Normal ? " as " : " re ") +
            target_type->str() + ")";
   }
+  NodeKind kind() const override { return NodeKind::TypeCast; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct VarAccess : Expression {
   std::string name;
   VarAccess(std::string n) : name(std::move(n)) {}
   std::string str() const override { return "VarAccess(" + name + ")"; }
+  NodeKind kind() const override { return NodeKind::VarAccess; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct EnumAccess : Expression {
@@ -406,6 +469,8 @@ struct EnumAccess : Expression {
   std::string variant;
   EnumAccess(std::string n, std::string v) : enum_name(n), variant(std::move(v)) {}
   std::string str() const override { return "EnumAccess(" + enum_name + "::" + variant + ")"; }
+  NodeKind kind() const override { return NodeKind::VarAccess; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct Dereference : Expression {
@@ -414,8 +479,11 @@ struct Dereference : Expression {
   std::string str() const override {
     return "Dereference(" + pointer->toString() + ")";
   }
+  NodeKind kind() const override {
+    return NodeKind::Dereference;
+  };
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
-
 struct FuncCall : Expression {
   ExprPtr func;
   std::vector<ExprPtr> args;
@@ -431,6 +499,8 @@ struct FuncCall : Expression {
     result += "))";
     return result;
   }
+  NodeKind kind() const override { return NodeKind::FuncCall; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct MethodCall : Expression {
@@ -449,26 +519,32 @@ struct MethodCall : Expression {
     result += "))";
     return result;
   }
+  NodeKind kind() const override { return NodeKind::MethodCall; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct FieldAccess : Expression {
-  ASTNodePtr base;
+  ExprPtr base;
   std::string field;
-  FieldAccess(ASTNodePtr b, std::string f)
+  FieldAccess(ExprPtr b, std::string f)
       : base(std::move(b)), field(std::move(f)) {}
   std::string str() const override {
     return "FieldAccess(" + base->toString() + "." + field + ")";
   }
+  NodeKind kind() const override { return NodeKind::FieldAccess; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct OffsetAccess : Expression {
-  ASTNodePtr base;
+  ExprPtr base;
   ExprPtr index;
-  OffsetAccess(ASTNodePtr b, ExprPtr i)
+  OffsetAccess(ExprPtr b, ExprPtr i)
       : base(std::move(b)), index(std::move(i)) {}
   std::string str() const override {
     return "OffsetAccess(" + base->toString() + "[" + index->toString() + "])";
   }
+  NodeKind kind() const override { return NodeKind::OffsetAccess; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct BinaryOperation : Expression {
@@ -481,6 +557,8 @@ struct BinaryOperation : Expression {
     return "BinaryOperation(" + left->toString() + " " + op + " " +
            right->toString() + ")";
   }
+  NodeKind kind() const override { return NodeKind::BinaryOp; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct UnaryOperation : Expression {
@@ -491,12 +569,15 @@ struct UnaryOperation : Expression {
   std::string str() const override {
     return "UnaryOperation(" + op + operand->toString() + ")";
   }
+  NodeKind kind() const override { return NodeKind::UnaryOp; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
+using ConstValue = std::variant<uint64_t, int64_t, double, bool, std::string>;
 struct Literal : Expression {
-  std::variant<int, float, bool, std::string> value;
+  ConstValue value;
   std::shared_ptr<Type> lit_type;
-  Literal(std::variant<int, float, bool, std::string> v,
+  Literal(ConstValue v,
           std::shared_ptr<Type> t)
       : value(std::move(v)), lit_type(std::move(t)) {}
   std::string str() const override {
@@ -518,6 +599,8 @@ struct Literal : Expression {
         value);
     return "Literal(" + val_str + " : " + lit_type->str() + ")";
   }
+  NodeKind kind() const override { return NodeKind::Literal; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct StructInitializer : Expression {
@@ -539,6 +622,8 @@ struct StructInitializer : Expression {
     result += " })";
     return result;
   }
+  NodeKind kind() const override { return NodeKind::StructInit; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 // ----------------- Statements -----------------
@@ -557,6 +642,8 @@ struct Block : Statement {
     result += " }";
     return result;
   }
+  NodeKind kind() const override { return NodeKind::Block; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct IfStatement : Statement {
@@ -574,6 +661,8 @@ struct IfStatement : Statement {
     result += ")";
     return result;
   }
+  NodeKind kind() const override { return NodeKind::IfStmt; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct ForStatement : Statement {
@@ -590,6 +679,8 @@ struct ForStatement : Statement {
            (increment ? increment->toString() : "none") + " " +
            body->toString() + ")";
   }
+  NodeKind kind() const override { return NodeKind::ForStmt; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct WhileStatement : Statement {
@@ -601,6 +692,8 @@ struct WhileStatement : Statement {
     return "WhileStatement(" + condition->toString() + " " + body->toString() +
            ")";
   }
+  NodeKind kind() const override { return NodeKind::WhileStmt; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct ReturnStatement : Statement {
@@ -610,6 +703,8 @@ struct ReturnStatement : Statement {
   std::string str() const override {
     return "ReturnStatement(" + (value ? value->toString() : "void") + ")";
   }
+  NodeKind kind() const override { return NodeKind::ReturnStmt; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct ExpressionStatement : Statement {
@@ -618,6 +713,8 @@ struct ExpressionStatement : Statement {
   std::string str() const override {
     return "ExpressionStatement(" + expression->toString() + ")";
   }
+  NodeKind kind() const override { return NodeKind::ExpressionStatement; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct Assignment : Statement {
@@ -628,6 +725,8 @@ struct Assignment : Statement {
   std::string str() const override {
     return "Assignment(" + target->toString() + " = " + value->toString() + ")";
   }
+  NodeKind kind() const override { return NodeKind::Assignment; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct FunctionDeclaration : ASTNode {
@@ -645,6 +744,8 @@ struct FunctionDeclaration : ASTNode {
     return "FunctionDeclaration(" + type->str() + ", " + name + "){" +
            (body ? body->toString() : " ;") + "}";
   }
+  NodeKind kind() const override { return NodeKind::FunctionDecl; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct VariableDeclaration : Statement {
@@ -656,8 +757,11 @@ struct VariableDeclaration : Statement {
   VariableDeclaration(std::string n, std::shared_ptr<Type> t, ASTNodePtr i)
       : name(std::move(n)), var_type(std::move(t)), initializer(std::move(i)) {}
   std::string str() const override {
-    return "VariableDeclaration(" + name + " : " + var_type->str() + ")";
+    return "VariableDeclaration(" + name + " : " + var_type->str() + " = " +
+           (initializer ? initializer->toString() : "null") + (is_const ? ", const" : "") + ")";
   }
+  NodeKind kind() const override { return NodeKind::VarDecl; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct EnumType : Type {
@@ -699,6 +803,8 @@ struct EnumDeclaration : ASTNode {
     result += "}";
     return result;
   }
+  NodeKind kind() const override { return NodeKind::EnumDecl; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 struct StructDeclaration : ASTNode {
@@ -732,6 +838,8 @@ struct StructDeclaration : ASTNode {
 
     return result;
   }
+  NodeKind kind() const override { return NodeKind::StructDecl; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
 #endif // AST_H

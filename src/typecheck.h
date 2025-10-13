@@ -2,6 +2,7 @@
 #define TYPECHECK_H
 
 #include "ast.h"
+#include "const_eval.h"
 #include <memory>
 #include <optional>
 #include <stack>
@@ -15,6 +16,10 @@ struct CastResult {
   ExprPtr right;
 };
 
+bool canExplicitCast(const std::shared_ptr<Type> &from,
+                     const std::shared_ptr<Type> &to);
+std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
+                                  const std::shared_ptr<Type> &to);
 class TypeChecker {
 public:
   TypeChecker();
@@ -30,6 +35,8 @@ public:
 
 private:
   std::vector<std::pair<ASTNodePtr, std::string>> m_errors; // Collected errors
+
+  ConstEvaluator m_const_eval; // For constant expression evaluation
 
   // Scope / symbol table: stack of name -> Type
   std::vector<std::unordered_map<std::string, std::shared_ptr<Type>>> m_scopes;
@@ -63,8 +70,6 @@ private:
   std::shared_ptr<Type> resolveType(const std::shared_ptr<Type> &t) const;
 
   bool canImplicitCast(const std::shared_ptr<Type> &from,
-                       const std::shared_ptr<Type> &to);
-  bool canExplicitCast(const std::shared_ptr<Type> &from,
                        const std::shared_ptr<Type> &to);
 
   void checkNode(const std::shared_ptr<ASTNode> &node);
