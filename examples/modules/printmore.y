@@ -10,3 +10,7 @@ struct V2 {
 fn printmore(str: *const u8) -> void {
     printf("More: %s\n", str);
 }
+
+fn printmoreer(stor: *const u8) -> void {
+    printf("Even More: %s\n", stor);
+}

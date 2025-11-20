@@ -51,16 +51,10 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
   if (!codegen.ok()) {
     std::cout << codegen.errors().size() << " errors during code generation:\n";
     for (const auto &err : codegen.errors()) {
-      std::cout << err.second << "\n";
       prettyError(err.first ? err.first->line : -1,
-                  err.first ? err.first->col : -1, err.second, raw_filepath);
+                  err.first ? err.first->col : -1, err.second, mod->source_code);
     }
     std::cout << "Code generation failed due to previous errors.\n";
-    return nullptr;
-  }
-
-  if (!codegen.ok()) {
-    std::cerr << "Code generation failed due to previous errors.\n";
     return nullptr;
   }
   std::cout << "Compilation succeeded.\n";

@@ -3,7 +3,6 @@
 #include "lexer.h"
 #include <algorithm>
 #include <cstddef>
-#include <iostream>
 #include <llvm/IR/Intrinsics.h>
 #include <memory>
 #include <unordered_map>
@@ -478,8 +477,12 @@ std::shared_ptr<Expression> Parser::parse_nud() {
     return expr;
   }
   case TokenType::STRING: {
-    expr = std::make_shared<Literal>(
-        t.value, std::make_shared<PointerType>(std::make_shared<U8>()));
+    auto ty = std::make_shared<PointerType>(
+        std::make_shared<U8>(), true);
+    auto lit = std::make_shared<Literal>(
+        t.value, ty);
+    std::cout << lit->lit_type->str() << std::endl;
+    expr = lit;
     expr->line = t.line;
     expr->col = t.column;
     return expr;

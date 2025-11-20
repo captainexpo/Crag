@@ -1,5 +1,5 @@
-fn printf(fmt: *const u8, ...) -> i32;
-fn atoi(s: *const u8) -> i32;
+extern fn printf(fmt: *const u8, ...) -> i32;
+extern fn atoi(s: *const u8) -> i32;
 
 enum MyError(i32) {
   DivisionByZero = 0,
@@ -19,11 +19,11 @@ fn divide(a: i32, b: i32) -> i32!MyError {
   if (b == 0) {
     return! MyError::DivisionByZero;
   }
-  return a / b; 
+  return a / b;
 }
 
 fn main(argc: i32, argv: **u8) -> i32 {
-  if (argc < 2) { 
+  if (argc < 2) {
     printf("Error: Not enough arguments, need to supply number to divide by\n");
     return 1;
   }

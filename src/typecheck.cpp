@@ -112,7 +112,6 @@ std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
     return to;
 
   if (from->isNumeric() && to->isNumeric()) {
-    // Promote to the higher rank type
     if (from->numericRank() >= to->numericRank())
       return from;
     return to;
@@ -121,39 +120,31 @@ std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
   TypeKind from_tk = from->kind();
   TypeKind to_tk = to->kind();
 
-  // Null -> pointer
   if (from_tk == TypeKind::Null && to_tk == TypeKind::Pointer)
     return to;
 
-  // Pointer -> pointer
   if (from_tk == TypeKind::Pointer && to_tk == TypeKind::Pointer) {
     auto to_ptr = dynamic_cast<PointerType *>(to.get());
     auto from_ptr = dynamic_cast<PointerType *>(from.get());
     if (!to_ptr || !from_ptr)
       return nullptr;
 
-    // case 1: identical base type, same or added const
     if (from_ptr->base->equals(to_ptr->base)) {
-      // Allow adding const, but not removing it
       if (from_ptr->pointer_const && !to_ptr->pointer_const)
         return nullptr;
       return to;
     }
 
-    // case 2: pointer to void (erasure)
     if (to_ptr->base->kind() == TypeKind::Void)
       return to;
 
-    // case 3: pointer to const void (adding const and erasing type)
     if (to_ptr->base->kind() == TypeKind::Void && to_ptr->pointer_const)
       return to;
 
-    // case 4: from const void* -> any pointer  ❌ (disallowed)
     if (from_ptr->base->kind() == TypeKind::Void)
       return nullptr;
   }
 
-  // Pointer <-> usize
   if ((from_tk == TypeKind::Pointer && to_tk == TypeKind::USize) ||
       (from_tk == TypeKind::USize && to_tk == TypeKind::Pointer))
     return to;
@@ -179,7 +170,7 @@ TypeChecker::resolveType(const std::shared_ptr<Type> &t) const {
     auto bt = resolveType(pt->base);
     if (!bt)
       return nullptr;
-    return std::make_shared<PointerType>(bt);
+    return std::make_shared<PointerType>(bt, pt->pointer_const);
   }
   if (auto at = std::dynamic_pointer_cast<ArrayType>(t)) {
     auto bt = resolveType(at->base);
@@ -233,7 +224,16 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
       auto et = en->enum_type;
       for (const auto &v : en->variants) {
         et->addVariant(v.first, v.second);
+
+        // infer type of variant value
+        auto vtype = resolveType(inferExpression(v.second));
+        if (!vtype->equals(en->base_type)) {
+          throw TypeCheckError(v.second,
+                "Enum variant " + v.first + " has type " + typeName(vtype) +
+                    ", expected " + typeName(en->base_type));
+        }
       }
+
 
       m_enums[en->name] = et;
       en->inferred_type = et;

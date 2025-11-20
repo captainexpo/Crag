@@ -615,7 +615,7 @@ struct Literal : Expression {
           }
         },
         value);
-    return "Literal(" + val_str + " : " + lit_type->str() + ")";
+    return "Literal(" + val_str + " : " + (lit_type != nullptr ? lit_type->str() : "nullptr") + ")";
   }
   NodeKind kind() const override { return NodeKind::Literal; }
   void accept(ASTVisitor &v) override { v.visit(*this); }

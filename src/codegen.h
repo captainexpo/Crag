@@ -26,6 +26,8 @@ class Scope {
 public:
   Scope(std::shared_ptr<Scope> parent = nullptr) : m_parent(parent) {}
 
+  bool is_global() const { return m_parent == nullptr; }
+
   struct Symbol {
     llvm::Value *value;
     llvm::Type *type;               // original type, needed for opaque pointers
@@ -34,12 +36,12 @@ public:
 
   void set(const std::string &name, llvm::Value *value, llvm::Type *type,
            std::shared_ptr<Type> ast_type) {
-    m_table[name] = {value, type, ast_type};
+    table[name] = {value, type, ast_type};
   }
 
   Symbol *get(const std::string &name) {
-    auto it = m_table.find(name);
-    if (it != m_table.end())
+    auto it = table.find(name);
+    if (it != table.end())
       return &it->second;
     if (m_parent)
       return m_parent->get(name);
@@ -47,7 +49,7 @@ public:
   }
 
   void dump() {
-    for (const auto &pair : m_table) {
+    for (const auto &pair : table) {
       llvm::outs() << "Symbol: " << pair.first << "\n";
     }
     if (m_parent) {
@@ -55,9 +57,9 @@ public:
       m_parent->dump();
     }
   }
+  std::map<std::string, Symbol> table;
 
 private:
-  std::map<std::string, Symbol> m_table;
   std::shared_ptr<Scope> m_parent;
 };
 
@@ -85,13 +87,35 @@ public:
   bool ok() const { return m_errors.empty(); }
   std::unique_ptr<llvm::Module> takeModule() { return std::move(m_llvm_module); }
 
-  void prepareForNewModule() {
-    // Set insert point outside of any function
+void prepareForNewModule() {
     m_builder.ClearInsertionPoint();
-    auto global_scope = m_scopeStack.front();
-    m_scopeStack.clear();
-    m_scopeStack.push_back(global_scope);
-  }
+    
+    // Preserve current module's symbols in global scope before clearing
+    if (m_scopeStack.size() > 1) {
+        // Get the global scope (first element)
+        Scope& globalScope = m_scopeStack[0];
+        
+        // Add all symbols from current local scopes to global scope
+        // We need to iterate through all non-global scopes
+        for (size_t i = 1; i < m_scopeStack.size(); i++) {
+            const Scope& currentScope = m_scopeStack[i];
+            // Copy symbols from current scope to global scope
+            for (const auto& pair : currentScope.table) {
+                globalScope.set(pair.first, pair.second.value, pair.second.type, pair.second.ast_type);
+            }
+        }
+    }
+    
+    // Clear all local scopes, keeping only global
+    while (m_scopeStack.size() > 1) {
+        m_scopeStack.pop_back();
+    }
+    
+    std::cout << "Preparing for new module, scope stack size: " << m_scopeStack.size() << "\n";
+    if (!m_scopeStack.empty()) {
+        m_scopeStack.front().dump();
+    }
+}
 
 private:
   std::vector<std::pair<ASTNodePtr, std::string>> m_errors;

@@ -421,7 +421,7 @@ IRGenerator::generateStatement(const std::shared_ptr<Statement> &stmt) {
 
 llvm::Function *IRGenerator::generateFunction(
     const std::shared_ptr<FunctionDeclaration> &func) {
-
+  std::cout << "Generating function: " << func->name << std::endl;
   llvm::FunctionType *fType =
       llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type));
 
@@ -478,8 +478,7 @@ llvm::Function *IRGenerator::generateFunction(
     }
   }
   m_error_union_return_type = nullptr;
-  // Validate the generated code, checking for consistency.
-  llvm::verifyFunction(*function);
+
   return function;
 }
 void IRGenerator::generateVariableDeclaration(
@@ -777,6 +776,8 @@ llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
       }
     } else if (std::holds_alternative<std::string>(lit->value)) {
       // String literal → create global string
+      std::cout << "Creating global string for literal: "
+                << std::get<std::string>(lit->value) << std::endl;
       auto strVal = std::get<std::string>(lit->value);
       auto strName = "g" + std::to_string(globalVals++);
       auto strType = llvm::ArrayType::get(llvm::Type::getInt8Ty(context),
@@ -798,6 +799,9 @@ llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
     return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(
         getLLVMType(std::make_shared<PointerType>(std::make_shared<Void>()))));
   } else {
+    if (!lit->inferred_type) {
+      throw CodeGenError(lit, "Literal " + lit->str() + " has no inferred type");
+    }
     throw CodeGenError(lit, "Unsupported literal type: " + lit->inferred_type->str());
   }
   return nullptr;
@@ -929,9 +933,9 @@ IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
       }
       llvm::Type *ty = arg->getType();
       if (ty->isIntegerTy(1) || ty->isIntegerTy(8) || ty->isIntegerTy(16)) {
-        argsV[i] = m_builder.CreateZExt(arg, llvm::Type::getInt32Ty(context));
+        argsV[i] = m_builder.CreateZExt(arg, llvm::Type::getInt32Ty(context), "vararg_promotetmp");
       } else if (ty->isFloatTy()) {
-        argsV[i] = m_builder.CreateFPExt(arg, llvm::Type::getDoubleTy(context));
+        argsV[i] = m_builder.CreateFPExt(arg, llvm::Type::getDoubleTy(context), "vararg_promotetmp");
       }
     }
   }
@@ -1117,9 +1121,11 @@ llvm::Value *IRGenerator::generateModuleAccess(const std::shared_ptr<ModuleAcces
 
   auto var_name = moduleAccess->member_name;
   auto full_name = mod->canonicalizeName(var_name);
+  std::cout << "Accessing module variable: " << full_name << std::endl;
 
   auto *sym = CUR_SCOPE.get(full_name);
   if (!sym) {
+    CUR_SCOPE.dump();
     throw CodeGenError(moduleAccess, "Unknown variable name: " + full_name);
   }
   llvm::Value *v = sym->value;
@@ -1163,7 +1169,10 @@ IRGenerator::generateBlock(const std::shared_ptr<Block> &blockNode) {
   m_scopeStack.push_back(*parent_scope);
   llvm::Value *lastValue = nullptr;
   for (const auto &stmt : blockNode->statements) {
-    lastValue = generateStatement(stmt);
+    try{ lastValue = generateStatement(stmt); }
+    catch (const CodeGenError &e) {
+      m_errors.push_back(std::make_pair(e.node(), e.what()));
+    }
   }
   return lastValue;
 }
