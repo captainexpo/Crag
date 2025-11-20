@@ -52,16 +52,29 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  std::string irFilePath = outputFilepath+".tmp.ll";
+  std::error_code ec;
+  llvm::raw_fd_ostream os(llvm::StringRef(irFilePath), ec);
+  if (ec) {
+    std::cerr << "Could not open output file: " << ec.message() << "\n";
+    return 1;
+  }
+  mod->print(os, nullptr);
+
   if (EmitIR) {
-    std::error_code ec;
-    llvm::raw_fd_ostream os(llvm::StringRef(outputFilepath), ec);
-    if (ec) {
-      std::cerr << "Could not open output file: " << ec.message() << "\n";
-      return 1;
-    }
-    mod->print(os, nullptr);
+    std::cout << "Emitted LLVM IR to " << outputFilepath << "\n";
     return 0;
   }
+
+  // Run clang to compile output_filepath to executable
+  std::string exe_name = dirname(outputFilepath) + "/" + stripped_file_name(outputFilepath);
+  std::string clang_cmd = "clang " + irFilePath + " -o " + exe_name;
+  int ret = system(clang_cmd.c_str());
+  if (ret != 0) {
+    std::cerr << "Failed to invoke clang to create executable.\n";
+    return 1;
+  }
+  std::cout << "Emitted executable to " << exe_name << "\n";
 
   return 0;
 }

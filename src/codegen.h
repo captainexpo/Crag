@@ -89,12 +89,12 @@ public:
 
 void prepareForNewModule() {
     m_builder.ClearInsertionPoint();
-    
+
     // Preserve current module's symbols in global scope before clearing
     if (m_scopeStack.size() > 1) {
         // Get the global scope (first element)
         Scope& globalScope = m_scopeStack[0];
-        
+
         // Add all symbols from current local scopes to global scope
         // We need to iterate through all non-global scopes
         for (size_t i = 1; i < m_scopeStack.size(); i++) {
@@ -105,15 +105,10 @@ void prepareForNewModule() {
             }
         }
     }
-    
+
     // Clear all local scopes, keeping only global
     while (m_scopeStack.size() > 1) {
         m_scopeStack.pop_back();
-    }
-    
-    std::cout << "Preparing for new module, scope stack size: " << m_scopeStack.size() << "\n";
-    if (!m_scopeStack.empty()) {
-        m_scopeStack.front().dump();
     }
 }
 

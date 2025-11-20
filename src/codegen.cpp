@@ -421,7 +421,6 @@ IRGenerator::generateStatement(const std::shared_ptr<Statement> &stmt) {
 
 llvm::Function *IRGenerator::generateFunction(
     const std::shared_ptr<FunctionDeclaration> &func) {
-  std::cout << "Generating function: " << func->name << std::endl;
   llvm::FunctionType *fType =
       llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type));
 
@@ -776,8 +775,6 @@ llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
       }
     } else if (std::holds_alternative<std::string>(lit->value)) {
       // String literal → create global string
-      std::cout << "Creating global string for literal: "
-                << std::get<std::string>(lit->value) << std::endl;
       auto strVal = std::get<std::string>(lit->value);
       auto strName = "g" + std::to_string(globalVals++);
       auto strType = llvm::ArrayType::get(llvm::Type::getInt8Ty(context),
@@ -1121,7 +1118,6 @@ llvm::Value *IRGenerator::generateModuleAccess(const std::shared_ptr<ModuleAcces
 
   auto var_name = moduleAccess->member_name;
   auto full_name = mod->canonicalizeName(var_name);
-  std::cout << "Accessing module variable: " << full_name << std::endl;
 
   auto *sym = CUR_SCOPE.get(full_name);
   if (!sym) {

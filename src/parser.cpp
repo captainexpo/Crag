@@ -481,7 +481,6 @@ std::shared_ptr<Expression> Parser::parse_nud() {
         std::make_shared<U8>(), true);
     auto lit = std::make_shared<Literal>(
         t.value, ty);
-    std::cout << lit->lit_type->str() << std::endl;
     expr = lit;
     expr->line = t.line;
     expr->col = t.column;

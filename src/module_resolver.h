@@ -59,16 +59,12 @@ public:
 
     auto module_canonical_name = canonicalModuleName(m_base_path, import_path);
 
-    std::cout << "Resolving module: " << import_path << " -> " << filename << "\n";
     if (auto it = m_module_cache.find(abs_path); it != m_module_cache.end()) {
       return it->second;
     }
 
     // Read file
     std::string source = readFile(abs_path);
-
-    std::cout << "Loading module from: " << abs_path << "\n";
-    std::cout << source << "\n";
 
     // Parse it
     Lexer lexer(source);

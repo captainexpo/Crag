@@ -3,6 +3,7 @@
 #include "module_resolver.h"
 #include "utils.h"
 #include "typecheck.h"
+#include "llvm/TargetParser/Host.h"
 #include <filesystem>
 #include <llvm/Support/TargetSelect.h>
 #include <memory>
@@ -35,9 +36,6 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
     return nullptr;
   }
 
-  // Print ast for debugging
-  std::cout << mod->ast->toString();
-
   auto codegen = IRGenerator("mainmod", context, moduleResolver);
   for (auto &[path, module] : moduleResolver.moduleCache()) {
     std::cout << "Generating code for module: " << path << "\n";
@@ -58,5 +56,9 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
     return nullptr;
   }
   std::cout << "Compilation succeeded.\n";
-  return codegen.takeModule();
+
+  auto llvmmod = codegen.takeModule();
+  llvmmod->setTargetTriple(llvm::sys::getDefaultTargetTriple());
+
+  return llvmmod;
 }

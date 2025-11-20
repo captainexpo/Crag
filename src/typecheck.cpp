@@ -100,8 +100,6 @@ bool canExplicitCast(const std::shared_ptr<Type> &from,
   if (from_tk == TypeKind::USize && to_tk == TypeKind::Pointer)
     return true;
 
-  std::cout << "DEBUG: cannot explicit cast from " << (int)from_tk
-            << " to " << (int)to_tk << "\n";
   return false;
 }
 std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
@@ -201,8 +199,6 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
   current_module = module;
   if (!module || !module->ast)
     return;
-
-  std::cout << module->ast->toString() << "\n";
 
   std::vector<std::shared_ptr<StructDeclaration>> struct_decls;
   for (const auto &decl : module->ast->declarations) {
@@ -358,8 +354,6 @@ void TypeChecker::checkVariableDeclaration(
         goto end;
       }
       if (const_val && const_val->get()->initializer) {
-        std::cout << "DEBUG: Const evaluated global " << name << " = "
-                  << const_val->get()->initializer->toString() << "\n";
         var->initializer = const_val->get()->initializer;
         expr = std::dynamic_pointer_cast<Expression>(var->initializer);
       } else {
@@ -655,8 +649,6 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
   if (bin->op == "+" || bin->op == "-" || bin->op == "*" || bin->op == "/") {
 
     if (!lt->isGeneralNumeric() || !rt->isGeneralNumeric()) { // Allow pointers here
-      std::cout << "DEBUG: lt = " << typeName(lt)
-                << ", rt = " << typeName(rt) << "\n";
       throw TypeCheckError(bin, "Arithmetic operators require numeric operands: got " +
                      typeName(lt) + " " + bin->op + " " + typeName(rt));
       return nullptr;
