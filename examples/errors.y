@@ -1,5 +1,5 @@
-extern fn printf(fmt: *const u8, ...) -> i32;
-extern fn atoi(s: *const u8) -> i32;
+extern fn printf(fmt: *u8, ...) -> i32;
+extern fn atoi(s: *u8) -> i32;
 
 enum MyError(i32) {
   DivisionByZero = 0,

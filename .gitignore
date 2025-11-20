@@ -31,5 +31,5 @@
 *.vscode/
 
 .cache/
-
+.pytest_cache/
 

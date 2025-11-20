@@ -1,4 +1,4 @@
-fn printf(_s: *u8, ...) -> i32;
+extern fn printf(_s: *const u8, ...) -> i32;
 
 fn for_loops() -> void {
   let i: i32 = 0;
@@ -48,7 +48,7 @@ fn null_pointer() -> void {
   let p: *i32 = null;
   if (p == null) {
     printf("p is null\n");
-    printf("p + 1 = %p\n", p + 1);
+    printf("p + 1 = %p\n", p as i32 + 1);
   }
 }
 
@@ -73,5 +73,5 @@ fn main(argc: i32, argv: **u8) -> i32 {
   null_pointer();
   constants();
   constant_pointer();
-  return 0; 
+  return 0;
 }

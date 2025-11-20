@@ -478,7 +478,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
   }
   case TokenType::STRING: {
     auto ty = std::make_shared<PointerType>(
-        std::make_shared<U8>(), true);
+        std::make_shared<U8>(), false);
     auto lit = std::make_shared<Literal>(
         t.value, ty);
     expr = lit;

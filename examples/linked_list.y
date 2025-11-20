@@ -1,4 +1,4 @@
-extern fn printf(_s: *u8, ...) -> i32;
+extern fn printf(_s: *const u8, ...) -> i32;
 extern fn free(_p: *u8) -> void;
 extern fn malloc(_size: usize) -> *u8;
 extern fn scanf(_s: *u8, ...) -> i32;
@@ -26,6 +26,7 @@ fn new_node(val: i32) -> *Node {
   n.* = Node { val: val, next: null };
   return n;
 }
+
 
 fn llappend(head: *Node, val: i32) -> *Node {
   let n: *Node = new_node(val);

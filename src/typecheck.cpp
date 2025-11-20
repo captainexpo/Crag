@@ -57,8 +57,11 @@ bool TypeChecker::canImplicitCast(const std::shared_ptr<Type> &from,
       return false;
 
     if (from_ptr->base->equals(to_ptr->base)) {
-      if (from_ptr->pointer_const && !to_ptr->pointer_const)
+      if (from_ptr->pointer_const && !to_ptr->pointer_const) {
+        std::cout << "Cannot cast away constness in pointer cast from "
+                  << from->str() << " to " << to->str() << "\n";
         return false;
+      }
       return true;
     }
 
@@ -447,46 +450,58 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
       if (ret->value) {
         throw TypeCheckError(ret->value, "Return with value in void function");
       }
-    } else {
+        } else {
       if (!ret->value) {
         if (!dynamic_cast<Void *>(m_expected_return_type.get())) {
           throw TypeCheckError(ret, "Return type mismatch: expected " +
-                         typeName(m_expected_return_type) +
-                         " but got void return");
+             typeName(m_expected_return_type) +
+             " but got void return");
         }
       } else {
 
         auto t = resolveType(ret_inferred);
         if (ret->is_error) { // Returning an error from the function (oh no!)
           if (!dynamic_cast<ErrorUnionType *>(m_expected_return_type.get())) {
-            throw TypeCheckError(ret, "Return type mismatch: expected " +
-                           typeName(m_expected_return_type) +
-                           " but got error return");
+        throw TypeCheckError(ret, "Return type mismatch: expected " +
+               typeName(m_expected_return_type) +
+               " but got error return");
           }
           auto exp_error = dynamic_cast<ErrorUnionType *>(
-              m_expected_return_type.get());
+          m_expected_return_type.get());
           if (!t->equals(exp_error->errorType)) {
-            throw TypeCheckError(ret, "Return type mismatch: expected " +
-                           typeName(exp_error->errorType) + " but got " +
-                           typeName(t));
+        if (canImplicitCast(t, exp_error->errorType)) {
+          ret->value = std::make_shared<TypeCast>(ret->value, exp_error->errorType, CastType::Normal);
+        } else {
+          throw TypeCheckError(ret, "Return type mismatch: expected " +
+                 typeName(exp_error->errorType) + " but got " +
+                 typeName(t));
+        }
           }
           return;
         }
         if (auto expected_error = std::dynamic_pointer_cast<ErrorUnionType>(m_expected_return_type)) {
           if (!t->equals(expected_error->valueType)) {
-            throw TypeCheckError(ret, "Return type mismatch: expected " +
-                           typeName(expected_error->valueType) + " but got " +
-                           typeName(t));
+        if (canImplicitCast(t, expected_error->valueType)) {
+          ret->value = std::make_shared<TypeCast>(ret->value, expected_error->valueType, CastType::Normal);
+        } else {
+          throw TypeCheckError(ret, "Return type mismatch: expected " +
+                 typeName(expected_error->valueType) + " but got " +
+                 typeName(t));
+        }
           }
           return;
         }
         if (!t || !t->equals(m_expected_return_type)) {
-          throw TypeCheckError(ret, "Return type mismatch: expected " +
-                         typeName(m_expected_return_type) + " but got " +
-                         typeName(t));
+          if (t && canImplicitCast(t, m_expected_return_type)) {
+        ret->value = std::make_shared<TypeCast>(ret->value, m_expected_return_type, CastType::Normal);
+          } else {
+        throw TypeCheckError(ret, "Return type mismatch: expected " +
+               typeName(m_expected_return_type) + " but got " +
+               typeName(t));
+          }
         }
       }
-    }
+        }
     return;
   }
   if (auto exprs = std::dynamic_pointer_cast<ExpressionStatement>(stmt)) {

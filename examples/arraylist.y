@@ -1,8 +1,8 @@
-fn printf(fmt: *const u8, ...) -> i32;
-fn malloc(size: usize) -> *void;
-fn free(ptr: *u8) -> void;
-fn memcpy(dest: *u8, src: *const u8, n: usize) -> *u8;
-fn exit(code: i32) -> void;
+extern fn printf(fmt: *const u8, ...) -> i32;
+extern fn malloc(size: usize) -> *void;
+extern fn free(ptr: *u8) -> void;
+extern fn memcpy(dest: *u8, src: *const u8, n: usize) -> *u8;
+extern fn exit(code: i32) -> void;
 
 enum ArrayListError(i32) {
   IndexOutOfBounds = 0,
@@ -14,7 +14,7 @@ struct ArrayList {
   cap: usize,
 
   fn init(self: *ArrayList, cap: usize) -> void {
-    self.ptr = malloc(cap * 4) re *i32; 
+    self.ptr = malloc(cap * 4) re *i32;
     self.len = 0 ;
     self.cap = cap;
   }
@@ -58,7 +58,7 @@ struct ArrayList {
 fn unwrap_or_exit(val: i32!ArrayListError, msg: *const u8, idx: i32) -> i32 {
   if (val.is_err) {
     printf("%s (index=%d): %d\n", msg, idx, val.err);
-    exit(1); 
+    exit(1);
   }
   return val.ok;
 }
@@ -73,7 +73,7 @@ fn main(argc: i32, argv: **u8) -> i32 {
 
   for (let j: usize = 0; j < list.len; j = j + 1) {
     let val: i32!ArrayListError = list.get(j);
-    printf("list[%d] = %d\n", j , unwrap_or_exit(val, "Error getting value", j )); 
+    printf("list[%d] = %d\n", j , unwrap_or_exit(val, "Error getting value", j ));
   }
 
   let result: i32!ArrayListError = list.set(5 , 1234);
@@ -82,7 +82,7 @@ fn main(argc: i32, argv: **u8) -> i32 {
     list.deinit();
     return 1;
   }
-  printf("After set: list[5] = %d\n", unwrap_or_exit(list.get(5), "Error getting value after set", 5)); 
+  printf("After set: list[5] = %d\n", unwrap_or_exit(list.get(5), "Error getting value after set", 5));
 
   list.deinit();
   return 0;
