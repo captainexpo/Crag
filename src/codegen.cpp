@@ -427,6 +427,13 @@ llvm::Function *IRGenerator::generateFunction(
 
   std::string fname = canonicalizeNonexternName(func->name);
 
+  if (m_llvm_module->getFunction(fname)) {
+    if (func->is_extern) {
+      return m_llvm_module->getFunction(fname);
+    }
+    throw CodeGenError(func, "Duplicate defition of function: " + func->name);
+  }
+
   llvm::Function *function = llvm::Function::Create(
       fType, llvm::Function::ExternalLinkage, fname, m_llvm_module.get());
   CUR_SCOPE.set(fname, function, fType, func->type);
