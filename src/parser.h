@@ -10,6 +10,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 class ParseError : public std::exception {
@@ -19,6 +20,8 @@ public:
   int col;
 
   ParseError(std::string m, int l, int c) : message(m), line(l), col(c) {}
+  ParseError(std::string m, const Token &t)
+      : message(m), line(t.line), col(t.column) {}
   const char *what() const noexcept override { return message.c_str(); }
 };
 
@@ -40,6 +43,8 @@ private:
 
   std::map<std::string, std::shared_ptr<StructType>> declared_structs;
   std::map<std::string, std::shared_ptr<EnumDeclaration>> declared_enums;
+
+  std::unordered_set<std::string> imported_modules;
 
   // Helper methods
   Token peek() const;
@@ -64,6 +69,9 @@ private:
   std::shared_ptr<StructDeclaration> parse_struct_declaration();
   std::shared_ptr<EnumDeclaration> parse_enum_declaration();
   std::shared_ptr<VariableDeclaration> parse_variable_declaration();
+  std::shared_ptr<ImportDeclaration> parse_import_declaration();
+
+  std::shared_ptr<ASTNode> parse_extern_declaration();
 
   std::shared_ptr<Statement> parse_statement(bool req_semi = true);
   std::shared_ptr<Block> parse_block();

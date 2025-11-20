@@ -29,6 +29,7 @@
 *.vcxproj*
 *.idea/
 *.vscode/
-```
+
+.cache/
 
 

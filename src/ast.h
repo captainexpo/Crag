@@ -46,6 +46,7 @@ struct ASTVisitor {
   virtual void visit(struct StructDeclaration &) {}
   virtual void visit(struct EnumDeclaration &) {}
   virtual void visit(struct VariableDeclaration &) {}
+  virtual void visit(struct ImportDeclaration &) {}
   virtual void visit(struct VarAccess &) {}
   virtual void visit(struct Assignment &) {}
   virtual void visit(struct IfStatement &) {}
@@ -56,6 +57,7 @@ struct ASTVisitor {
   virtual void visit(struct TypeCast &) {}
   virtual void visit(struct FieldAccess &) {}
   virtual void visit(struct OffsetAccess &) {}
+  virtual void visit(struct ModuleAccess &) {}
   virtual void visit(struct MethodCall &) {}
   virtual void visit(struct Dereference &) {}
   virtual void visit(struct UnaryOperation &) {}
@@ -84,6 +86,8 @@ struct Type {
   virtual bool isFloating() const { return false; }
 
   virtual int numericRank() const { return -1; }
+
+  virtual bool isGeneralNumeric() const { return isNumeric() || kind() == TypeKind::Pointer; }
 };
 
 struct Void : Type {
@@ -379,6 +383,7 @@ enum class NodeKind {
   TypeCast,
   FieldAccess,
   OffsetAccess,
+  ModuleAccess,
   MethodCall,
   Dereference,
   UnaryOp,
@@ -458,6 +463,7 @@ struct TypeCast : Expression {
 
 struct VarAccess : Expression {
   std::string name;
+  bool is_extern = false;
   VarAccess(std::string n) : name(std::move(n)) {}
   std::string str() const override { return "VarAccess(" + name + ")"; }
   NodeKind kind() const override { return NodeKind::VarAccess; }
@@ -544,6 +550,18 @@ struct OffsetAccess : Expression {
     return "OffsetAccess(" + base->toString() + "[" + index->toString() + "])";
   }
   NodeKind kind() const override { return NodeKind::OffsetAccess; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
+};
+
+struct ModuleAccess : Expression {
+  std::string module_name;
+  std::string member_name;
+  ModuleAccess(std::string m, std::string n)
+      : module_name(std::move(m)), member_name(std::move(n)) {}
+  std::string str() const override {
+    return "ModuleAccess(" + module_name + "::" + member_name + ")";
+  }
+  NodeKind kind() const override { return NodeKind::ModuleAccess; }
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
@@ -730,6 +748,7 @@ struct Assignment : Statement {
 };
 
 struct FunctionDeclaration : ASTNode {
+  bool is_extern;
   std::string name;
   std::shared_ptr<FunctionType> type;
   std::vector<std::string> param_names;
@@ -737,11 +756,11 @@ struct FunctionDeclaration : ASTNode {
 
   FunctionDeclaration(std::string n, std::shared_ptr<FunctionType> t,
                       std::vector<std::string> params,
-                      std::shared_ptr<Statement> b)
+                      std::shared_ptr<Statement> b, bool ext = false)
       : name(std::move(n)), type(std::move(t)), param_names(std::move(params)),
-        body(std::move(b)) {}
+        body(std::move(b)), is_extern(ext) {}
   std::string str() const override {
-    return "FunctionDeclaration(" + type->str() + ", " + name + "){" +
+    return std::string(is_extern ? "Extern" : "") + "FunctionDeclaration(" + type->str() + ", " + name + "){" +
            (body ? body->toString() : " ;") + "}";
   }
   NodeKind kind() const override { return NodeKind::FunctionDecl; }
@@ -757,10 +776,22 @@ struct VariableDeclaration : Statement {
   VariableDeclaration(std::string n, std::shared_ptr<Type> t, ASTNodePtr i)
       : name(std::move(n)), var_type(std::move(t)), initializer(std::move(i)) {}
   std::string str() const override {
-    return "VariableDeclaration(" + name + " : " + var_type->str() + " = " +
+    return "VariableDeclaration(" + name + " : " + (var_type != nullptr ? var_type->str() : "unknown") + " = " +
            (initializer ? initializer->toString() : "null") + (is_const ? ", const" : "") + ")";
   }
   NodeKind kind() const override { return NodeKind::VarDecl; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
+};
+
+struct ImportDeclaration : ASTNode {
+  std::string path;
+  std::string alias;
+
+  ImportDeclaration(std::string p, std::string a) : path(std::move(p)), alias(std::move(a)) {}
+  std::string str() const override {
+    return "ImportDeclaration(\"" + path + "\", \"" + alias + "\")";
+  }
+  NodeKind kind() const override { return NodeKind::Unknown; }
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
@@ -808,6 +839,7 @@ struct EnumDeclaration : ASTNode {
 };
 
 struct StructDeclaration : ASTNode {
+  bool is_extern = false;
   std::string name;
   std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
   std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;

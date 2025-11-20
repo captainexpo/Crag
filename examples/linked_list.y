@@ -1,11 +1,24 @@
-fn printf(_s: *u8, ...) -> i32;
-fn free(_p: *u8) -> void;
-fn malloc(_size: usize) -> *u8;
-fn scanf(_s: *u8, ...) -> i32;
+extern fn printf(_s: *u8, ...) -> i32;
+extern fn free(_p: *u8) -> void;
+extern fn malloc(_size: usize) -> *u8;
+extern fn scanf(_s: *u8, ...) -> i32;
 
 struct Node {
   val: i32,
   next: *Node,
+
+  fn print(self: *Node) -> void {
+    if (self.next == null) {
+      printf("%d\n", self.val);
+      return;
+    }
+    printf("%d -> ", self.val);
+    self.next.print();
+  }
+
+  fn append(self: *Node, val: i32) -> void {
+    let n = new_node(val);
+  }
 }
 
 fn new_node(val: i32) -> *Node {
@@ -15,7 +28,7 @@ fn new_node(val: i32) -> *Node {
 }
 
 fn llappend(head: *Node, val: i32) -> *Node {
-  let n: *Node = new_node(val); 
+  let n: *Node = new_node(val);
   if (head == null) {
     return n;
   }
@@ -48,13 +61,13 @@ fn llfree(head: *Node) -> i32 {
 }
 
 fn main(argc: i32, argv: **u8) -> i32 {
+
   let x: *Node = new_node(42);
   x.next = new_node(43);
-  let y: *Node = x.next;
-  llappend(x, 44);
-  llappend(x, 45);
-  llappend(x, 46);
-  llprint(x);
+  x.append(44);
+  x.append(45);
+  x.append(46);
+  x.print();
   llfree(x);
   return 0;
 }

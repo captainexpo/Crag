@@ -39,6 +39,12 @@ std::string tokenTypeName(TokenType type) {
     return "FALSE";
   case TokenType::NULL_T:
     return "NULL_T";
+  case TokenType::IMPORT:
+    return "IMPORT";
+  case TokenType::EXTERN:
+    return "EXTERN";
+  case TokenType::PUB:
+    return "PUB";
   case TokenType::QUESTION:
     return "QUESTION";
   case TokenType::EQ:
@@ -128,7 +134,26 @@ std::string tokenTypeName(TokenType type) {
   }
 }
 Lexer::Lexer(const std::string &src) : code(src) {
-  keywords = {{"fn", TokenType::FN}, {"return", TokenType::RETURN}, {"if", TokenType::IF}, {"else", TokenType::ELSE}, {"while", TokenType::WHILE}, {"for", TokenType::FOR}, {"let", TokenType::LET}, {"const", TokenType::CONST}, {"struct", TokenType::STRUCT}, {"enum", TokenType::ENUM}, {"true", TokenType::TRUE}, {"false", TokenType::FALSE}, {"null", TokenType::NULL_T}, {"as", TokenType::AS}, {"re", TokenType::RE}};
+  keywords = {
+      {"fn", TokenType::FN},
+      {"return", TokenType::RETURN},
+      {"if", TokenType::IF},
+      {"else", TokenType::ELSE},
+      {"while", TokenType::WHILE},
+      {"for", TokenType::FOR},
+      {"let", TokenType::LET},
+      {"const", TokenType::CONST},
+      {"struct", TokenType::STRUCT},
+      {"enum", TokenType::ENUM},
+      {"true", TokenType::TRUE},
+      {"false", TokenType::FALSE},
+      {"null", TokenType::NULL_T},
+      {"as", TokenType::AS},
+      {"re", TokenType::RE},
+      {"import", TokenType::IMPORT},
+      {"extern", TokenType::EXTERN},
+      {"pub", TokenType::PUB},
+  };
 }
 
 char Lexer::peek() const { return pos < code.size() ? code[pos] : '\0'; }

@@ -53,18 +53,30 @@ Token Parser::consume(TokenType expected_type) {
     position++;
     return t;
   }
-  error("Unexpected token: " + t.value, t, true);
+  throw ParseError("Expected " + tokenTypeName(expected_type) +
+                   ", got " + tokenTypeName(t.type),
+                   t.line, t.column);
   return Token{TokenType::EOF_T, "", -1, -1};
 }
 
 void Parser::synchronize() {
+  advance();
   while (peek().type != TokenType::EOF_T) {
-    if (advance().type == TokenType::SEMICOLON)
+    if (peek().type == TokenType::SEMICOLON)
       return;
-    TokenType t = peek().type;
-    if (t == TokenType::FN || t == TokenType::LET || t == TokenType::CONST ||
-        t == TokenType::STRUCT)
+    switch (peek().type) {
+    case TokenType::FN:
+    case TokenType::LET:
+    case TokenType::CONST:
+    case TokenType::STRUCT:
+    case TokenType::ENUM:
+    case TokenType::IMPORT:
+    case TokenType::EXTERN:
       return;
+    default:
+      break;
+    }
+    advance();
   }
 }
 
@@ -96,12 +108,11 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
     t = parse_function_ptr_type();
     break;
   default:
-    error("Unexpected token in type", current);
-    return nullptr;
+    throw ParseError("Unexpected token in type", current.line, current.column);
   }
   if (top_level && peek().type == TokenType::QUESTION) {
     consume(TokenType::QUESTION);
-    error("Nullable types not supported yet", current);
+    throw ParseError("Nullable types not supported yet", current.line, current.column);
     t->nullable = true;
   }
   if (peek().type == TokenType::BANG) {
@@ -134,8 +145,8 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
     return std::make_shared<Boolean>();
   if (val == "void")
     return std::make_shared<Void>();
-  error("Unknown primitive type " + val, peek());
-  return nullptr;
+  throw ParseError("Unknown primitive type " + val, peek().line,
+                   peek().column);
 }
 
 std::shared_ptr<Type> Parser::parse_pointer_type() {
@@ -195,10 +206,44 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
     return parse_struct_declaration();
   case TokenType::ENUM:
     return parse_enum_declaration();
+  case TokenType::IMPORT:
+    return parse_import_declaration();
+  case TokenType::EXTERN:
+    return parse_extern_declaration();
   default:
-    error("Unexpected token in declaration", t, true);
-    return nullptr;
+    throw ParseError("Unexpected token in declaration", t.line,
+                     t.column);
   }
+}
+
+std::shared_ptr<ASTNode> Parser::parse_extern_declaration() {
+  consume(TokenType::EXTERN);
+  switch (peek().type) {
+  case TokenType::LET:
+  case TokenType::CONST:
+  case TokenType::STRUCT:
+    break;
+  case TokenType::FN: {
+    auto fn = parse_function_declaration();
+    fn->is_extern = true;
+    return fn;
+  }
+  default:
+    break;
+  }
+  throw ParseError("Only function extern declarations are supported", peek().line,
+                   peek().column);
+}
+
+std::shared_ptr<ImportDeclaration> Parser::parse_import_declaration() {
+  consume(TokenType::IMPORT);
+  std::string path = consume(TokenType::STRING).value;
+  consume(TokenType::AS);
+  std::string alias = consume(TokenType::ID).value;
+
+  imported_modules.insert(alias);
+
+  return std::make_shared<ImportDeclaration>(path, alias);
 }
 
 std::shared_ptr<VariableDeclaration> Parser::parse_variable_declaration() {
@@ -237,7 +282,7 @@ std::shared_ptr<EnumDeclaration> Parser::parse_enum_declaration() {
   std::shared_ptr<Literal> last_literal = nullptr;
   while (peek().type != TokenType::RBRACE) {
     if (peek().type == TokenType::EOF_T) {
-      error("Unterminated enum declaration, expected '}'", peek());
+      throw ParseError("Unterminated enum declaration, expected '}'", peek().line, peek().column);
       break;
     }
     std::string vname = consume(TokenType::ID).value;
@@ -247,12 +292,12 @@ std::shared_ptr<EnumDeclaration> Parser::parse_enum_declaration() {
         lit->lit_type = enum_type;
         variant_map.insert({vname, lit});
       } else {
-        error("Enum variant value must be a literal", peek());
+        throw ParseError("Enum variant value must be a literal", peek().line, peek().column);
       }
     } else {
       // Auto-assign value
       if (!last_literal) {
-        error("First enum variant must have an explicit value", peek());
+        throw ParseError("First enum variant must have an explicit value", peek());
         continue;
       }
       if (auto ilit = std::dynamic_pointer_cast<Literal>(last_literal)) {
@@ -261,10 +306,10 @@ std::shared_ptr<EnumDeclaration> Parser::parse_enum_declaration() {
           variant_map.insert({vname, new_lit});
           last_literal = new_lit;
         } else {
-          error("Enum auto-assigned values must be integers", peek());
+          throw ParseError("Enum auto-assigned values must be integers", peek());
         }
       } else {
-        error("Enum auto-assigned values must be integers", peek());
+        throw ParseError("Enum auto-assigned values must be integers", peek());
       }
     }
     last_literal = variant_map[vname];
@@ -290,7 +335,7 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
   std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
   while (peek().type != TokenType::RBRACE) {
     if (peek().type == TokenType::EOF_T) {
-      error("Unterminated struct declaration, expected '}'", peek());
+      throw ParseError("Unterminated struct declaration, expected '}'", peek());
       break;
     }
     if (peek().type == TokenType::FN) {
@@ -366,14 +411,14 @@ std::shared_ptr<Block> Parser::parse_block() {
     while (peek().type != TokenType::RBRACE) {
       block->statements.push_back(parse_statement());
       if (peek().type == TokenType::EOF_T) {
-        error("Unterminated block, expected '}'", peek());
+        throw ParseError("Unterminated block, expected '}'", peek());
         break;
       }
     }
     consume(TokenType::RBRACE);
   } catch (const ParseError &e) {
+    m_errors.push_back(e);
     synchronize();
-    throw e;
   }
   return block;
 }
@@ -441,7 +486,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
   }
   case TokenType::CHAR: {
     if (t.value.length() != 1)
-      error("Invalid char literal", t);
+      throw ParseError("Invalid char literal", t);
     expr = std::make_shared<Literal>(static_cast<int>(t.value[0]),
                                      std::make_shared<U8>());
     expr->line = t.line;
@@ -482,8 +527,8 @@ std::shared_ptr<Expression> Parser::parse_nud() {
       expr->col = t.column;
       return expr;
     }
-    error("Unexpected token in nud", t);
-    return nullptr;
+    throw ParseError("Unexpected token in nud", t);
+    throw ParseError("Unexpected token in nud", t.line, t.column);
   }
 }
 
@@ -512,6 +557,19 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
         return expr;
       }
       std::string field_name = consume(TokenType::ID).value;
+      if (auto va = std::dynamic_pointer_cast<VarAccess>(left)) {
+        if (imported_modules.count(va->name)) {
+          // Module access
+          expr = std::make_shared<ModuleAccess>(va->name, field_name);
+          expr->line = t.line;
+          expr->col = t.column;
+
+          if (peek().type == TokenType::LBRACE) {
+            // Struct initialization from imported module
+          }
+          return expr;
+        }
+      }
       expr = std::make_shared<FieldAccess>(left, field_name);
       expr->line = t.line;
       expr->col = t.column;
@@ -522,8 +580,8 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
       std::string variant_name = consume(TokenType::ID).value;
       auto enum_base = std::dynamic_pointer_cast<VarAccess>(left);
       if (!enum_base) {
-        error("Left side of :: must be an enum name", t);
-        return nullptr;
+        throw ParseError("Left side of :: must be an enum name", t);
+        throw ParseError("Left side of :: must be an enum name", t.line, t.column);
       }
       expr = std::make_shared<EnumAccess>(enum_base->name, variant_name);
       expr->line = t.line;
@@ -568,11 +626,10 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
       return expr;
     }
     default:
-      error("Unexpected postfix operator", t);
+      throw ParseError("Unexpected postfix operator", t);
     }
   }
-  error("Unexpected token in led", t);
-  return nullptr;
+  throw ParseError("Unexpected token in led", t.line, t.column);
 }
 int Parser::get_precedence(const Token &token) const {
   switch (token.type) {
@@ -779,7 +836,12 @@ std::shared_ptr<Program> Parser::parse() {
   program->col = 1;
 
   while (peek().type != TokenType::EOF_T) {
-    program->append(parse_declaration());
+    try {
+      program->append(parse_declaration());
+    } catch (const ParseError &e) {
+      m_errors.push_back(e);
+      synchronize();
+    }
   }
   return program;
 }

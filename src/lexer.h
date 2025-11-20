@@ -24,6 +24,9 @@ enum class TokenType {
   TRUE,
   FALSE,
   NULL_T,
+  IMPORT,
+  EXTERN,
+  PUB,
 
   // Operators
   EQ,

@@ -1,8 +1,8 @@
-fn printf(format: *const u8, ...) -> i32;
-fn malloc(size: usize) -> *u8;
-fn memcpy(dest: *u8, src: *const u8, n: usize) -> *u8;
-fn strlen(s: *const u8) -> u32;
-fn free(ptr: *u8) -> void;
+extern fn printf(format: *const u8, ...) -> i32;
+extern fn malloc(size: usize) -> *u8;
+extern fn memcpy(dest: *u8, src: *const u8, n: usize) -> *u8;
+extern fn strlen(s: *const u8) -> u32;
+extern fn free(ptr: *u8) -> void;
 
 fn max(a: i32, b: i32) -> i32 {
   if (a > b) {
@@ -35,7 +35,7 @@ struct Str {
     let new_len: usize = self.len + s.len;
     let new_ptr: *u8 = malloc(new_len );
     memcpy(new_ptr, self.ptr, self.len );
-    memcpy(new_ptr + self.len as *u8, s.ptr, s.len as usize);
+    memcpy(new_ptr + (self.len as *u8), s.ptr, s.len as usize);
     self.ptr = new_ptr;
     self.len = new_len;
   }
@@ -49,7 +49,7 @@ struct Str {
     self.len = 0 as usize;
   }
   fn compare(self: *Str, s: *Str) -> i32 {
-    let min_len: usize = min(self.len as i32, s.len as i32) as usize;  
+    let min_len: usize = min(self.len as i32, s.len as i32) as usize;
     for (let i: usize = 0; i < min_len; i = i + 1) {
       if (self.ptr[i] != s.ptr[i]) {
         return (self.ptr[i] - s.ptr[i]) re i32;
@@ -62,6 +62,13 @@ struct Str {
       return 0 re u8;
     }
     return self.ptr[i];
+  }
+  fn print(self: *Str) -> void {
+    let i: usize = 0;
+    while (i < self.len) {
+      printf("%c", self.ptr[i]);
+      i = i + 1;
+    }
   }
 }
 
@@ -76,13 +83,12 @@ fn make_str(s: *u8) -> Str {
 
 fn main() -> i32 {
   let s: Str = make_str("Hello,");
-  let t: Str = make_str(" World!"); 
+  let t: Str = make_str(" World!\n");
   s.append(&t);
-  printf("%s\n", s.ptr());
+  s.print();
   printf("Length: %d\n", s.len());
   printf("Comparison with 'Hello, World!': %d\n", s.compare(&t));
   s.deinit();
   t.deinit();
-  printf("%s", true);
   return 0;
 }

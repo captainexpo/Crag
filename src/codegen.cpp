@@ -1,5 +1,6 @@
 #include "codegen.h"
 #include "ast.h"
+#include "module_resolver.h"
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/BasicBlock.h>
@@ -31,18 +32,11 @@ int globalVals = 0;
 
 #define IS_INSTANCE(obj, type) (std::dynamic_pointer_cast<type>(obj) != nullptr)
 #define CUR_SCOPE m_scopeStack.back()
-// Constructor: create module and initialize builder
-IRGenerator::IRGenerator(std::string module_name)
-    : m_context(),
-      m_module(std::make_unique<llvm::Module>(module_name, m_context)),
-      m_builder(m_context) {
-  // Initialize the global scope
-  m_scopeStack.push_back(Scope(nullptr));
-}
 
 // Public API stubs
-void IRGenerator::generate(const std::shared_ptr<Program> &node) {
-  for (const auto &decl : node->declarations) {
+void IRGenerator::generate(std::shared_ptr<Module> module) {
+  m_current_module = module;
+  for (const auto &decl : module->ast->declarations) {
     if (IS_INSTANCE(decl, FunctionDeclaration)) {
       generateFunction(std::dynamic_pointer_cast<FunctionDeclaration>(decl));
       continue;
@@ -62,9 +56,60 @@ void IRGenerator::generate(const std::shared_ptr<Program> &node) {
           std::dynamic_pointer_cast<EnumDeclaration>(decl));
       continue;
     }
-
-    error(node, "Unknown top-level declaration: " + decl->str());
+    if (IS_INSTANCE(decl, ImportDeclaration)) {
+      continue; // Handled elsewhere
+    }
+    throw CodeGenError(decl, "Unknown top-level declaration: " + decl->str());
   }
+}
+
+int outputModuleObjectFile(const std::string &filename,
+                           llvm::Module *module) {
+  // REF:
+  // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html Make
+
+  auto targetTriple = llvm::sys::getDefaultTargetTriple();
+  llvm::InitializeAllTargetInfos();
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmParsers();
+  llvm::InitializeAllAsmPrinters();
+
+  std::string errorStr;
+  auto Target = llvm::TargetRegistry::lookupTarget(targetTriple, errorStr);
+
+  // Print an error and exit if we couldn't find the requested target.
+  // This generally occurs if we've forgotten to initialise the
+  // TargetRegistry or we have a bogus target triple.
+  if (!Target) {
+    return 1;
+  }
+  auto CPU = "generic";
+  auto Features = "";
+
+  llvm::TargetOptions opt;
+  auto targetMachine = Target->createTargetMachine(targetTriple, CPU, Features,
+                                                   opt, llvm::Reloc::PIC_);
+  module->setDataLayout(targetMachine->createDataLayout());
+  module->setTargetTriple(targetTriple);
+
+  std::error_code ec;
+  llvm::raw_fd_ostream dest(filename, ec, llvm::sys::fs::OF_None);
+
+  if (ec) {
+    return 1;
+  }
+  llvm::legacy::PassManager pass;
+  auto FileType = llvm::CodeGenFileType::ObjectFile;
+
+  if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
+    return 1;
+  }
+
+  pass.run(*module);
+  dest.flush();
+
+  return 0;
 }
 
 int IRGenerator::outputObjFile(const std::string &filename) {
@@ -85,7 +130,7 @@ int IRGenerator::outputObjFile(const std::string &filename) {
   // This generally occurs if we've forgotten to initialise the
   // TargetRegistry or we have a bogus target triple.
   if (!Target) {
-    error(nullptr, "Failed to lookup target: " + errorStr);
+    throw CodeGenError(nullptr, "Failed to lookup target: " + errorStr);
     return 1;
   }
   auto CPU = "generic";
@@ -94,74 +139,70 @@ int IRGenerator::outputObjFile(const std::string &filename) {
   llvm::TargetOptions opt;
   auto targetMachine = Target->createTargetMachine(targetTriple, CPU, Features,
                                                    opt, llvm::Reloc::PIC_);
-  m_module->setDataLayout(targetMachine->createDataLayout());
-  m_module->setTargetTriple(targetTriple);
+  m_llvm_module->setDataLayout(targetMachine->createDataLayout());
+  m_llvm_module->setTargetTriple(targetTriple);
 
   std::error_code ec;
   llvm::raw_fd_ostream dest(filename, ec, llvm::sys::fs::OF_None);
 
   if (ec) {
-    error(nullptr, "Could not open file: " + ec.message());
+    throw CodeGenError(nullptr, "Could not open file: " + ec.message());
     return 1;
   }
   llvm::legacy::PassManager pass;
   auto FileType = llvm::CodeGenFileType::ObjectFile;
 
   if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
-    error(nullptr, "TargetMachine can't emit a file of this type");
+    throw CodeGenError(nullptr, "TargetMachine can't emit a file of this type");
     return 1;
   }
 
-  pass.run(*m_module);
+  pass.run(*m_llvm_module);
   dest.flush();
 
   return 0;
 }
 
 void IRGenerator::printIR(const std::string &filename) {
-  if (m_module) {
+  if (m_llvm_module) {
     std::error_code ec;
     llvm::raw_fd_ostream out(filename, ec, llvm::sys::fs::OF_None);
     if (ec) {
-      error(nullptr, "Could not open file: " + ec.message());
+      throw CodeGenError(nullptr, "Could not open file: " + ec.message());
     }
-    m_module->print(out, nullptr);
+    m_llvm_module->print(out, nullptr);
   }
-}
-
-void IRGenerator::error(ASTNodePtr node, const std::string &msg) {
-  m_errors.push_back(std::make_pair(node, msg));
 }
 
 llvm::Type *IRGenerator::getLLVMType(const std::shared_ptr<Type> &type) {
 
   if (IS_INSTANCE(type, I32))
-    return llvm::Type::getInt32Ty(m_context);
+    return llvm::Type::getInt32Ty(context);
   if (IS_INSTANCE(type, I64))
-    return llvm::Type::getInt64Ty(m_context);
+    return llvm::Type::getInt64Ty(context);
   if (IS_INSTANCE(type, U8))
-    return llvm::Type::getInt8Ty(m_context);
+    return llvm::Type::getInt8Ty(context);
   if (IS_INSTANCE(type, U32))
-    return llvm::Type::getInt32Ty(m_context);
+    return llvm::Type::getInt32Ty(context);
   if (IS_INSTANCE(type, U64))
-    return llvm::Type::getInt64Ty(m_context);
+    return llvm::Type::getInt64Ty(context);
   if (IS_INSTANCE(type, F32))
-    return llvm::Type::getFloatTy(m_context);
+    return llvm::Type::getFloatTy(context);
   if (IS_INSTANCE(type, F64))
-    return llvm::Type::getDoubleTy(m_context);
+    return llvm::Type::getDoubleTy(context);
   if (IS_INSTANCE(type, Boolean))
-    return llvm::Type::getInt1Ty(m_context);
+    return llvm::Type::getInt1Ty(context);
   if (IS_INSTANCE(type, Void))
-    return llvm::Type::getVoidTy(m_context);
+    return llvm::Type::getVoidTy(context);
   if (IS_INSTANCE(type, USize))
-    return llvm::Type::getInt64Ty(m_context); // Assuming 64-bit for USize
+    return llvm::Type::getInt64Ty(context); // Assuming 64-bit for USize
   if (IS_INSTANCE(type, StructType)) {
     auto structType = std::dynamic_pointer_cast<StructType>(type);
     auto it = m_structTypes.find(structType->name);
     if (it != m_structTypes.end()) {
       return it->second;
     } else {
-      error(nullptr, "Unknown struct type: " + structType->name);
+      throw CodeGenError(nullptr, "Unknown struct type: " + structType->name);
     }
   }
   if (IS_INSTANCE(type, PointerType)) {
@@ -186,18 +227,17 @@ llvm::Type *IRGenerator::getLLVMType(const std::shared_ptr<Type> &type) {
     // Represent as a struct { valueType, errorType, isError (i1) }
     std::vector<llvm::Type *> elements = {
         getLLVMType(eut->valueType), getLLVMType(eut->errorType),
-        llvm::Type::getInt1Ty(m_context)};
-    auto st = llvm::StructType::get(m_context, elements);
+        llvm::Type::getInt1Ty(context)};
+    auto st = llvm::StructType::get(context, elements);
     return st;
   }
   if (IS_INSTANCE(type, EnumType)) {
     return getLLVMType(std::dynamic_pointer_cast<EnumType>(type)->base_type);
   }
   if (!type) {
-    error(nullptr, "Type is null");
-    return nullptr;
+    throw CodeGenError(nullptr, "Type is null");
   } else {
-    error(nullptr, "Unsupported type: " + type->str());
+    throw CodeGenError(nullptr, "Unsupported type: " + type->str());
   }
   return nullptr;
 }
@@ -206,7 +246,7 @@ llvm::Value *
 IRGenerator::generateAddress(const std::shared_ptr<Expression> &expr) {
   if (IS_INSTANCE(expr, VarAccess)) {
     auto var = std::dynamic_pointer_cast<VarAccess>(expr);
-    return CUR_SCOPE.get(var->name)->value;
+    return CUR_SCOPE.get(canonicalizeNonexternName(var->name))->value;
   } else if (IS_INSTANCE(expr, OffsetAccess)) {
     return generateOffsetAccess(std::dynamic_pointer_cast<OffsetAccess>(expr),
                                 false);
@@ -228,8 +268,7 @@ IRGenerator::generateAddress(const std::shared_ptr<Expression> &expr) {
     auto deref = std::dynamic_pointer_cast<Dereference>(expr);
     return generateExpression(deref->pointer, true);
   }
-  error(expr, "Expression is not an lvalue: " + expr->str());
-  return nullptr;
+  throw CodeGenError(expr, "Expression is not an lvalue: " + expr->str());
 }
 
 llvm::Value *
@@ -238,46 +277,59 @@ IRGenerator::generateExpression(const std::shared_ptr<Expression> &expr,
   if (IS_INSTANCE(expr, BinaryOperation)) {
     auto binOp = std::dynamic_pointer_cast<BinaryOperation>(expr);
     return generateBinaryOp(binOp->left, binOp->right, binOp->op, loadValue);
-  } else if (IS_INSTANCE(expr, UnaryOperation)) {
+  }
+  if (IS_INSTANCE(expr, UnaryOperation)) {
     auto unOp = std::dynamic_pointer_cast<UnaryOperation>(expr);
     return generateUnaryOp(unOp->operand, unOp->op, loadValue);
-  } else if (IS_INSTANCE(expr, Literal)) {
+  }
+  if (IS_INSTANCE(expr, Literal)) {
     return generateLiteral(std::dynamic_pointer_cast<Literal>(expr), loadValue);
-  } else if (IS_INSTANCE(expr, VarAccess)) {
+  }
+  if (IS_INSTANCE(expr, VarAccess)) {
     return generateVarAccess(std::dynamic_pointer_cast<VarAccess>(expr),
                              loadValue);
-  } else if (IS_INSTANCE(expr, EnumAccess)) {
+  }
+  if (IS_INSTANCE(expr, EnumAccess)) {
     return generateEnumAccess(std::dynamic_pointer_cast<EnumAccess>(expr),
                               loadValue);
-  } else if (IS_INSTANCE(expr, FuncCall)) {
+  }
+  if (IS_INSTANCE(expr, FuncCall)) {
     return generateFuncCall(std::dynamic_pointer_cast<FuncCall>(expr),
                             loadValue);
-  } else if (IS_INSTANCE(expr, FieldAccess)) {
+  }
+  if (IS_INSTANCE(expr, FieldAccess)) {
     return generateFieldAccess(std::dynamic_pointer_cast<FieldAccess>(expr),
                                loadValue);
-  } else if (IS_INSTANCE(expr, StructInitializer)) {
+  }
+  if (IS_INSTANCE(expr, StructInitializer)) {
     return generateStructInitializer(
         std::dynamic_pointer_cast<StructInitializer>(expr), loadValue);
-  } else if (IS_INSTANCE(expr, OffsetAccess)) {
+  }
+  if (IS_INSTANCE(expr, OffsetAccess)) {
     return generateOffsetAccess(std::dynamic_pointer_cast<OffsetAccess>(expr),
                                 loadValue);
-  } else if (IS_INSTANCE(expr, TypeCast)) {
+  }
+  if (IS_INSTANCE(expr, TypeCast)) {
     return generateCast(std::dynamic_pointer_cast<TypeCast>(expr), loadValue);
-  } else if (IS_INSTANCE(expr, Dereference)) {
+  }
+  if (IS_INSTANCE(expr, Dereference)) {
     auto deref = std::dynamic_pointer_cast<Dereference>(expr);
     llvm::Value *ptr = generateExpression(deref->pointer, true);
     if (loadValue) {
       return m_builder.CreateLoad(getLLVMType(deref->inferred_type), ptr,
                                   "derefloadtmp");
-    } else {
-      return ptr;
     }
-  } else if (IS_INSTANCE(expr, MethodCall)) {
+    return ptr;
+  }
+  if (IS_INSTANCE(expr, MethodCall)) {
     return generateMethodCall(std::dynamic_pointer_cast<MethodCall>(expr),
                               loadValue);
   }
-  error(expr, "Unknown expression type: " + expr->str());
-  return nullptr;
+  if (IS_INSTANCE(expr, ModuleAccess)) {
+    return generateModuleAccess(std::dynamic_pointer_cast<ModuleAccess>(expr),
+                                loadValue);
+  }
+  throw CodeGenError(expr, "Unknown expression type: " + expr->str());
 }
 std::string llvmTypeToString(llvm::Type *ty) {
   std::string str;
@@ -292,8 +344,7 @@ IRGenerator::generateCast(const std::shared_ptr<TypeCast> &typeCast,
   llvm::Value *val = generateExpression(typeCast->expr);
   llvm::Type *destType = getLLVMType(typeCast->target_type);
   if (!val || !destType) {
-    error(typeCast, "Invalid cast operation");
-    return nullptr;
+    throw CodeGenError(typeCast, "Invalid cast operation");
   }
   llvm::Type *srcType = val->getType();
   if (srcType == destType) {
@@ -332,7 +383,7 @@ IRGenerator::generateCast(const std::shared_ptr<TypeCast> &typeCast,
   } else if (srcType->isIntegerTy() && destType->isPointerTy()) {
     return m_builder.CreateIntToPtr(val, destType, "inttoptrtmp");
   } else {
-    error(typeCast, "Unsupported cast from " + llvmTypeToString(srcType) +
+    throw CodeGenError(typeCast, "Unsupported cast from " + llvmTypeToString(srcType) +
                         " to " + llvmTypeToString(destType));
   }
   return nullptr;
@@ -363,7 +414,7 @@ IRGenerator::generateStatement(const std::shared_ptr<Statement> &stmt) {
         std::dynamic_pointer_cast<ReturnStatement>(stmt));
   } else {
 
-    error(stmt, "Unknown statement type: " + stmt->str());
+    throw CodeGenError(stmt, "Unknown statement type: " + stmt->str());
   }
   return nullptr;
 }
@@ -373,9 +424,12 @@ llvm::Function *IRGenerator::generateFunction(
 
   llvm::FunctionType *fType =
       llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type));
+
+  std::string fname = canonicalizeNonexternName(func->name);
+
   llvm::Function *function = llvm::Function::Create(
-      fType, llvm::Function::ExternalLinkage, func->name, m_module.get());
-  CUR_SCOPE.set(func->name, function, fType, func->type);
+      fType, llvm::Function::ExternalLinkage, fname, m_llvm_module.get());
+  CUR_SCOPE.set(fname, function, fType, func->type);
   // Set names for all arguments
   unsigned idx = 0;
   for (auto &arg : function->args()) {
@@ -388,7 +442,7 @@ llvm::Function *IRGenerator::generateFunction(
   m_scopeStack.push_back(Scope(CUR_SCOPE));
 
   llvm::BasicBlock *entry =
-      llvm::BasicBlock::Create(m_context, "entry", function);
+      llvm::BasicBlock::Create(context, "entry", function);
   m_builder.SetInsertPoint(entry);
   // Allocate space for arguments and store them
   idx = 0;
@@ -396,7 +450,8 @@ llvm::Function *IRGenerator::generateFunction(
     llvm::AllocaInst *alloca =
         m_builder.CreateAlloca(arg.getType(), nullptr, arg.getName() + ".addr");
     m_builder.CreateStore(&arg, alloca);
-    CUR_SCOPE.set(arg.getName().str(), alloca, arg.getType(),
+    auto argname = arg.getName().str();
+    CUR_SCOPE.set(canonicalizeNonexternName(argname), alloca, arg.getType(),
                   func->type->params[idx]);
     idx++;
   }
@@ -412,7 +467,7 @@ llvm::Function *IRGenerator::generateFunction(
     if (IS_INSTANCE(func->type->ret, Void)) {
       m_builder.CreateRetVoid();
     } else {
-      error(func, "Non-void function missing return: " + func->name);
+      throw CodeGenError(func, "Non-void function missing return: " + func->name);
     }
   }
   m_error_union_return_type = nullptr;
@@ -435,33 +490,38 @@ void IRGenerator::generateVariableDeclaration(
         if (llvm::isa<llvm::Constant>(initValV)) {
           initVal = llvm::cast<llvm::Constant>(initValV);
         } else {
-          error(varDecl, "Global variable initializer must be a constant");
+          throw CodeGenError(varDecl, "Global variable initializer must be a constant");
           initVal = llvm::Constant::getNullValue(varType);
         }
       } else {
-        error(varDecl, "Unsupported initializer type");
+        throw CodeGenError(varDecl, "Unsupported initializer type");
         initVal = llvm::Constant::getNullValue(varType);
       }
     } else {
       initVal = llvm::Constant::getNullValue(varType);
     }
     llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
-        *m_module, varType, varDecl->is_const,
-        llvm::GlobalValue::ExternalLinkage, initVal, varDecl->name);
-    CUR_SCOPE.set(varDecl->name, gVar, varType, varDecl->var_type);
+        *m_llvm_module, varType, varDecl->is_const,
+        llvm::GlobalValue::ExternalLinkage, initVal, canonicalizeNonexternName(varDecl->name));
+    CUR_SCOPE.set(canonicalizeNonexternName(varDecl->name), gVar, varType, varDecl->var_type);
     return;
   }
 
   llvm::Type *varType = getLLVMType(varDecl->var_type);
   llvm::Value *alloca = m_builder.CreateAlloca(varType, nullptr, varDecl->name);
-  CUR_SCOPE.set(varDecl->name, alloca, varType, varDecl->var_type);
+  CUR_SCOPE.set(canonicalizeNonexternName(varDecl->name), alloca, varType, varDecl->var_type);
   if (varDecl->initializer) {
     llvm::Value *initVal = nullptr;
     if (IS_INSTANCE(varDecl->initializer, Expression)) {
       initVal = generateExpression(
           std::dynamic_pointer_cast<Expression>(varDecl->initializer));
     } else {
-      error(varDecl, "Unsupported initializer type");
+      throw CodeGenError(varDecl, "Unsupported initializer type");
+    }
+    if (initVal == nullptr) {
+      throw CodeGenError(varDecl, "Failed to generate initializer for variable: " +
+                         varDecl->name);
+      initVal = llvm::Constant::getNullValue(varType);
     }
     m_builder.CreateStore(initVal, alloca);
   }
@@ -482,7 +542,7 @@ void IRGenerator::generateStructDeclaration(
     const std::shared_ptr<StructDeclaration> &structDecl) {
 
   llvm::StructType *llvmStruct =
-      llvm::StructType::create(m_context, structDecl->name);
+      llvm::StructType::create(context, structDecl->name);
 
   m_structTypes[structDecl->name] = llvmStruct;
 
@@ -510,30 +570,26 @@ llvm::Value *IRGenerator::generateBinaryOp(
     std::string op, bool loadValue) {
 
   if (!left || !right) {
-    error(nullptr, "Invalid binary operation: null operand expression");
-    return nullptr;
+    throw CodeGenError(nullptr, "Invalid binary operation: null operand expression");
   }
 
   llvm::Value *l = generateExpression(left);
   llvm::Value *r = generateExpression(right);
 
   if (!l || !r) {
-    error(nullptr, "Failed to generate LLVM value for binary operands");
-    return nullptr;
+    throw CodeGenError(nullptr, "Failed to generate LLVM value for binary operands");
   }
 
   llvm::Type *ty = l->getType();
   if (!ty) {
-    error(left, "Left operand of binary op has no type");
-    return nullptr;
+    throw CodeGenError(left, "Left operand of binary op has no type");
   }
 
   // Handle assignment separately
   if (op == "=") {
     llvm::Value *addr = generateAddress(left);
     if (!addr) {
-      error(left, "Left operand of assignment is not an lvalue");
-      return nullptr;
+      throw CodeGenError(left, "Left operand of assignment is not an lvalue");
     }
     m_builder.CreateStore(r, addr);
     return r;
@@ -614,18 +670,17 @@ llvm::Value *IRGenerator::generateBinaryOp(
 
   // Pointer handling → cast to integer
   if (ty->isPointerTy()) {
-    ty = llvm::Type::getInt64Ty(m_context);
+    ty = llvm::Type::getInt64Ty(context);
     l = m_builder.CreatePtrToInt(l, ty, "ptrtoint_lhs");
     r = m_builder.CreatePtrToInt(r, ty, "ptrtoint_rhs");
     if (!l || !r) {
-      error(nullptr, "Failed to convert pointer operands to integer");
-      return nullptr;
+      throw CodeGenError(nullptr, "Failed to convert pointer operands to integer");
     }
   }
 
   // Ensure both operands have the same type
   if (l->getType() != r->getType()) {
-    error(nullptr, "Type mismatch in binary op: lhs=" +
+    throw CodeGenError(nullptr, "Type mismatch in binary op: lhs=" +
                        llvmTypeToString(l->getType()) +
                        " rhs=" + llvmTypeToString(r->getType()));
     return nullptr;
@@ -634,8 +689,7 @@ llvm::Value *IRGenerator::generateBinaryOp(
   // Check operator support
   auto it = ops.find(op);
   if (it == ops.end()) {
-    error(right, "Unsupported binary operator: " + op);
-    return nullptr;
+    throw CodeGenError(right, "Unsupported binary operator: " + op);
   }
 
   const OpInfo &info = it->second;
@@ -645,7 +699,7 @@ llvm::Value *IRGenerator::generateBinaryOp(
   else if (ty->isFloatingPointTy())
     return info.floatOp(l, r);
   else {
-    error(right,
+    throw CodeGenError(right,
           "Unsupported type for binary operator: " + llvmTypeToString(ty));
     return nullptr;
   }
@@ -656,6 +710,9 @@ IRGenerator::generateUnaryOp(const std::shared_ptr<Expression> &operand,
                              std::string op, bool loadValue) {
   auto val = generateExpression(operand);
   if (op == "-") {
+    if (val->getType()->isFloatingPointTy()) {
+      return m_builder.CreateFNeg(val, "fnegtmp");
+    }
     return m_builder.CreateNeg(val, "negtmp");
   } else if (op == "+") {
     return val; // Unary plus is a no-op
@@ -664,78 +721,77 @@ IRGenerator::generateUnaryOp(const std::shared_ptr<Expression> &operand,
   } else if (op == "&") {
     return generateAddress(operand);
   }
-  error(operand, "Unsupported unary operator: " + op);
-  return nullptr;
+  throw CodeGenError(operand, "Unsupported unary operator: " + op);
 }
 
 llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
                                           bool loadValue) {
 
-  if (IS_INSTANCE(lit->lit_type, I32)) {
-    return llvm::ConstantInt::get(m_context,
+  if (IS_INSTANCE(lit->inferred_type, I32)) {
+    return llvm::ConstantInt::get(context,
                                   llvm::APInt(32, std::get<int64_t>(lit->value)));
-  } else if (IS_INSTANCE(lit->lit_type, I64)) {
-    return llvm::ConstantInt::get(m_context,
+  } else if (IS_INSTANCE(lit->inferred_type, I64)) {
+    return llvm::ConstantInt::get(context,
                                   llvm::APInt(64, std::get<int64_t>(lit->value)));
-  } else if (IS_INSTANCE(lit->lit_type, U8)) {
-    return llvm::ConstantInt::get(m_context,
-                                  llvm::APInt(8, std::get<int64_t>(lit->value)));
-  } else if (IS_INSTANCE(lit->lit_type, U32)) {
-    return llvm::ConstantInt::get(m_context,
-                                  llvm::APInt(32, std::get<int64_t>(lit->value)));
-  } else if (IS_INSTANCE(lit->lit_type, U64)) {
-    return llvm::ConstantInt::get(m_context,
-                                  llvm::APInt(64, std::get<int64_t>(lit->value)));
-  } else if (IS_INSTANCE(lit->lit_type, F32)) {
+  } else if (IS_INSTANCE(lit->inferred_type, U8)) {
+    return llvm::ConstantInt::get(context,
+                                  llvm::APInt(8, std::get<uint64_t>(lit->value)));
+  } else if (IS_INSTANCE(lit->inferred_type, U32)) {
+    return llvm::ConstantInt::get(context,
+                                  llvm::APInt(32, std::get<uint64_t>(lit->value)));
+  } else if (IS_INSTANCE(lit->inferred_type, U64)) {
+    return llvm::ConstantInt::get(context,
+                                  llvm::APInt(64, std::get<uint64_t>(lit->value)));
+  } else if (IS_INSTANCE(lit->inferred_type, F32)) {
     return llvm::ConstantFP::get(m_builder.getFloatTy(),
                                  std::get<double>(lit->value));
-  } else if (IS_INSTANCE(lit->lit_type, F64)) {
+  } else if (IS_INSTANCE(lit->inferred_type, F64)) {
     return llvm::ConstantFP::get(m_builder.getDoubleTy(),
                                  std::get<double>(lit->value));
-  } else if (IS_INSTANCE(lit->lit_type, Boolean)) {
+  } else if (IS_INSTANCE(lit->inferred_type, Boolean)) {
     return llvm::ConstantInt::get(
-        m_context, llvm::APInt(1, std::get<bool>(lit->value) ? 1 : 0));
-  } else if (IS_INSTANCE(lit->lit_type, Void)) {
+        context, llvm::APInt(1, std::get<bool>(lit->value) ? 1 : 0));
+  } else if (IS_INSTANCE(lit->inferred_type, Void)) {
     return nullptr; // Void literals don't have a value
-  } else if (IS_INSTANCE(lit->lit_type, USize)) {
+  } else if (IS_INSTANCE(lit->inferred_type, USize)) {
     return llvm::ConstantInt::get(
-        m_context,
+        context,
         llvm::APInt(64,
                     std::get<int64_t>(lit->value))); // Assuming 64-bit for USize
-  } else if (IS_INSTANCE(lit->lit_type, PointerType)) {
+  } else if (IS_INSTANCE(lit->inferred_type, PointerType)) {
     if (std::holds_alternative<int64_t>(lit->value)) {
       int intVal = std::get<int64_t>(lit->value);
       if (intVal == 0) {
         // Null pointer literal
         return llvm::ConstantPointerNull::get(
-            llvm::cast<llvm::PointerType>(getLLVMType(lit->lit_type)));
+            llvm::cast<llvm::PointerType>(getLLVMType(lit->inferred_type)));
       } else {
-        error(lit, "Only null (0) is allowed as integer pointer literal");
+        throw CodeGenError(lit, "Only null (0) is allowed as integer pointer literal");
       }
     } else if (std::holds_alternative<std::string>(lit->value)) {
       // String literal → create global string
       auto strVal = std::get<std::string>(lit->value);
       auto strName = "g" + std::to_string(globalVals++);
-      auto strType = llvm::ArrayType::get(llvm::Type::getInt8Ty(m_context),
+      auto strType = llvm::ArrayType::get(llvm::Type::getInt8Ty(context),
                                           strVal.size() + 1);
       auto strConstant =
-          llvm::ConstantDataArray::getString(m_context, strVal, true);
+          llvm::ConstantDataArray::getString(context, strVal, true);
       auto globalStr = new llvm::GlobalVariable(
-          *m_module, strType, true, llvm::GlobalValue::PrivateLinkage,
+          *m_llvm_module, strType, true, llvm::GlobalValue::PrivateLinkage,
           strConstant, strName);
       llvm::Constant *zero =
-          llvm::ConstantInt::get(llvm::Type::getInt32Ty(m_context), 0);
+          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
       llvm::Constant *indices[] = {zero, zero};
       return llvm::ConstantExpr::getGetElementPtr(strType, globalStr, indices,
                                                   true);
     } else {
-      error(lit, "Unsupported pointer literal value type");
+      throw CodeGenError(lit, "Unsupported pointer literal value type");
     }
-  } else if (IS_INSTANCE(lit->lit_type, NullType)) {
+  } else if (IS_INSTANCE(lit->inferred_type, NullType)) {
     return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(
         getLLVMType(std::make_shared<PointerType>(std::make_shared<Void>()))));
   } else {
-    error(lit, "Unsupported literal type: " + lit->lit_type->str());
+    throw CodeGenError(lit, "Unsupported literal type: " + lit->inferred_type->str());
   }
   return nullptr;
 }
@@ -743,10 +799,9 @@ llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
 llvm::Value *
 IRGenerator::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
                                bool loadValue) {
-  auto *sym = CUR_SCOPE.get(varAccess->name);
+  auto *sym = CUR_SCOPE.get(canonicalizeNonexternName(varAccess->name));
   if (!sym) {
-    error(varAccess, "Unknown variable name: " + varAccess->name);
-    return nullptr;
+    throw CodeGenError(varAccess, "Unknown variable name: " + varAccess->name);
   }
 
   llvm::Value *v = sym->value;
@@ -761,14 +816,12 @@ IRGenerator::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
 llvm::Value *IRGenerator::generateEnumAccess(const std::shared_ptr<EnumAccess> &enumAccess, bool loadValue) {
   auto it = m_enumTypes.find(enumAccess->enum_name);
   if (it == m_enumTypes.end()) {
-    error(enumAccess, "Unknown enum type: " + enumAccess->enum_name);
-    return nullptr;
+    throw CodeGenError(enumAccess, "Unknown enum type: " + enumAccess->enum_name);
   }
   auto enumType = it->second;
   auto valIt = enumType->variant_map.find(enumAccess->variant);
   if (valIt == enumType->variant_map.end()) {
-    error(enumAccess, "Unknown enum variant: " + enumAccess->variant);
-    return nullptr;
+    throw CodeGenError(enumAccess, "Unknown enum variant: " + enumAccess->variant);
   }
   std::shared_ptr<Literal> literal = valIt->second;
   // Assuming enums are represented as i32
@@ -776,11 +829,11 @@ llvm::Value *IRGenerator::generateEnumAccess(const std::shared_ptr<EnumAccess> &
 }
 
 llvm::Value *IRGenerator::generateMethodCall(const std::shared_ptr<MethodCall> &methodCall, bool loadValue) {
+
   auto structAccess = methodCall->object;
   llvm::Value *objPtr = generateAddress(std::static_pointer_cast<Expression>(structAccess));
   if (!objPtr) {
-    error(structAccess, "Failed to generate address for method call object");
-    return nullptr;
+    throw CodeGenError(structAccess, "Failed to generate address for method call object");
   }
   auto structType = std::dynamic_pointer_cast<StructType>(structAccess->inferred_type);
   if (!structType) {
@@ -795,35 +848,32 @@ llvm::Value *IRGenerator::generateMethodCall(const std::shared_ptr<MethodCall> &
       }
     }
     if (!structType) {
-      error(structAccess, "Method call on non-pointer, non-struct type: " + structAccess->inferred_type->str());
-      return nullptr;
+      throw CodeGenError(structAccess, "Method call on non-pointer, non-struct type: " + structAccess->inferred_type->str());
     }
   }
   if (!structType) {
-    error(structAccess,
+    throw CodeGenError(structAccess,
           "Failed to determine struct type for method call");
     return nullptr;
   }
   // Find the struct type
   auto accessee = m_structTypes.find(structType->name);
   if (accessee == m_structTypes.end()) {
-    error(structAccess, "Unknown struct type in method call: " + structType->name);
-    return nullptr;
+    throw CodeGenError(structAccess, "Unknown struct type in method call: " + structType->name);
   }
   // Mangle method name
-  std::string mangledName = "__" + structType->name + "_" + methodCall->method;
+  std::string mangledName = canonicalizeNonexternName("__" + structType->name + "_" + methodCall->method);
   // Prepare arguments
   std::vector<llvm::Value *> argsV;
   argsV.push_back(objPtr); // 'this' pointer
   for (const auto &arg : methodCall->args) {
     argsV.push_back(generateExpression(arg));
   }
-  llvm::Function *calleeValue = m_module->getFunction(mangledName);
+  llvm::Function *calleeValue = m_llvm_module->getFunction(mangledName);
   if (!calleeValue) {
-    error(methodCall, "Unknown method: " + mangledName);
-    return nullptr;
+    throw CodeGenError(methodCall, "Unknown method: " + mangledName);
   }
-  return m_builder.CreateCall(calleeValue, argsV, "calltmp");
+  return m_builder.CreateCall(calleeValue, argsV, calleeValue->getFunctionType()->getReturnType() != llvm::Type::getVoidTy(context) ? "methodcalltmp" : "");
 }
 llvm::Value *
 IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
@@ -836,8 +886,7 @@ IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
   llvm::Value *calleeValue =
       generateExpression(std::static_pointer_cast<Expression>(funcCall->func));
   if (!calleeValue) {
-    error(funcCall, "Failed to generate callee for function call");
-    return nullptr;
+    throw CodeGenError(funcCall, "Failed to generate callee for function call");
   }
 
   llvm::FunctionType *funcTy = nullptr;
@@ -849,18 +898,16 @@ IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     // Indirect call via function pointer
     auto it = funcCall->func->inferred_type;
     if (!IS_INSTANCE(it, PointerType)) {
-      error(funcCall, "Callee is a pointer, but inferred type is not a pointer");
-      return nullptr;
+      throw CodeGenError(funcCall, "Callee is a pointer, but inferred type is not a pointer");
     }
     auto ptrType = std::dynamic_pointer_cast<PointerType>(it);
     if (!IS_INSTANCE(ptrType->base, FunctionType)) {
-      error(funcCall, "Callee is a pointer, but not to a function type");
-      return nullptr;
+      throw CodeGenError(funcCall, "Callee is a pointer, but not to a function type");
     }
     auto funcType = std::dynamic_pointer_cast<FunctionType>(ptrType->base);
     funcTy = llvm::cast<llvm::FunctionType>(getLLVMType(funcType));
   } else {
-    error(funcCall, "Callee is not a function or function pointer: " +
+    throw CodeGenError(funcCall, "Callee is not a function or function pointer: " +
                         funcCall->func->str());
     return nullptr;
   }
@@ -871,19 +918,18 @@ IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     for (size_t i = numFixedArgs; i < argsV.size(); ++i) {
       llvm::Value *arg = argsV[i];
       if (!arg) {
-        error(funcCall, "Null argument value for vararg " + std::to_string(i));
-        return nullptr;
+        throw CodeGenError(funcCall, "Null argument value for vararg " + std::to_string(i));
       }
       llvm::Type *ty = arg->getType();
       if (ty->isIntegerTy(1) || ty->isIntegerTy(8) || ty->isIntegerTy(16)) {
-        argsV[i] = m_builder.CreateZExt(arg, llvm::Type::getInt32Ty(m_context));
+        argsV[i] = m_builder.CreateZExt(arg, llvm::Type::getInt32Ty(context));
       } else if (ty->isFloatTy()) {
-        argsV[i] = m_builder.CreateFPExt(arg, llvm::Type::getDoubleTy(m_context));
+        argsV[i] = m_builder.CreateFPExt(arg, llvm::Type::getDoubleTy(context));
       }
     }
   }
 
-  return m_builder.CreateCall(funcTy, calleeValue, argsV, "calltmp");
+  return m_builder.CreateCall(funcTy, calleeValue, argsV, funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
 }
 llvm::Value *IRGenerator::generateOffsetAccess(
     const std::shared_ptr<OffsetAccess> &offsetAccess, bool loadValue) {
@@ -891,17 +937,15 @@ llvm::Value *IRGenerator::generateOffsetAccess(
   llvm::Value *basePtr = generateExpression(
       std::static_pointer_cast<Expression>(offsetAccess->base));
   if (!basePtr) {
-    error(offsetAccess, "Failed to generate base for offset access");
-    return nullptr;
+    throw CodeGenError(offsetAccess, "Failed to generate base for offset access");
   }
   llvm::Value *index = generateExpression(offsetAccess->index);
   if (!index) {
-    error(offsetAccess->index, "Failed to generate index for offset access");
-    return nullptr;
+    throw CodeGenError(offsetAccess->index, "Failed to generate index for offset access");
   }
   llvm::Type *resultType = getLLVMType(offsetAccess->inferred_type);
   if (!resultType) {
-    error(offsetAccess, "Unknown type for offset access: " +
+    throw CodeGenError(offsetAccess, "Unknown type for offset access: " +
                             offsetAccess->inferred_type->str());
     return nullptr;
   }
@@ -919,20 +963,17 @@ llvm::Value *IRGenerator::generateFieldAccess(
     const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
 
   if (!fieldAccess || !fieldAccess->base) {
-    error(nullptr, "Invalid field access: missing base expression");
-    return nullptr;
+    throw CodeGenError(nullptr, "Invalid field access: missing base expression");
   }
 
   if (!fieldAccess->base->inferred_type) {
-    error(fieldAccess->base, "Base expression of field access has no inferred type");
-    return nullptr;
+    throw CodeGenError(fieldAccess->base, "Base expression of field access has no inferred type");
   }
 
   llvm::Value *basePtr =
       generateAddress(std::static_pointer_cast<Expression>(fieldAccess->base));
   if (!basePtr) {
-    error(fieldAccess->base, "Failed to generate address for field base");
-    return nullptr;
+    throw CodeGenError(fieldAccess->base, "Failed to generate address for field base");
   }
 
   if (auto eu_type = std::dynamic_pointer_cast<ErrorUnionType>(fieldAccess->base->inferred_type)) {
@@ -957,15 +998,14 @@ llvm::Value *IRGenerator::generateFieldAccess(
 
     } else if (fieldAccess->field == "is_err") {
       // Return index 2
-      llvm::Type *bool_type = llvm::Type::getInt1Ty(m_context);
+      llvm::Type *bool_type = llvm::Type::getInt1Ty(context);
       auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 2, "error_union_is_err_access");
       return loadValue
                  ? m_builder.CreateLoad(bool_type, gep, "load_error_union_is_err")
                  : gep;
 
     } else {
-      error(fieldAccess, "Unknown field on error union: " + fieldAccess->field);
-      return nullptr;
+      throw CodeGenError(fieldAccess, "Unknown field on error union: " + fieldAccess->field);
     }
   }
   // Check if base type is a struct or pointer-to-struct
@@ -979,7 +1019,7 @@ llvm::Value *IRGenerator::generateFieldAccess(
       structType = std::dynamic_pointer_cast<StructType>(ptrType->base);
 
       if (!ptrType->base) {
-        error(fieldAccess->base,
+        throw CodeGenError(fieldAccess->base,
               "Pointer type in field access has no base type");
         return nullptr;
       }
@@ -990,7 +1030,7 @@ llvm::Value *IRGenerator::generateFieldAccess(
             llvm::PointerType::getUnqual(getLLVMType(ptrType->base)), basePtr,
             "load_ptr_for_field");
         if (!basePtr) {
-          error(fieldAccess->base,
+          throw CodeGenError(fieldAccess->base,
                 "Failed to load pointer value for field access");
           return nullptr;
         }
@@ -998,7 +1038,7 @@ llvm::Value *IRGenerator::generateFieldAccess(
     }
 
     if (!structType) {
-      error(fieldAccess->base,
+      throw CodeGenError(fieldAccess->base,
             "Field access on non-struct type: " +
                 fieldAccess->base->inferred_type->str());
       return nullptr;
@@ -1008,7 +1048,7 @@ llvm::Value *IRGenerator::generateFieldAccess(
   // Confirm struct type is registered in LLVM mapping
   auto accessee = m_structTypes.find(structType->name);
   if (accessee == m_structTypes.end() || !accessee->second) {
-    error(fieldAccess->base,
+    throw CodeGenError(fieldAccess->base,
           "Unknown or unregistered struct type in field access: " +
               structType->name);
     return nullptr;
@@ -1020,7 +1060,7 @@ llvm::Value *IRGenerator::generateFieldAccess(
   const auto &fieldName = fieldAccess->field;
   int fieldIndex = structType->getFieldIndex(fieldName);
   if (fieldIndex < 0) {
-    error(fieldAccess->base,
+    throw CodeGenError(fieldAccess->base,
           "Struct '" + structType->name +
               "' has no field named '" + fieldName + "'");
     return nullptr;
@@ -1029,19 +1069,19 @@ llvm::Value *IRGenerator::generateFieldAccess(
   // Build GEP safely
   llvm::Value *gep = m_builder.CreateGEP(
       llvmStruct, basePtr,
-      {llvm::ConstantInt::get(llvm::Type::getInt32Ty(m_context), 0),
-       llvm::ConstantInt::get(llvm::Type::getInt32Ty(m_context), fieldIndex)},
+      {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+       llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), fieldIndex)},
       "field_access");
 
   if (!gep) {
-    error(fieldAccess->base, "Failed to create GEP for field '" + fieldName +
+    throw CodeGenError(fieldAccess->base, "Failed to create GEP for field '" + fieldName +
                                  "' in struct '" + structType->name + "'");
     return nullptr;
   }
 
   if (loadValue) {
     if (!fieldAccess->inferred_type) {
-      error(fieldAccess, "Field '" + fieldName +
+      throw CodeGenError(fieldAccess, "Field '" + fieldName +
                              "' has no inferred type for load");
       return nullptr;
     }
@@ -1052,12 +1092,42 @@ llvm::Value *IRGenerator::generateFieldAccess(
   return gep;
 }
 
+llvm::Value *IRGenerator::generateModuleAccess(const std::shared_ptr<ModuleAccess> &moduleAccess,
+                                               bool loadValue) {
+  // Same as variable access, but with namespaced name
+
+  auto mod_name = moduleAccess->module_name;
+  std::shared_ptr<Module> mod;
+  if (m_current_module->imports.find(moduleAccess->module_name) !=
+      m_current_module->imports.end()) {
+    mod =
+        m_current_module->imports[moduleAccess->module_name];
+  } else {
+    throw CodeGenError(moduleAccess,
+          "Module not found: " + moduleAccess->module_name);
+    return nullptr;
+  }
+
+  auto var_name = moduleAccess->member_name;
+  auto full_name = mod->canonicalizeName(var_name);
+
+  auto *sym = CUR_SCOPE.get(full_name);
+  if (!sym) {
+    throw CodeGenError(moduleAccess, "Unknown variable name: " + full_name);
+  }
+  llvm::Value *v = sym->value;
+  if (llvm::isa<llvm::Function>(v))
+    return v;
+  if (!loadValue)
+    return v;
+  return m_builder.CreateLoad(sym->type, v, var_name);
+}
+
 llvm::Value *IRGenerator::generateStructInitializer(
     const std::shared_ptr<StructInitializer> &structInit, bool loadValue) {
   auto it = m_structTypes.find(structInit->struct_type->name);
   if (it == m_structTypes.end()) {
-    error(structInit, "Unknown struct type: " + structInit->struct_type->name);
-    return nullptr;
+    throw CodeGenError(structInit, "Unknown struct type: " + structInit->struct_type->name);
   }
   llvm::StructType *llvmStruct = it->second;
   llvm::Value *alloca =
@@ -1068,8 +1138,8 @@ llvm::Value *IRGenerator::generateStructInitializer(
     // Generate GEP for field
     llvm::Value *fieldPtr = m_builder.CreateGEP(
         llvmStruct, alloca,
-        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(m_context), 0),
-         llvm::ConstantInt::get(llvm::Type::getInt32Ty(m_context), fieldIndex)},
+        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), fieldIndex)},
         "fieldptr");
     llvm::Value *fieldVal = generateExpression(field.second);
     m_builder.CreateStore(fieldVal, fieldPtr);
@@ -1100,11 +1170,11 @@ IRGenerator::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
       condV, llvm::ConstantInt::get(condV->getType(), 0), "ifcond");
   llvm::Function *theFunction = m_builder.GetInsertBlock()->getParent();
   llvm::BasicBlock *thenBB =
-      llvm::BasicBlock::Create(m_context, "then", theFunction);
+      llvm::BasicBlock::Create(context, "then", theFunction);
   llvm::BasicBlock *elseBB =
-      llvm::BasicBlock::Create(m_context, "else", theFunction);
+      llvm::BasicBlock::Create(context, "else", theFunction);
   llvm::BasicBlock *mergeBB =
-      llvm::BasicBlock::Create(m_context, "ifcont", theFunction);
+      llvm::BasicBlock::Create(context, "ifcont", theFunction);
   m_builder.CreateCondBr(condV, thenBB, elseBB);
   m_builder.SetInsertPoint(thenBB);
   llvm::Value *thenV = generateStatement(ifStmt->then_branch);
@@ -1122,11 +1192,11 @@ llvm::Value *IRGenerator::generateWhileStatement(
     const std::shared_ptr<WhileStatement> &whileStmt) {
   llvm::Function *theFunction = m_builder.GetInsertBlock()->getParent();
   auto cond_block =
-      llvm::BasicBlock::Create(m_context, "while.cond", theFunction);
+      llvm::BasicBlock::Create(context, "while.cond", theFunction);
   auto body_block =
-      llvm::BasicBlock::Create(m_context, "while.body", theFunction);
+      llvm::BasicBlock::Create(context, "while.body", theFunction);
   auto after_block =
-      llvm::BasicBlock::Create(m_context, "while.end", theFunction);
+      llvm::BasicBlock::Create(context, "while.end", theFunction);
   m_builder.CreateBr(cond_block);
   m_builder.SetInsertPoint(cond_block);
   auto condition = generateExpression(whileStmt->condition);
@@ -1147,11 +1217,11 @@ llvm::Value *IRGenerator::generateForStatement(
   if (forStmt->init)
     generateStatement(forStmt->init);
   auto cond_block =
-      llvm::BasicBlock::Create(m_context, "for.cond", theFunction);
+      llvm::BasicBlock::Create(context, "for.cond", theFunction);
   auto body_block =
-      llvm::BasicBlock::Create(m_context, "for.body", theFunction);
+      llvm::BasicBlock::Create(context, "for.body", theFunction);
   auto after_block =
-      llvm::BasicBlock::Create(m_context, "for.end", theFunction);
+      llvm::BasicBlock::Create(context, "for.end", theFunction);
   m_builder.CreateBr(cond_block);
   m_builder.SetInsertPoint(cond_block);
   llvm::Value *condition = nullptr;
@@ -1160,7 +1230,7 @@ llvm::Value *IRGenerator::generateForStatement(
     condition = m_builder.CreateICmpNE(
         condition, llvm::ConstantInt::get(condition->getType(), 0), "forcond");
   } else {
-    condition = llvm::ConstantInt::get(llvm::Type::getInt1Ty(m_context), 1);
+    condition = llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 1);
   }
   m_builder.CreateCondBr(condition, body_block, after_block);
   m_builder.SetInsertPoint(body_block);
@@ -1199,7 +1269,7 @@ llvm::Value *IRGenerator::generateReturnStatement(
 
       auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1, "insert_err");
       withTag = m_builder.CreateInsertValue(withErr,
-                                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(m_context), 1),
+                                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 1),
                                             2, "insert_is_err");
 
     } else {
@@ -1212,7 +1282,7 @@ llvm::Value *IRGenerator::generateReturnStatement(
 
       auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1, "insert_err");
       withTag = m_builder.CreateInsertValue(withErr,
-                                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(m_context), 0),
+                                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 0),
                                             2, "insert_is_err");
     }
     retVal = withTag;
