@@ -1,4 +1,2 @@
 #!/bin/bash
-set -e
-PYTEST=${PYTEST:-pytest}
-$PYTEST -q tests/run_all.py
+uv run tests/run_all.py

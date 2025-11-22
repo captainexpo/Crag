@@ -1,0 +1,59 @@
+NAME: Errors Example
+DESC: Test errors example behavior; when no args are provided it should print a helpful message.
+BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+extern fn atoi(s: *u8) -> i32;
+
+enum MyError(i32) {
+  DivisionByZero = 0,
+  Unknown = 1,
+}
+
+fn myErrorToString(err: MyError) -> *const u8 {
+  if (err == MyError::DivisionByZero) {
+    return "Division by Zero";
+  } else if (err == MyError::Unknown) {
+    return "Unknown Error";
+  }
+  return "Invalid Error Code";
+}
+
+fn divide(a: i32, b: i32) -> i32!MyError {
+  if (b == 0) {
+    return! MyError::DivisionByZero;
+  }
+  return a / b;
+}
+
+fn test(argv: *u8) -> i32 {
+  let result: i32!MyError = divide(10, atoi(argv));
+  printf("Attempting to divide 10 by %s\n", argv);
+  printf("Errored: %d\n", result.is_err);
+  if (result.is_err) {
+    printf("Error occurred: %s\n", myErrorToString(result.err));
+    return 1;
+  }
+  printf("Result: %d\n", result.ok);
+  return 0;
+}
+
+fn main() -> i32 {
+    test("2");
+    test("0");
+    test("5");
+    return 0;
+}
+
+END CODE
+BEGIN EXPECT
+Attempting to divide 10 by 2
+Errored: 0
+Result: 5
+Attempting to divide 10 by 0
+Errored: 1
+Error occurred: Division by Zero
+Attempting to divide 10 by 5
+Errored: 0
+Result: 2
+END EXPECT

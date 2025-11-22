@@ -1,0 +1,17 @@
+NAME: Forward Decl Not Required
+DESC: Test whether code not required forward declaration works
+BEGIN CODE
+
+
+fn main(argc: i32, argv: **u8) -> i32 {
+  printf("Hello World!\n");
+  return 0;
+}
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+
+END CODE
+BEGIN EXPECT
+Hello World!\n
+END EXPECT

@@ -1,0 +1,21 @@
+NAME: While Loops
+DESC: Test whether while loops work
+
+BEGIN CODE
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+  let i: i32 = 1;
+  let j: i32 = 0;
+  while (i < 10) {
+    i = i * 2;
+    j = j + 1;
+  }
+  printf("%d %d\n", i, j);
+  return 0;
+}
+
+END CODE
+BEGIN EXPECT
+16 4\n
+END EXPECT

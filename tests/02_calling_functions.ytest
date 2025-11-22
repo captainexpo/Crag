@@ -1,0 +1,24 @@
+NAME: Calling Functions
+DESC: Test whether calling functions works
+
+BEGIN CODE
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn print_something(something: *u8) -> void {
+  printf("Something: %s", something);
+}
+
+fn something_else(x: i32, y: i32) -> i32 {
+  return x * x + y * y;
+}
+
+fn main() -> i32 {
+  print_something("This is something\n");
+  printf("%d\n", something_else(2,3));
+  return 0;
+}
+
+END CODE
+BEGIN EXPECT
+Something: This is something\n13
+END EXPECT

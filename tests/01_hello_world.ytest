@@ -1,0 +1,16 @@
+NAME: Hello World
+DESC: Test whether language is able to print "Hello World!\n" and return 0
+BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main(argc: i32, argv: **u8) -> i32 {
+  printf("Hello World!\n");
+  return 0;
+}
+
+
+END CODE
+BEGIN EXPECT
+Hello World!\n
+END EXPECT
