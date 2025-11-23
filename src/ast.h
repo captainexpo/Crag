@@ -421,6 +421,9 @@ struct ASTNode {
 
 struct Statement : ASTNode {};
 struct Expression : ASTNode {};
+struct Declaration : ASTNode {
+  bool is_pub;
+};
 using ExprPtr = std::shared_ptr<Expression>;
 using StmtPtr = std::shared_ptr<Statement>;
 
@@ -747,7 +750,7 @@ struct Assignment : Statement {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct FunctionDeclaration : ASTNode {
+struct FunctionDeclaration : Declaration {
   bool is_extern;
   std::string name;
   std::shared_ptr<FunctionType> type;
@@ -816,7 +819,7 @@ struct EnumType : Type {
   }
 };
 
-struct EnumDeclaration : ASTNode {
+struct EnumDeclaration : Declaration {
   std::string name;
   std::shared_ptr<Type> base_type;
   std::shared_ptr<EnumType> enum_type; // Set after declaration
@@ -838,7 +841,7 @@ struct EnumDeclaration : ASTNode {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct StructDeclaration : ASTNode {
+struct StructDeclaration : Declaration {
   bool is_extern = false;
   std::string name;
   std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;

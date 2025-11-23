@@ -53,7 +53,7 @@ Token Parser::consume(TokenType expected_type) {
     return t;
   }
   throw ParseError("Expected " + tokenTypeName(expected_type) +
-                   ", got " + tokenTypeName(t.type),
+                       ", got " + tokenTypeName(t.type),
                    t.line, t.column);
   return Token{TokenType::EOF_T, "", -1, -1};
 }
@@ -192,35 +192,50 @@ std::shared_ptr<PointerType> Parser::parse_function_ptr_type() {
 // ---- Declarations ----
 std::shared_ptr<ASTNode> Parser::parse_declaration() {
   Token t = peek();
+  bool is_pub = match({TokenType::PUB});
+  t = peek();
   switch (t.type) {
-  case TokenType::FN:
-    return parse_function_declaration();
+  case TokenType::FN: {
+    auto fn = parse_function_declaration();
+    fn->is_pub = is_pub;
+    return fn;
+  }
   case TokenType::LET:
   case TokenType::CONST: {
     auto vd = parse_variable_declaration();
     consume(TokenType::SEMICOLON);
     return vd;
   }
-  case TokenType::STRUCT:
-    return parse_struct_declaration();
-  case TokenType::ENUM:
-    return parse_enum_declaration();
+  case TokenType::STRUCT: {
+    auto sd = parse_struct_declaration();
+    sd->is_pub = is_pub;
+    return sd;
+  }
+  case TokenType::ENUM: {
+    auto ed = parse_enum_declaration();
+    ed->is_pub = is_pub;
+    return ed;
+  }
   case TokenType::IMPORT:
     return parse_import_declaration();
-  case TokenType::EXTERN:
-    return parse_extern_declaration();
+  case TokenType::EXTERN: {
+    auto ed = parse_extern_declaration();
+    ed->is_pub = is_pub;
+    return ed;
+  }
   default:
     throw ParseError("Unexpected token in declaration", t.line,
                      t.column);
   }
 }
 
-std::shared_ptr<ASTNode> Parser::parse_extern_declaration() {
+std::shared_ptr<Declaration> Parser::parse_extern_declaration() {
   consume(TokenType::EXTERN);
   switch (peek().type) {
   case TokenType::LET:
   case TokenType::CONST:
   case TokenType::STRUCT:
+  case TokenType::ENUM:
     break;
   case TokenType::FN: {
     auto fn = parse_function_declaration();

@@ -2,17 +2,16 @@
 #define MODULE_RESOLVER_H
 
 #include "ast.h"
+#include "parser.h" // assume you have a Parser class that can parse source text
+#include "utils.h"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include "utils.h"
-#include "parser.h" // assume you have a Parser class that can parse source text
-
-
-
 
 struct Module {
 public:
@@ -24,7 +23,7 @@ public:
 
   std::string source_code;
 
-  std::unordered_set<std::string> externFunctions;
+  std::unordered_set<std::string> externDeclarations;
 
   std::string canonicalizeName(const std::string &s) const {
     return canon_name + "." + s;
@@ -45,28 +44,25 @@ inline std::string canonicalModuleName(const std::string &root_path, const std::
   }
   return base;
 }
-
 class ModuleResolver {
 public:
   explicit ModuleResolver(std::string base_path)
       : m_base_path(std::move(base_path)) {}
 
-  // Retrieve or load a module AST
-  std::shared_ptr<Module> loadModule(const std::string &import_path) {
-    // Check cache first
-    auto abs_path = resolveModulePath(import_path);
-    auto filename = abs_path.substr(abs_path.find_last_of("/\\") + 1);
+  // adjacency list: module -> list of modules it depends on
+  std::unordered_map<std::string, std::vector<std::string>> dependencyGraph;
 
+  std::shared_ptr<Module> loadModule(const std::string &import_path) {
+    auto abs_path = resolveModulePath(import_path);
     auto module_canonical_name = canonicalModuleName(m_base_path, import_path);
 
+    // Reuse cached module
     if (auto it = m_module_cache.find(abs_path); it != m_module_cache.end()) {
       return it->second;
     }
 
-    // Read file
+    // ---- Load & parse source ----
     std::string source = readFile(abs_path);
-
-    // Parse it
     Lexer lexer(source);
     auto tokens = lexer.tokenize();
 
@@ -79,34 +75,42 @@ public:
       exit(1);
     }
 
+    // ---- Create module ----
     auto module = std::make_shared<Module>();
-
     module->canon_name = module_canonical_name;
     module->path = abs_path;
     module->ast = ast;
     module->source_code = source;
 
-    // Cache it
+    // insert empty adjacency entry (important before recursion)
+    dependencyGraph[module->canon_name];
+
+    // Cache it BEFORE processing imports (avoids infinite recursion)
     m_module_cache[abs_path] = module;
 
-    // Collect exports
-    for (const auto &imp : ast->declarations) {
-      if (auto importDecl = std::dynamic_pointer_cast<ImportDeclaration>(imp)) {
-        module->imports[importDecl->alias] = loadModule(importDecl->path);
+    // ---- Process declarations ----
+    for (const auto &decl : ast->declarations) {
+      if (auto importDecl = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
+        auto importedMod = loadModule(importDecl->path);
+        module->imports[importDecl->alias] = importedMod;
+
+        // Add dependency edge: module -> imported module
+        dependencyGraph[module->canon_name].push_back(importedMod->canon_name);
         continue;
       }
 
-      // Should check for pub-ness in the future, but for now, export all
-      if (auto varDecl = std::dynamic_pointer_cast<VariableDeclaration>(imp)) {
-        module->exports[varDecl->name] = varDecl;
-      } else if (auto funcDecl = std::dynamic_pointer_cast<FunctionDeclaration>(imp)) {
-        module->exports[funcDecl->name] = funcDecl;
+      // exports
+      if (auto funcDecl = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
+        if (funcDecl->is_pub)
+          module->exports[funcDecl->name] = funcDecl;
         if (funcDecl->is_extern)
-          module->externFunctions.insert(funcDecl->name);
-      } else if (auto structDecl = std::dynamic_pointer_cast<StructDeclaration>(imp)) {
-        module->exports[structDecl->name] = structDecl;
-      } else if (auto enumDecl = std::dynamic_pointer_cast<EnumDeclaration>(imp)) {
-        module->exports[enumDecl->name] = enumDecl;
+          module->externDeclarations.insert(funcDecl->name);
+      } else if (auto structDecl = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
+        if (structDecl->is_pub)
+          module->exports[structDecl->name] = structDecl;
+      } else if (auto enumDecl = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
+        if (enumDecl->is_pub)
+          module->exports[enumDecl->name] = enumDecl;
       }
     }
 
@@ -114,7 +118,6 @@ public:
   }
 
   std::string resolveModulePath(const std::string &import_path) const {
-    // TODO: handle relative paths, extensions, etc.
     return m_base_path + "/" + import_path;
   }
 
@@ -122,6 +125,67 @@ public:
     return m_module_cache;
   }
 
+  bool hasDependencyCycle() {
+    // Simple DFS to detect cycles
+    std::unordered_set<std::string> visited;
+    std::unordered_set<std::string> recStack;
+
+    std::function<bool(const std::string &)> dfs = [&](const std::string &mod_name) {
+      if (recStack.find(mod_name) != recStack.end())
+        return true; // cycle detected
+      if (visited.find(mod_name) != visited.end())
+        return false; // already processed
+
+      visited.insert(mod_name);
+      recStack.insert(mod_name);
+
+      for (const auto &dep : dependencyGraph[mod_name]) {
+        if (dfs(dep))
+          return true;
+      }
+
+      recStack.erase(mod_name);
+      return false;
+    };
+
+    for (const auto &[mod_name, _] : dependencyGraph) {
+      if (dfs(mod_name))
+        return true;
+    }
+    return false;
+  }
+
+  std::vector<std::string> getBestOrder() {
+    std::vector<std::string> order;
+    std::unordered_set<std::string> visited;
+
+    std::function<void(const std::string &)> dfs = [&](const std::string &mod_name) {
+      if (visited.find(mod_name) != visited.end())
+        return;
+
+      visited.insert(mod_name);
+
+      for (const auto &dep : dependencyGraph[mod_name]) {
+        dfs(dep);
+      }
+
+      order.push_back(mod_name);
+    };
+
+    for (const auto &[mod_name, _] : dependencyGraph) {
+      dfs(mod_name);
+    }
+
+    return order;
+  }
+  std::shared_ptr<Module> getModule(const std::string &module_name) const {
+    for (const auto &[path, module] : m_module_cache) {
+      if (module->canon_name == module_name) {
+        return module;
+      }
+    }
+    return nullptr;
+  }
 private:
   std::string m_base_path;
   std::unordered_map<std::string, std::shared_ptr<Module>> m_module_cache;
@@ -137,5 +201,4 @@ private:
     return buffer.str();
   }
 };
-
 #endif

@@ -42,10 +42,9 @@ void IRGenerator::generate(std::shared_ptr<Module> module) {
   m_current_module = module;
   for (const auto &decl : module->ast->declarations) {
     if (IS_INSTANCE(decl, FunctionDeclaration)) {
-      llvm::Function* fn = generateFunctionDefinition(
-          std::dynamic_pointer_cast<FunctionDeclaration>(decl));
-      funcDecls.push_back({fn, std::dynamic_pointer_cast<FunctionDeclaration>(decl)});
-
+      auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl);
+      llvm::Function* fn = generateFunctionDefinition(fd);
+      funcDecls.push_back({fn, fd});
       continue;
     }
     if (IS_INSTANCE(decl, VariableDeclaration)) {
@@ -391,8 +390,7 @@ llvm::Function * IRGenerator::generateFunctionDefinition(std::shared_ptr<Functio
   llvm::FunctionType *fType =
       llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type));
 
-  std::string fname = canonicalizeNonexternName(func->name);
-
+  std::string fname = func->is_extern ? func->name : canonicalizeNonexternName(func->name);
   if (m_llvm_module->getFunction(fname)) {
     if (func->is_extern) {
       return m_llvm_module->getFunction(fname);
@@ -408,7 +406,6 @@ llvm::Function * IRGenerator::generateFunctionDefinition(std::shared_ptr<Functio
   for (auto &arg : function->args()) {
     arg.setName(func->param_names[idx++]);
   }
-
   return function;
 }
 
@@ -1154,11 +1151,14 @@ llvm::Value *IRGenerator::generateModuleAccess(const std::shared_ptr<ModuleAcces
   }
 
   auto var_name = moduleAccess->member_name;
-  auto full_name = mod->canonicalizeName(var_name);
+  // make sure full name isn't an extern name
+  auto full_name = var_name;
+  if (mod->externDeclarations.find(var_name) == mod->externDeclarations.end()){
+    full_name = mod->canonicalizeName(var_name);
+  }
 
   auto *sym = CUR_SCOPE.get(full_name);
   if (!sym) {
-    CUR_SCOPE.dump();
     throw CodeGenError(moduleAccess, "Unknown variable name: " + full_name);
   }
   llvm::Value *v = sym->value;

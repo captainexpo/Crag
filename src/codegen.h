@@ -111,7 +111,9 @@ void prepareForNewModule() {
         m_scopeStack.pop_back();
     }
 }
-
+void clearErrors() {
+    m_errors.clear();
+}
 private:
   std::vector<std::pair<ASTNodePtr, std::string>> m_errors;
 
@@ -135,8 +137,8 @@ private:
     // TODO: Don't do that :)
     if (name == "main")
       return name; // main function should not be namespaced
-    if (m_current_module->externFunctions.find(name) !=
-        m_current_module->externFunctions.end()) {
+    if (m_current_module->externDeclarations.find(name) !=
+        m_current_module->externDeclarations.end()) {
       return name;
     }
     return m_current_module->canonicalizeName(name);

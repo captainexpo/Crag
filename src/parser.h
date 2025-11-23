@@ -71,7 +71,7 @@ private:
   std::shared_ptr<VariableDeclaration> parse_variable_declaration();
   std::shared_ptr<ImportDeclaration> parse_import_declaration();
 
-  std::shared_ptr<ASTNode> parse_extern_declaration();
+  std::shared_ptr<Declaration> parse_extern_declaration();
 
   std::shared_ptr<Statement> parse_statement(bool req_semi = true);
   std::shared_ptr<Block> parse_block();
