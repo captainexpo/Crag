@@ -1,5 +1,5 @@
 AME: Linked List Example
-DESC: Test linked list printing from examples/linked_list.y
+DESC: Test linked list printing from examples/linked_list.y. This is more of an all-encompassing test
 BEGIN CODE
 
 extern fn printf(_s: *const u8, ...) -> i32;
@@ -20,7 +20,11 @@ struct Node {
   }
 
   fn append(self: *Node, val: i32) -> void {
-    let n = new_node(val);
+    let cur: *Node = self;
+    while (cur.next != null) {
+      cur = cur.next;
+    }
+    cur.next = new_node(val);
   }
 }
 

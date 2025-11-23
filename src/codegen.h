@@ -149,14 +149,18 @@ private:
                             bool loadValue);
   llvm::Value *generateAddress(const std::shared_ptr<Expression> &expr);
   llvm::Value *generateStatement(const std::shared_ptr<Statement> &stmt);
-  llvm::Function *generateFunction(const std::shared_ptr<FunctionDeclaration> &func);
+
+  llvm::Function * generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> funcDecl);
+  llvm::Function * generateFunctionBody(std::shared_ptr<FunctionDeclaration> funcDecl, llvm::Function *function);
+
   void generateVariableDeclaration(
       const std::shared_ptr<VariableDeclaration> &varDecl);
   void generateStructDeclaration(
       const std::shared_ptr<StructDeclaration> &structDecl);
   void generateEnumDeclaration(
       const std::shared_ptr<EnumDeclaration> &enumDecl);
-  void generateStructMethods(const std::shared_ptr<StructDeclaration> &structDecl);
+std::vector<std::pair<llvm::Function*, std::shared_ptr<FunctionDeclaration>>> generateStructMethods(
+    const std::shared_ptr<StructDeclaration> &structDecl);
   llvm::Value *generateBinaryOp(const std::shared_ptr<Expression> &left,
                                 const std::shared_ptr<Expression> &right,
                                 std::string op, bool loadValue = true);

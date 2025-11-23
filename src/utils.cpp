@@ -10,9 +10,9 @@ void prettyError(int line, int col, const std::string &msg,const std::string &so
 
   while (std::getline(srcStream, srcLine)) {
     if (currentLine == line) {
-      std::cout << srcLine << "\n";
-      std::cout << std::string(col - 1, ' ') << "^\n";
-      std::cout << "Error at " << line << ":" << col << " - " << msg << "\n";
+      std::cerr << srcLine << "\n";
+      std::cerr << std::string(col - 1, ' ') << "^\n";
+      std::cerr << "Error at " << line << ":" << col << " - " << msg << "\n";
       return;
     }
     currentLine++;

@@ -86,17 +86,17 @@ C_YELLOW = (255, 255, 0)
 
 
 
-def run_unit_test(tmp_path: Path, src_path: str) -> (list[str], TestResult):
-    g_outputs: list[str] = []
+def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str]]:
+    outs: list[str] = []
     def printc(text: Any, color: tuple[int, int, int]) -> None:
-        nonlocal g_outputs
-        g_outputs.append(color_text(text, color))
+        nonlocal outs
+        outs.append(color_text(text, color))
     comp = find_compiler()
     if comp is None or not isinstance(comp, str):
-        print("Compiler not found, skipping test.")
-        return TestResult.SKIP, g_outputs
+        printc("Compiler not found, skipping test.", C_YELLOW)
+        return TestResult.SKIP, outs
     if not isinstance(src_path, str):
-        print("Invalid source path, skipping test.")
+        printc("Invalid source path, skipping test.", C_YELLOW)
         return TestResult.SKIP
     outdir = tmp_path / "out"
     outdir.mkdir(exist_ok=True)
@@ -114,13 +114,13 @@ def run_unit_test(tmp_path: Path, src_path: str) -> (list[str], TestResult):
         printc("Compilation failed:\n", C_RED)
         printc(f"----------Stdout----------\n{result.stdout.strip()}\n", C_RED)
         printc(f"----------Stderr----------\n{result.stderr.strip()}\n--------------------------", C_RED)
-        return TestResult.FAIL,  g_outputs
+        return TestResult.FAIL,  outs
     # call the generated binary
     bin_file = out_base
     result = subprocess.run([bin_file], capture_output=True, text=True)
     if result.returncode != 0:
         printc(f"Execution failed:\nStdout{result.stdout}\nStderr:\n{result.stderr}", C_RED)
-        return TestResult.FAIL, g_outputs
+        return TestResult.FAIL, outs
     actual_output = result.stdout.rstrip()
     if actual_output != expected_output:
         printc("Output mismatch:", C_RED)
@@ -128,39 +128,45 @@ def run_unit_test(tmp_path: Path, src_path: str) -> (list[str], TestResult):
         printc(expected_output, C_RED)
         printc("Actual Output:", C_RED)
         printc(actual_output, C_RED)
-        return TestResult.FAIL, g_outputs
-    return TestResult.PASS, g_outputs
+        return TestResult.FAIL, outs
+    return TestResult.PASS, outs
 
 
 def main():
-    EXAMPLES = []
-    EXAMPLES += glob.glob(os.path.join(ROOT, "tests", "*.ytest"))
+    TEST_FILES = []
+    TEST_FILES += glob.glob(os.path.join(ROOT, "tests", "*.ytest"))
 
-    total = len(EXAMPLES)
+    total = len(TEST_FILES)
     passed = 0
     failed = 0
     skipped = 0
-    outs = []
+    fails = []
+    skips = []
     import tempfile
     with tempfile.TemporaryDirectory() as tmpdirname:
         tmp_path = os.path.abspath(tmpdirname)
-        for example in EXAMPLES:
-            result, out = run_unit_test(Path(tmp_path), example)
+        for test_path in TEST_FILES:
+            result, out = run_unit_test(Path(tmp_path), test_path)
             if result == TestResult.PASS:
                 print(color_text(".", C_GREEN), end="", flush=True)
                 passed += 1
             elif result == TestResult.FAIL:
                 print(color_text("F", C_RED), end="", flush=True)
                 failed += 1
-                outs.extend([example] + out)
+                fails.extend([test_path] + out)
             else:
                 print(color_text("S", C_YELLOW), end="", flush=True)
                 skipped += 1
+                skips.extend([test_path] + out)
         print()
     print(f"Passed: {color_text(passed, C_GREEN)}, Failed: {color_text(failed, C_RED)}, Skipped: {color_text(skipped, C_YELLOW)}")
+    if skipped > 0:
+        print("Skipped details:")
+        for output in skips:
+            print(output)
     if failed > 0:
         print("Failure details:")
-        for output in outs:
+        for output in fails:
             print(output)
     exit(failed)
 

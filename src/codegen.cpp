@@ -35,10 +35,17 @@ int globalVals = 0;
 
 // Public API stubs
 void IRGenerator::generate(std::shared_ptr<Module> module) {
+
+
+  std::vector<std::pair<llvm::Function*, std::shared_ptr<FunctionDeclaration>>> funcDecls;
+
   m_current_module = module;
   for (const auto &decl : module->ast->declarations) {
     if (IS_INSTANCE(decl, FunctionDeclaration)) {
-      generateFunction(std::dynamic_pointer_cast<FunctionDeclaration>(decl));
+      llvm::Function* fn = generateFunctionDefinition(
+          std::dynamic_pointer_cast<FunctionDeclaration>(decl));
+      funcDecls.push_back({fn, std::dynamic_pointer_cast<FunctionDeclaration>(decl)});
+
       continue;
     }
     if (IS_INSTANCE(decl, VariableDeclaration)) {
@@ -47,8 +54,12 @@ void IRGenerator::generate(std::shared_ptr<Module> module) {
       continue;
     }
     if (IS_INSTANCE(decl, StructDeclaration)) {
-      generateStructDeclaration(
-          std::dynamic_pointer_cast<StructDeclaration>(decl));
+      auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl);
+      generateStructDeclaration(sd);
+      auto sms = generateStructMethods(sd);
+      for (const auto& pair : sms) {
+        funcDecls.push_back(pair);
+      }
       continue;
     }
     if (IS_INSTANCE(decl, EnumDeclaration)) {
@@ -61,56 +72,12 @@ void IRGenerator::generate(std::shared_ptr<Module> module) {
     }
     throw CodeGenError(decl, "Unknown top-level declaration: " + decl->str());
   }
+  for (const auto &fnPair : funcDecls) {
+    generateFunctionBody(fnPair.second, fnPair.first);
+  }
 }
 
-int outputModuleObjectFile(const std::string &filename,
-                           llvm::Module *module) {
-  // REF:
-  // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html Make
 
-  auto targetTriple = llvm::sys::getDefaultTargetTriple();
-  llvm::InitializeAllTargetInfos();
-  llvm::InitializeAllTargets();
-  llvm::InitializeAllTargetMCs();
-  llvm::InitializeAllAsmParsers();
-  llvm::InitializeAllAsmPrinters();
-
-  std::string errorStr;
-  auto Target = llvm::TargetRegistry::lookupTarget(targetTriple, errorStr);
-
-  // Print an error and exit if we couldn't find the requested target.
-  // This generally occurs if we've forgotten to initialise the
-  // TargetRegistry or we have a bogus target triple.
-  if (!Target) {
-    return 1;
-  }
-  auto CPU = "generic";
-  auto Features = "";
-
-  llvm::TargetOptions opt;
-  auto targetMachine = Target->createTargetMachine(targetTriple, CPU, Features,
-                                                   opt, llvm::Reloc::PIC_);
-  module->setDataLayout(targetMachine->createDataLayout());
-  module->setTargetTriple(targetTriple);
-
-  std::error_code ec;
-  llvm::raw_fd_ostream dest(filename, ec, llvm::sys::fs::OF_None);
-
-  if (ec) {
-    return 1;
-  }
-  llvm::legacy::PassManager pass;
-  auto FileType = llvm::CodeGenFileType::ObjectFile;
-
-  if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
-    return 1;
-  }
-
-  pass.run(*module);
-  dest.flush();
-
-  return 0;
-}
 
 int IRGenerator::outputObjFile(const std::string &filename) {
   // REF:
@@ -419,8 +386,8 @@ IRGenerator::generateStatement(const std::shared_ptr<Statement> &stmt) {
   return nullptr;
 }
 
-llvm::Function *IRGenerator::generateFunction(
-    const std::shared_ptr<FunctionDeclaration> &func) {
+
+llvm::Function * IRGenerator::generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> func) {
   llvm::FunctionType *fType =
       llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type));
 
@@ -437,13 +404,18 @@ llvm::Function *IRGenerator::generateFunction(
       fType, llvm::Function::ExternalLinkage, fname, m_llvm_module.get());
   CUR_SCOPE.set(fname, function, fType, func->type);
   // Set names for all arguments
-  unsigned idx = 0;
+  unsigned int idx = 0;
   for (auto &arg : function->args()) {
     arg.setName(func->param_names[idx++]);
   }
 
-  if (!func->body)
-    return function;
+  return function;
+}
+
+llvm::Function* IRGenerator::generateFunctionBody(std::shared_ptr<FunctionDeclaration> func, llvm::Function *function) {
+  if (func->is_extern || !func->body) {
+    return function; // No body to generate
+  }
 
   m_scopeStack.push_back(Scope(CUR_SCOPE));
 
@@ -451,7 +423,7 @@ llvm::Function *IRGenerator::generateFunction(
       llvm::BasicBlock::Create(context, "entry", function);
   m_builder.SetInsertPoint(entry);
   // Allocate space for arguments and store them
-  idx = 0;
+  unsigned int idx = 0;
   for (auto &arg : function->args()) {
     llvm::AllocaInst *alloca =
         m_builder.CreateAlloca(arg.getType(), nullptr, arg.getName() + ".addr");
@@ -480,6 +452,68 @@ llvm::Function *IRGenerator::generateFunction(
 
   return function;
 }
+//
+// llvm::Function *IRGenerator::generateFunction(
+//     const std::shared_ptr<FunctionDeclaration> &func) {
+//   llvm::FunctionType *fType =
+//       llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type));
+//
+//   std::string fname = canonicalizeNonexternName(func->name);
+//
+//   if (m_llvm_module->getFunction(fname)) {
+//     if (func->is_extern) {
+//       return m_llvm_module->getFunction(fname);
+//     }
+//     throw CodeGenError(func, "Duplicate defition of function: " + func->name);
+//   }
+//
+//   llvm::Function *function = llvm::Function::Create(
+//       fType, llvm::Function::ExternalLinkage, fname, m_llvm_module.get());
+//   CUR_SCOPE.set(fname, function, fType, func->type);
+//   // Set names for all arguments
+//   unsigned idx = 0;
+//   for (auto &arg : function->args()) {
+//     arg.setName(func->param_names[idx++]);
+//   }
+//
+//   if (!func->body)
+//     return function;
+//
+//   m_scopeStack.push_back(Scope(CUR_SCOPE));
+//
+//   llvm::BasicBlock *entry =
+//       llvm::BasicBlock::Create(context, "entry", function);
+//   m_builder.SetInsertPoint(entry);
+//   // Allocate space for arguments and store them
+//   idx = 0;
+//   for (auto &arg : function->args()) {
+//     llvm::AllocaInst *alloca =
+//         m_builder.CreateAlloca(arg.getType(), nullptr, arg.getName() + ".addr");
+//     m_builder.CreateStore(&arg, alloca);
+//     auto argname = arg.getName().str();
+//     CUR_SCOPE.set(canonicalizeNonexternName(argname), alloca, arg.getType(),
+//                   func->type->params[idx]);
+//     idx++;
+//   }
+//
+//   if (IS_INSTANCE(func->type->ret, ErrorUnionType)) {
+//     m_error_union_return_type =
+//         std::dynamic_pointer_cast<ErrorUnionType>(func->type->ret);
+//   } else {
+//     m_error_union_return_type = nullptr;
+//   }
+//   generateStatement(func->body);
+//   if (m_builder.GetInsertBlock()->getTerminator() == nullptr) {
+//     if (IS_INSTANCE(func->type->ret, Void)) {
+//       m_builder.CreateRetVoid();
+//     } else {
+//       throw CodeGenError(func, "Non-void function missing return: " + func->name);
+//     }
+//   }
+//   m_error_union_return_type = nullptr;
+//
+//   return function;
+// }
 void IRGenerator::generateVariableDeclaration(
     const std::shared_ptr<VariableDeclaration> &varDecl) {
 
@@ -532,15 +566,20 @@ void IRGenerator::generateVariableDeclaration(
   }
 }
 
-void IRGenerator::generateStructMethods(
+std::vector<std::pair<llvm::Function*, std::shared_ptr<FunctionDeclaration>>> IRGenerator::generateStructMethods(
     const std::shared_ptr<StructDeclaration> &structDecl) {
+ std::vector<std::pair<llvm::Function*, std::shared_ptr<FunctionDeclaration>>> methods;
   for (std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>>::iterator iter = structDecl->methods.begin();
        iter != structDecl->methods.end(); ++iter) {
     auto method = iter->second;
-    std::string mangledName = "__" + structDecl->name + "_" + method->name;
+    std::string mangledName = structDecl->name + "." + method->name;
     method->name = mangledName;
-    generateFunction(method);
+
+    // HACK: Just get this done for now, should probably be better somehow
+    llvm::Function* fn = generateFunctionDefinition(method);
+    methods.push_back({fn, method});
   }
+  return methods;
 }
 
 void IRGenerator::generateStructDeclaration(
@@ -558,8 +597,6 @@ void IRGenerator::generateStructDeclaration(
   }
 
   llvmStruct->setBody(fieldTypes, /*packed=*/false);
-
-  generateStructMethods(structDecl);
 }
 
 void IRGenerator::generateEnumDeclaration(
@@ -870,7 +907,7 @@ llvm::Value *IRGenerator::generateMethodCall(const std::shared_ptr<MethodCall> &
     throw CodeGenError(structAccess, "Unknown struct type in method call: " + structType->name);
   }
   // Mangle method name
-  std::string mangledName = canonicalizeNonexternName("__" + structType->name + "_" + methodCall->method);
+  std::string mangledName = canonicalizeNonexternName(structType->name + "." + methodCall->method);
   // Prepare arguments
   std::vector<llvm::Value *> argsV;
   argsV.push_back(objPtr); // 'this' pointer
