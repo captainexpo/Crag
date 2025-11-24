@@ -111,6 +111,11 @@ public:
       } else if (auto enumDecl = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
         if (enumDecl->is_pub)
           module->exports[enumDecl->name] = enumDecl;
+      } else if (auto varDecl = std::dynamic_pointer_cast<VariableDeclaration>(decl)) {
+        if (varDecl->is_pub)
+          module->exports[varDecl->name] = varDecl;
+        if (varDecl->is_extern)
+          module->externDeclarations.insert(varDecl->name);
       }
     }
 
@@ -186,6 +191,7 @@ public:
     }
     return nullptr;
   }
+
 private:
   std::string m_base_path;
   std::unordered_map<std::string, std::shared_ptr<Module>> m_module_cache;

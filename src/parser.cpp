@@ -233,7 +233,13 @@ std::shared_ptr<Declaration> Parser::parse_extern_declaration() {
   consume(TokenType::EXTERN);
   switch (peek().type) {
   case TokenType::LET:
-  case TokenType::CONST:
+  case TokenType::CONST: {
+    auto var_decl = parse_variable_declaration();
+    var_decl->is_extern = true;
+    consume(TokenType::SEMICOLON);
+    return var_decl;
+  }
+
   case TokenType::STRUCT:
   case TokenType::ENUM:
     break;

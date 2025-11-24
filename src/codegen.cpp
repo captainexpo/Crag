@@ -36,14 +36,13 @@ int globalVals = 0;
 // Public API stubs
 void IRGenerator::generate(std::shared_ptr<Module> module) {
 
-
-  std::vector<std::pair<llvm::Function*, std::shared_ptr<FunctionDeclaration>>> funcDecls;
+  std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> funcDecls;
 
   m_current_module = module;
   for (const auto &decl : module->ast->declarations) {
     if (IS_INSTANCE(decl, FunctionDeclaration)) {
       auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl);
-      llvm::Function* fn = generateFunctionDefinition(fd);
+      llvm::Function *fn = generateFunctionDefinition(fd);
       funcDecls.push_back({fn, fd});
       continue;
     }
@@ -56,7 +55,7 @@ void IRGenerator::generate(std::shared_ptr<Module> module) {
       auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl);
       generateStructDeclaration(sd);
       auto sms = generateStructMethods(sd);
-      for (const auto& pair : sms) {
+      for (const auto &pair : sms) {
         funcDecls.push_back(pair);
       }
       continue;
@@ -75,8 +74,6 @@ void IRGenerator::generate(std::shared_ptr<Module> module) {
     generateFunctionBody(fnPair.second, fnPair.first);
   }
 }
-
-
 
 int IRGenerator::outputObjFile(const std::string &filename) {
   // REF:
@@ -350,7 +347,7 @@ IRGenerator::generateCast(const std::shared_ptr<TypeCast> &typeCast,
     return m_builder.CreateIntToPtr(val, destType, "inttoptrtmp");
   } else {
     throw CodeGenError(typeCast, "Unsupported cast from " + llvmTypeToString(srcType) +
-                        " to " + llvmTypeToString(destType));
+                                     " to " + llvmTypeToString(destType));
   }
   return nullptr;
 }
@@ -385,8 +382,7 @@ IRGenerator::generateStatement(const std::shared_ptr<Statement> &stmt) {
   return nullptr;
 }
 
-
-llvm::Function * IRGenerator::generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> func) {
+llvm::Function *IRGenerator::generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> func) {
   llvm::FunctionType *fType =
       llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type));
 
@@ -409,7 +405,7 @@ llvm::Function * IRGenerator::generateFunctionDefinition(std::shared_ptr<Functio
   return function;
 }
 
-llvm::Function* IRGenerator::generateFunctionBody(std::shared_ptr<FunctionDeclaration> func, llvm::Function *function) {
+llvm::Function *IRGenerator::generateFunctionBody(std::shared_ptr<FunctionDeclaration> func, llvm::Function *function) {
   if (func->is_extern || !func->body) {
     return function; // No body to generate
   }
@@ -517,6 +513,17 @@ void IRGenerator::generateVariableDeclaration(
   bool is_global = m_scopeStack.size() == 1;
 
   if (is_global) {
+    if (varDecl->is_extern) {
+      // Extern global variable declaration
+      // Don't canonicalize name due to extern linkage
+      llvm::Type *varType = getLLVMType(varDecl->var_type);
+      llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
+          *m_llvm_module, varType, varDecl->is_const,
+          llvm::GlobalValue::ExternalLinkage, nullptr,
+          varDecl->name);
+      CUR_SCOPE.set(varDecl->name, gVar, varType, varDecl->var_type);
+      return;
+    }
     llvm::Type *varType = getLLVMType(varDecl->var_type);
     llvm::Constant *initVal = nullptr;
     if (varDecl->initializer) {
@@ -556,16 +563,16 @@ void IRGenerator::generateVariableDeclaration(
     }
     if (initVal == nullptr) {
       throw CodeGenError(varDecl, "Failed to generate initializer for variable: " +
-                         varDecl->name);
+                                      varDecl->name);
       initVal = llvm::Constant::getNullValue(varType);
     }
     m_builder.CreateStore(initVal, alloca);
   }
 }
 
-std::vector<std::pair<llvm::Function*, std::shared_ptr<FunctionDeclaration>>> IRGenerator::generateStructMethods(
+std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> IRGenerator::generateStructMethods(
     const std::shared_ptr<StructDeclaration> &structDecl) {
- std::vector<std::pair<llvm::Function*, std::shared_ptr<FunctionDeclaration>>> methods;
+  std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> methods;
   for (std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>>::iterator iter = structDecl->methods.begin();
        iter != structDecl->methods.end(); ++iter) {
     auto method = iter->second;
@@ -573,7 +580,7 @@ std::vector<std::pair<llvm::Function*, std::shared_ptr<FunctionDeclaration>>> IR
     method->name = mangledName;
 
     // HACK: Just get this done for now, should probably be better somehow
-    llvm::Function* fn = generateFunctionDefinition(method);
+    llvm::Function *fn = generateFunctionDefinition(method);
     methods.push_back({fn, method});
   }
   return methods;
@@ -720,8 +727,8 @@ llvm::Value *IRGenerator::generateBinaryOp(
   // Ensure both operands have the same type
   if (l->getType() != r->getType()) {
     throw CodeGenError(nullptr, "Type mismatch in binary op: lhs=" +
-                       llvmTypeToString(l->getType()) +
-                       " rhs=" + llvmTypeToString(r->getType()));
+                                    llvmTypeToString(l->getType()) +
+                                    " rhs=" + llvmTypeToString(r->getType()));
     return nullptr;
   }
 
@@ -739,7 +746,7 @@ llvm::Value *IRGenerator::generateBinaryOp(
     return info.floatOp(l, r);
   else {
     throw CodeGenError(right,
-          "Unsupported type for binary operator: " + llvmTypeToString(ty));
+                       "Unsupported type for binary operator: " + llvmTypeToString(ty));
     return nullptr;
   }
 }
@@ -895,7 +902,7 @@ llvm::Value *IRGenerator::generateMethodCall(const std::shared_ptr<MethodCall> &
   }
   if (!structType) {
     throw CodeGenError(structAccess,
-          "Failed to determine struct type for method call");
+                       "Failed to determine struct type for method call");
     return nullptr;
   }
   // Find the struct type
@@ -950,7 +957,7 @@ IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     funcTy = llvm::cast<llvm::FunctionType>(getLLVMType(funcType));
   } else {
     throw CodeGenError(funcCall, "Callee is not a function or function pointer: " +
-                        funcCall->func->str());
+                                     funcCall->func->str());
     return nullptr;
   }
 
@@ -988,7 +995,7 @@ llvm::Value *IRGenerator::generateOffsetAccess(
   llvm::Type *resultType = getLLVMType(offsetAccess->inferred_type);
   if (!resultType) {
     throw CodeGenError(offsetAccess, "Unknown type for offset access: " +
-                            offsetAccess->inferred_type->str());
+                                         offsetAccess->inferred_type->str());
     return nullptr;
   }
   // Gep instruction
@@ -1062,7 +1069,7 @@ llvm::Value *IRGenerator::generateFieldAccess(
 
       if (!ptrType->base) {
         throw CodeGenError(fieldAccess->base,
-              "Pointer type in field access has no base type");
+                           "Pointer type in field access has no base type");
         return nullptr;
       }
 
@@ -1073,7 +1080,7 @@ llvm::Value *IRGenerator::generateFieldAccess(
             "load_ptr_for_field");
         if (!basePtr) {
           throw CodeGenError(fieldAccess->base,
-                "Failed to load pointer value for field access");
+                             "Failed to load pointer value for field access");
           return nullptr;
         }
       }
@@ -1081,8 +1088,8 @@ llvm::Value *IRGenerator::generateFieldAccess(
 
     if (!structType) {
       throw CodeGenError(fieldAccess->base,
-            "Field access on non-struct type: " +
-                fieldAccess->base->inferred_type->str());
+                         "Field access on non-struct type: " +
+                             fieldAccess->base->inferred_type->str());
       return nullptr;
     }
   }
@@ -1091,8 +1098,8 @@ llvm::Value *IRGenerator::generateFieldAccess(
   auto accessee = m_structTypes.find(structType->name);
   if (accessee == m_structTypes.end() || !accessee->second) {
     throw CodeGenError(fieldAccess->base,
-          "Unknown or unregistered struct type in field access: " +
-              structType->name);
+                       "Unknown or unregistered struct type in field access: " +
+                           structType->name);
     return nullptr;
   }
 
@@ -1103,8 +1110,8 @@ llvm::Value *IRGenerator::generateFieldAccess(
   int fieldIndex = structType->getFieldIndex(fieldName);
   if (fieldIndex < 0) {
     throw CodeGenError(fieldAccess->base,
-          "Struct '" + structType->name +
-              "' has no field named '" + fieldName + "'");
+                       "Struct '" + structType->name +
+                           "' has no field named '" + fieldName + "'");
     return nullptr;
   }
 
@@ -1117,14 +1124,14 @@ llvm::Value *IRGenerator::generateFieldAccess(
 
   if (!gep) {
     throw CodeGenError(fieldAccess->base, "Failed to create GEP for field '" + fieldName +
-                                 "' in struct '" + structType->name + "'");
+                                              "' in struct '" + structType->name + "'");
     return nullptr;
   }
 
   if (loadValue) {
     if (!fieldAccess->inferred_type) {
       throw CodeGenError(fieldAccess, "Field '" + fieldName +
-                             "' has no inferred type for load");
+                                          "' has no inferred type for load");
       return nullptr;
     }
     return m_builder.CreateLoad(getLLVMType(fieldAccess->inferred_type), gep,
@@ -1146,14 +1153,14 @@ llvm::Value *IRGenerator::generateModuleAccess(const std::shared_ptr<ModuleAcces
         m_current_module->imports[moduleAccess->module_name];
   } else {
     throw CodeGenError(moduleAccess,
-          "Module not found: " + moduleAccess->module_name);
+                       "Module not found: " + moduleAccess->module_name);
     return nullptr;
   }
 
   auto var_name = moduleAccess->member_name;
   // make sure full name isn't an extern name
   auto full_name = var_name;
-  if (mod->externDeclarations.find(var_name) == mod->externDeclarations.end()){
+  if (mod->externDeclarations.find(var_name) == mod->externDeclarations.end()) {
     full_name = mod->canonicalizeName(var_name);
   }
 
@@ -1202,8 +1209,9 @@ IRGenerator::generateBlock(const std::shared_ptr<Block> &blockNode) {
   m_scopeStack.push_back(*parent_scope);
   llvm::Value *lastValue = nullptr;
   for (const auto &stmt : blockNode->statements) {
-    try{ lastValue = generateStatement(stmt); }
-    catch (const CodeGenError &e) {
+    try {
+      lastValue = generateStatement(stmt);
+    } catch (const CodeGenError &e) {
       m_errors.push_back(std::make_pair(e.node(), e.what()));
     }
   }

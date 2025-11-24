@@ -133,9 +133,9 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
       } else if (auto pu = std::get_if<uint64_t>(&lit->value)) {
         src_u = *pu;
         src_s = static_cast<int64_t>(*pu);
-      } else if (auto pu = std::get_if<uintptr_t>(&lit->value)) {
-        src_u = static_cast<uint64_t>(*pu);
-        src_s = static_cast<int64_t>(src_u);
+        // } else if (auto pu = std::get_if<uintptr_t>(&lit->value)) {
+        //   src_u = static_cast<uint64_t>(*pu);
+        //   src_s = static_cast<int64_t>(src_u);
       } else {
         return std::nullopt;
       }
@@ -222,8 +222,8 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
           d = static_cast<double>(*pi);
       } else if (auto pu = std::get_if<uint64_t>(&lit->value)) {
         d = static_cast<double>(*pu);
-      } else if (auto pu = std::get_if<uintptr_t>(&lit->value)) {
-        d = static_cast<double>(static_cast<uint64_t>(*pu));
+        // } else if (auto pu = std::get_if<uintptr_t>(&lit->value)) {
+        //   d = static_cast<double>(static_cast<uint64_t>(*pu));
       } else
         return std::nullopt;
 
@@ -252,8 +252,8 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
     // We require that literal stores uintptr_t for pointer constants.
     if (from_type->kind() == TypeKind::Pointer && to_type->kind() == TypeKind::Pointer) {
       // bitcast: keep address bits as uintptr_t
-      if (auto pval = std::get_if<uintptr_t>(&lit->value)) {
-        return std::make_shared<Literal>(static_cast<uintptr_t>(*pval), to_type);
+      if (auto pval = std::get_if<uint64_t>(&lit->value)) {
+        return std::make_shared<Literal>(static_cast<uint64_t>(*pval), to_type);
       } else {
         // if literal was integer, accept int->ptr reinterpret
         if (auto pu = std::get_if<uint64_t>(&lit->value)) {
@@ -264,7 +264,7 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
     }
 
     if (from_type->kind() == TypeKind::Pointer && dstIntBits) {
-      if (auto pval = std::get_if<uintptr_t>(&lit->value)) {
+      if (auto pval = std::get_if<uint64_t>(&lit->value)) {
         // pointer -> int (ptrtoint)
         uint64_t u = static_cast<uint64_t>(*pval);
         if (to_type->isUnsigned())

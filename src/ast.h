@@ -419,9 +419,9 @@ struct ASTNode {
   }
 };
 
-struct Statement : ASTNode {};
-struct Expression : ASTNode {};
-struct Declaration : ASTNode {
+struct Statement : virtual ASTNode {};
+struct Expression : virtual ASTNode {};
+struct Declaration : virtual ASTNode {
   bool is_pub;
 };
 using ExprPtr = std::shared_ptr<Expression>;
@@ -449,7 +449,7 @@ struct Program : ASTNode {
 enum class CastType { Normal,
                       Reinterperet };
 
-struct TypeCast : Expression {
+struct TypeCast : public Expression {
   ExprPtr expr;
   std::shared_ptr<Type> target_type;
   CastType cast_type;
@@ -464,7 +464,7 @@ struct TypeCast : Expression {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct VarAccess : Expression {
+struct VarAccess : public Expression {
   std::string name;
   bool is_extern = false;
   VarAccess(std::string n) : name(std::move(n)) {}
@@ -473,7 +473,7 @@ struct VarAccess : Expression {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct EnumAccess : Expression {
+struct EnumAccess : public Expression {
   std::string enum_name;
   std::string variant;
   EnumAccess(std::string n, std::string v) : enum_name(n), variant(std::move(v)) {}
@@ -482,7 +482,7 @@ struct EnumAccess : Expression {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct Dereference : Expression {
+struct Dereference : public Expression {
   ExprPtr pointer;
   Dereference(ExprPtr p) : pointer(std::move(p)) {}
   std::string str() const override {
@@ -493,7 +493,7 @@ struct Dereference : Expression {
   };
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
-struct FuncCall : Expression {
+struct FuncCall : public Expression {
   ExprPtr func;
   std::vector<ExprPtr> args;
   FuncCall(ExprPtr f, std::vector<ExprPtr> a)
@@ -512,7 +512,7 @@ struct FuncCall : Expression {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct MethodCall : Expression {
+struct MethodCall : public Expression {
   ExprPtr object;
   std::string method;
   std::vector<ExprPtr> args;
@@ -532,7 +532,7 @@ struct MethodCall : Expression {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct FieldAccess : Expression {
+struct FieldAccess : public Expression {
   ExprPtr base;
   std::string field;
   FieldAccess(ExprPtr b, std::string f)
@@ -544,7 +544,7 @@ struct FieldAccess : Expression {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct OffsetAccess : Expression {
+struct OffsetAccess : public Expression {
   ExprPtr base;
   ExprPtr index;
   OffsetAccess(ExprPtr b, ExprPtr i)
@@ -556,7 +556,7 @@ struct OffsetAccess : Expression {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct ModuleAccess : Expression {
+struct ModuleAccess : public Expression {
   std::string module_name;
   std::string member_name;
   ModuleAccess(std::string m, std::string n)
@@ -568,7 +568,7 @@ struct ModuleAccess : Expression {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct BinaryOperation : Expression {
+struct BinaryOperation : public Expression {
   ExprPtr left;
   std::string op;
   ExprPtr right;
@@ -582,7 +582,7 @@ struct BinaryOperation : Expression {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct UnaryOperation : Expression {
+struct UnaryOperation : public Expression {
   std::string op;
   ExprPtr operand;
   UnaryOperation(std::string o, ExprPtr e)
@@ -595,7 +595,7 @@ struct UnaryOperation : Expression {
 };
 
 using ConstValue = std::variant<uint64_t, int64_t, double, bool, std::string>;
-struct Literal : Expression {
+struct Literal : public Expression {
   ConstValue value;
   std::shared_ptr<Type> lit_type;
   Literal(ConstValue v,
@@ -624,7 +624,7 @@ struct Literal : Expression {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct StructInitializer : Expression {
+struct StructInitializer : public Expression {
   std::shared_ptr<StructType> struct_type;
   std::map<std::string, std::shared_ptr<Expression>> field_values;
 
@@ -649,7 +649,7 @@ struct StructInitializer : Expression {
 
 // ----------------- Statements -----------------
 
-struct Block : Statement {
+struct Block : public Statement {
   std::vector<StmtPtr> statements;
   Block() = default;
   void append(StmtPtr stmt) { statements.push_back(std::move(stmt)); }
@@ -667,7 +667,7 @@ struct Block : Statement {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct IfStatement : Statement {
+struct IfStatement : public Statement {
   ExprPtr condition;
   StmtPtr then_branch;
   StmtPtr else_branch;
@@ -686,7 +686,7 @@ struct IfStatement : Statement {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct ForStatement : Statement {
+struct ForStatement : public Statement {
   StmtPtr init;
   ExprPtr condition;
   StmtPtr increment;
@@ -704,7 +704,7 @@ struct ForStatement : Statement {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct WhileStatement : Statement {
+struct WhileStatement : public Statement {
   ExprPtr condition;
   StmtPtr body;
   WhileStatement(ExprPtr c, StmtPtr b)
@@ -717,7 +717,7 @@ struct WhileStatement : Statement {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct ReturnStatement : Statement {
+struct ReturnStatement : public Statement {
   ExprPtr value;
   bool is_error = false; // For error unions, set outside of constructor
   ReturnStatement(ExprPtr v) : value(std::move(v)) {}
@@ -728,7 +728,7 @@ struct ReturnStatement : Statement {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct ExpressionStatement : Statement {
+struct ExpressionStatement : public Statement {
   ExprPtr expression;
   ExpressionStatement(ExprPtr e) : expression(std::move(e)) {}
   std::string str() const override {
@@ -738,7 +738,7 @@ struct ExpressionStatement : Statement {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct Assignment : Statement {
+struct Assignment : public Statement {
   ExprPtr target;
   ExprPtr value;
   Assignment(ExprPtr t, ExprPtr v)
@@ -770,11 +770,12 @@ struct FunctionDeclaration : Declaration {
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct VariableDeclaration : Statement {
+struct VariableDeclaration : Statement, Declaration {
   std::string name;
   std::shared_ptr<Type> var_type;
   ASTNodePtr initializer;
   bool is_const = false;
+  bool is_extern = false;
 
   VariableDeclaration(std::string n, std::shared_ptr<Type> t, ASTNodePtr i)
       : name(std::move(n)), var_type(std::move(t)), initializer(std::move(i)) {}

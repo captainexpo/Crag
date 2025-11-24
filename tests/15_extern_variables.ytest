@@ -1,0 +1,17 @@
+NAME: Extern Variables 
+DESC: Test whether external variables work 
+BEGIN CODE
+
+extern const __stdoutp: *void;
+
+extern fn fprintf(fd: *void, str: *u8, ...) -> i32; 
+
+fn main(argc: i32, argv: **u8) -> i32 {
+  fprintf(__stdoutp, "Hello Extern Vars!\n");
+  return 0;
+}
+
+END CODE
+BEGIN EXPECT
+Hello Extern Vars!\n
+END EXPECT

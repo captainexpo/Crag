@@ -1,0 +1,14 @@
+pub extern fn printf(fmt: *u8, ...) -> i32;
+pub extern fn scanf(fmt: *u8, ...) -> i32;
+pub extern fn malloc(size: usize) -> *u8;
+pub extern fn free(ptr: *u8) -> void;
+pub extern fn realloc(ptr: *u8, size: usize) -> *u8;
+pub extern fn memcpy(dest: *u8, src: *u8, n: usize) -> *u8;
+pub extern fn memset(s: *u8, c: i32, n: usize) -> *u8;
+pub extern fn usleep(usec: u32) -> i32;
+pub extern fn fgets(s: *u8, size: i32, stream: *void) -> *u8;
+pub extern fn strcmp(s1: *u8, s2: *u8) -> i32;
+pub extern fn strlen(s: *u8) -> usize;
+pub extern fn strcpy(dest: *u8, src: *u8) -> *u8;
+pub extern fn strcat(dest: *u8, src: *u8) -> *u8;
+pub extern const __stdinp: *void;
