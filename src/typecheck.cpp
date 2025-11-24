@@ -228,11 +228,10 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
         auto vtype = resolveType(inferExpression(v.second));
         if (!vtype->equals(en->base_type)) {
           throw TypeCheckError(v.second,
-                "Enum variant " + v.first + " has type " + typeName(vtype) +
-                    ", expected " + typeName(en->base_type));
+                               "Enum variant " + v.first + " has type " + typeName(vtype) +
+                                   ", expected " + typeName(en->base_type));
         }
       }
-
 
       m_enums[en->name] = et;
       en->inferred_type = et;
@@ -323,7 +322,7 @@ void TypeChecker::checkFunctionDeclaration(
                                     : ("arg" + std::to_string(i)));
     if (!insertSymbol(pname, fn->type->params[i])) {
       throw TypeCheckError(fn,
-            "Duplicate parameter name " + pname + " in function " + fn->name);
+                           "Duplicate parameter name " + pname + " in function " + fn->name);
     }
   }
 
@@ -387,13 +386,13 @@ void TypeChecker::checkVariableDeclaration(
                                                       CastType::Normal);
       } else if (canExplicitCast(init_type, var->var_type)) {
         throw TypeCheckError(init, "Explicit cast needed in initializer for variable " + name +
-                        ": cannot implicitly convert " + typeName(init_type) +
-                        " to " + typeName(var->var_type));
+                                       ": cannot implicitly convert " + typeName(init_type) +
+                                       " to " + typeName(var->var_type));
         goto end;
       } else {
         throw TypeCheckError(var, "Type mismatch in initializer for variable " + name +
-                       ": expected " + typeName(var->var_type) + " but got " +
-                       typeName(init_type));
+                                      ": expected " + typeName(var->var_type) + " but got " +
+                                      typeName(init_type));
         goto end;
       }
     }
@@ -422,8 +421,7 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
     for (auto &s : block->statements) {
       try {
         checkStatement(s);
-      }
-      catch (const TypeCheckError &e) {
+      } catch (const TypeCheckError &e) {
         m_errors.emplace_back(e.node, e.what());
       }
     }
@@ -434,7 +432,7 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
     auto t = inferExpression(iff->condition);
     if (!t || !dynamic_cast<Boolean *>(t.get())) {
       throw TypeCheckError(iff->condition,
-            "Condition in if-statement is not boolean: got " + typeName(t));
+                           "Condition in if-statement is not boolean: got " + typeName(t));
     }
     checkStatement(iff->then_branch);
     if (iff->else_branch)
@@ -450,58 +448,58 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
       if (ret->value) {
         throw TypeCheckError(ret->value, "Return with value in void function");
       }
-        } else {
+    } else {
       if (!ret->value) {
         if (!dynamic_cast<Void *>(m_expected_return_type.get())) {
           throw TypeCheckError(ret, "Return type mismatch: expected " +
-             typeName(m_expected_return_type) +
-             " but got void return");
+                                        typeName(m_expected_return_type) +
+                                        " but got void return");
         }
       } else {
 
         auto t = resolveType(ret_inferred);
         if (ret->is_error) { // Returning an error from the function (oh no!)
           if (!dynamic_cast<ErrorUnionType *>(m_expected_return_type.get())) {
-        throw TypeCheckError(ret, "Return type mismatch: expected " +
-               typeName(m_expected_return_type) +
-               " but got error return");
+            throw TypeCheckError(ret, "Return type mismatch: expected " +
+                                          typeName(m_expected_return_type) +
+                                          " but got error return");
           }
           auto exp_error = dynamic_cast<ErrorUnionType *>(
-          m_expected_return_type.get());
+              m_expected_return_type.get());
           if (!t->equals(exp_error->errorType)) {
-        if (canImplicitCast(t, exp_error->errorType)) {
-          ret->value = std::make_shared<TypeCast>(ret->value, exp_error->errorType, CastType::Normal);
-        } else {
-          throw TypeCheckError(ret, "Return type mismatch: expected " +
-                 typeName(exp_error->errorType) + " but got " +
-                 typeName(t));
-        }
+            if (canImplicitCast(t, exp_error->errorType)) {
+              ret->value = std::make_shared<TypeCast>(ret->value, exp_error->errorType, CastType::Normal);
+            } else {
+              throw TypeCheckError(ret, "Return type mismatch: expected " +
+                                            typeName(exp_error->errorType) + " but got " +
+                                            typeName(t));
+            }
           }
           return;
         }
         if (auto expected_error = std::dynamic_pointer_cast<ErrorUnionType>(m_expected_return_type)) {
           if (!t->equals(expected_error->valueType)) {
-        if (canImplicitCast(t, expected_error->valueType)) {
-          ret->value = std::make_shared<TypeCast>(ret->value, expected_error->valueType, CastType::Normal);
-        } else {
-          throw TypeCheckError(ret, "Return type mismatch: expected " +
-                 typeName(expected_error->valueType) + " but got " +
-                 typeName(t));
-        }
+            if (canImplicitCast(t, expected_error->valueType)) {
+              ret->value = std::make_shared<TypeCast>(ret->value, expected_error->valueType, CastType::Normal);
+            } else {
+              throw TypeCheckError(ret, "Return type mismatch: expected " +
+                                            typeName(expected_error->valueType) + " but got " +
+                                            typeName(t));
+            }
           }
           return;
         }
         if (!t || !t->equals(m_expected_return_type)) {
           if (t && canImplicitCast(t, m_expected_return_type)) {
-        ret->value = std::make_shared<TypeCast>(ret->value, m_expected_return_type, CastType::Normal);
+            ret->value = std::make_shared<TypeCast>(ret->value, m_expected_return_type, CastType::Normal);
           } else {
-        throw TypeCheckError(ret, "Return type mismatch: expected " +
-               typeName(m_expected_return_type) + " but got " +
-               typeName(t));
+            throw TypeCheckError(ret, "Return type mismatch: expected " +
+                                          typeName(m_expected_return_type) + " but got " +
+                                          typeName(t));
           }
         }
       }
-        }
+    }
     return;
   }
   if (auto exprs = std::dynamic_pointer_cast<ExpressionStatement>(stmt)) {
@@ -524,7 +522,7 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
       }
 
       throw TypeCheckError(asg,
-            "Assignment type mismatch: " + typeName(lt) + " = " + typeName(rt));
+                           "Assignment type mismatch: " + typeName(lt) + " = " + typeName(rt));
     }
     return;
   }
@@ -545,10 +543,14 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
     auto t = inferExpression(wh->condition);
     if (!t || !dynamic_cast<Boolean *>(t.get())) {
       throw TypeCheckError(wh->condition,
-            "Condition in while-statement is not boolean: got " + typeName(t));
+                           "Condition in while-statement is not boolean: got " + typeName(t));
     }
     checkStatement(wh->body);
     return;
+  }
+  if (stmt->kind() == NodeKind::BreakStatement ||
+      stmt->kind() == NodeKind::ContinueStatement) {
+    return; // nothing to check
   }
 
   throw TypeCheckError(stmt, "Unsupported statement type");
@@ -629,7 +631,7 @@ TypeChecker::inferTypeCast(const std::shared_ptr<TypeCast> &tc) {
     return tc->target_type;
   }
   throw TypeCheckError(tc, "Invalid type cast from " + typeName(ot) + " to " +
-                tc->target_type->str());
+                               tc->target_type->str());
   return nullptr;
 }
 
@@ -665,7 +667,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
 
     if (!lt->isGeneralNumeric() || !rt->isGeneralNumeric()) { // Allow pointers here
       throw TypeCheckError(bin, "Arithmetic operators require numeric operands: got " +
-                     typeName(lt) + " " + bin->op + " " + typeName(rt));
+                                    typeName(lt) + " " + bin->op + " " + typeName(rt));
       return nullptr;
     }
     if (!lt->equals(rt)) {
@@ -677,7 +679,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
         lt = rt;
       } else {
         throw TypeCheckError(bin, "Arithmetic operator type mismatch: " + typeName(lt) + " " +
-                       bin->op + " " + typeName(rt));
+                                      bin->op + " " + typeName(rt));
         return nullptr;
       }
     }
@@ -691,7 +693,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
     if (!lt->equals(rt) && !canImplicitCast(rt, lt) &&
         !canImplicitCast(lt, rt)) {
       throw TypeCheckError(bin, "Comparison operands must have same type: " + typeName(lt) +
-                     " vs " + typeName(rt));
+                                    " vs " + typeName(rt));
       return nullptr;
     }
     auto b = std::make_shared<Boolean>();
@@ -706,7 +708,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
           std::dynamic_pointer_cast<OffsetAccess>(bin->left) ||
           std::dynamic_pointer_cast<Dereference>(bin->left))) {
       throw TypeCheckError(bin->left,
-            "Left operand of assignment is not an lvalue: " + bin->left->str());
+                           "Left operand of assignment is not an lvalue: " + bin->left->str());
       return nullptr;
     }
     if (lt->is_const) {
@@ -720,7 +722,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
       auto ptype = std::dynamic_pointer_cast<PointerType>(pt);
       if (!ptype) {
         throw TypeCheckError(deref->pointer,
-              "Dereference of non-pointer type: " + typeName(pt));
+                             "Dereference of non-pointer type: " + typeName(pt));
         return nullptr;
       }
       if (ptype->pointer_const) {
@@ -734,7 +736,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
         return lt;
       }
       throw TypeCheckError(bin,
-            "Assignment type mismatch: " + typeName(lt) + " = " + typeName(rt));
+                           "Assignment type mismatch: " + typeName(lt) + " = " + typeName(rt));
       return nullptr;
     }
     bin->inferred_type = resolveType(lt);
@@ -808,8 +810,8 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
       mc->args.size() !=
           (ftype->params.size() - 1)) {
     throw TypeCheckError(mc, "Method call argument count mismatch: expected " +
-                  std::to_string(ftype->params.size() - 1) + " got " +
-                  std::to_string(mc->args.size()));
+                                 std::to_string(ftype->params.size() - 1) + " got " +
+                                 std::to_string(mc->args.size()));
     return nullptr;
   }
   size_t n = ftype->params.size();
@@ -818,14 +820,14 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
 
     if (!at)
       throw TypeCheckError(mc, "Failed to infer type of method call argument " +
-                    std::to_string(i));
+                                   std::to_string(i));
     if (i + 1 < ftype->params.size() && !at->equals(ftype->params[i + 1])) {
       if (canImplicitCast(at, ftype->params[i + 1])) {
         mc->args[i] = std::make_shared<TypeCast>(mc->args[i], ftype->params[i + 1], CastType::Normal);
       } else
         throw TypeCheckError(mc, "Method call argument " + std::to_string(i) +
-                      " type mismatch: expected " + typeName(ftype->params[i + 1]) +
-                      " got " + typeName(at));
+                                     " type mismatch: expected " + typeName(ftype->params[i + 1]) +
+                                     " got " + typeName(at));
     }
   }
   mc->inferred_type = resolveType(ftype->ret);
@@ -847,7 +849,7 @@ TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call) {
 
       if (!ftype) {
         throw TypeCheckError(call,
-              "Attempted to call non-function pointer type: " + typeName(ft));
+                             "Attempted to call non-function pointer type: " + typeName(ft));
       }
     } else {
       throw TypeCheckError(call, "Attempted to call non-function type: " + typeName(ft));
@@ -859,8 +861,8 @@ TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call) {
       call->args.size() !=
           (ftype->params.size())) { // if method, first param is 'self'
     throw TypeCheckError(call, "Function call argument count mismatch: expected " +
-                    std::to_string(ftype->params.size()) + " got " +
-                    std::to_string(call->args.size()));
+                                   std::to_string(ftype->params.size()) + " got " +
+                                   std::to_string(call->args.size()));
   }
 
   size_t n = ftype->params.size();
@@ -868,15 +870,15 @@ TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call) {
     auto at = inferExpression(call->args[i]);
     if (!at)
       throw TypeCheckError(call, "Failed to infer type of function call argument " +
-                      std::to_string(i));
+                                     std::to_string(i));
 
     if (i < ftype->params.size() && !at->equals(ftype->params[i])) {
       if (canImplicitCast(at, ftype->params[i])) {
         call->args[i] = std::make_shared<TypeCast>(call->args[i], ftype->params[i], CastType::Normal);
       } else
-      throw TypeCheckError(call, "Function call argument " + std::to_string(i) +
-                        " type mismatch: expected " + typeName(ftype->params[i]) +
-                        " got " + typeName(at));
+        throw TypeCheckError(call, "Function call argument " + std::to_string(i) +
+                                       " type mismatch: expected " + typeName(ftype->params[i]) +
+                                       " got " + typeName(at));
     }
   }
 
@@ -912,7 +914,8 @@ std::shared_ptr<Type>
 TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
   if (auto baseExpr = std::dynamic_pointer_cast<Expression>(fa->base)) {
     auto bt = inferExpression(baseExpr);
-    if (!bt) throw TypeCheckError(fa, "Failed to infer type of field access base");
+    if (!bt)
+      throw TypeCheckError(fa, "Failed to infer type of field access base");
     auto st = std::dynamic_pointer_cast<StructType>(bt);
     if (!st) {
       auto pt = std::dynamic_pointer_cast<PointerType>(bt);
@@ -942,10 +945,12 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
   if (auto baseExpr = std::dynamic_pointer_cast<Expression>(oa->base)) {
     auto bt = inferExpression(baseExpr);
     inferExpression(oa->index);
-    if (!bt) throw TypeCheckError(oa, "Failed to infer type of offset access base");
+    if (!bt)
+      throw TypeCheckError(oa, "Failed to infer type of offset access base");
     if (auto at = std::dynamic_pointer_cast<ArrayType>(bt)) {
       auto idxt = inferExpression(oa->index);
-      if (!idxt) throw TypeCheckError(oa, "Failed to infer type of offset access index");
+      if (!idxt)
+        throw TypeCheckError(oa, "Failed to infer type of offset access index");
       oa->inferred_type = resolveType(at->base);
       return at->base;
     }
@@ -986,8 +991,8 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init) {
         p.second = std::make_shared<TypeCast>(p.second, ft, CastType::Normal);
       } else {
         throw TypeCheckError(init, "Struct " + st->name + " field " + p.first +
-                        " type mismatch: expected " + typeName(ft) + " got " +
-                        typeName(vt));
+                                       " type mismatch: expected " + typeName(ft) + " got " +
+                                       typeName(vt));
       }
     }
   }

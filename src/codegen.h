@@ -17,9 +17,15 @@ public:
       : m_node(node), m_msg(msg) {}
   const char *what() const noexcept override { return m_msg.c_str(); }
   ASTNodePtr node() const { return m_node; }
+
 private:
   ASTNodePtr m_node;
   std::string m_msg;
+};
+
+struct LoopInfo {
+  llvm::BasicBlock *breakBB;
+  llvm::BasicBlock *continueBB;
 };
 
 class Scope {
@@ -69,15 +75,21 @@ struct OpInfo {
   std::function<llvm::Value *(llvm::Value *, llvm::Value *)> floatOp;
 };
 
-class IRGenerator {
+class Codegen {
 public:
-  IRGenerator(std::string module_name, llvm::LLVMContext &ctx, ModuleResolver moduleResolver)
+  virtual ~Codegen() = default;
+  virtual void generate(std::shared_ptr<Module> module) = 0;
+};
+
+class LLVMCodegen : public Codegen {
+public:
+  LLVMCodegen(std::string module_name, llvm::LLVMContext &ctx, ModuleResolver moduleResolver)
       : context(ctx), m_builder(ctx), m_module_resolver(moduleResolver) {
-    // Initialize the global scope
+
     m_llvm_module = std::make_unique<llvm::Module>(module_name, ctx);
     m_scopeStack.push_back(Scope(nullptr));
   }
-  void generate(std::shared_ptr<Module> module);
+  void generate(std::shared_ptr<Module> module) override;
   void printIR(const std::string &filename);
   int outputObjFile(const std::string &filename);
 
@@ -87,34 +99,31 @@ public:
   bool ok() const { return m_errors.empty(); }
   std::unique_ptr<llvm::Module> takeModule() { return std::move(m_llvm_module); }
 
-void prepareForNewModule() {
+  void prepareForNewModule() {
     m_builder.ClearInsertionPoint();
 
-    // Preserve current module's symbols in global scope before clearing
     if (m_scopeStack.size() > 1) {
-        // Get the global scope (first element)
-        Scope& globalScope = m_scopeStack[0];
+      Scope &globalScope = m_scopeStack[0];
 
-        // Add all symbols from current local scopes to global scope
-        // We need to iterate through all non-global scopes
-        for (size_t i = 1; i < m_scopeStack.size(); i++) {
-            const Scope& currentScope = m_scopeStack[i];
-            // Copy symbols from current scope to global scope
-            for (const auto& pair : currentScope.table) {
-                globalScope.set(pair.first, pair.second.value, pair.second.type, pair.second.ast_type);
-            }
+      for (size_t i = 1; i < m_scopeStack.size(); i++) {
+        const Scope &currentScope = m_scopeStack[i];
+        for (const auto &pair : currentScope.table) {
+          globalScope.set(pair.first, pair.second.value, pair.second.type, pair.second.ast_type);
         }
+      }
     }
 
     // Clear all local scopes, keeping only global
     while (m_scopeStack.size() > 1) {
-        m_scopeStack.pop_back();
+      m_scopeStack.pop_back();
     }
-}
-void clearErrors() {
+  }
+  void clearErrors() {
     m_errors.clear();
-}
+  }
+
 private:
+  std::vector<LoopInfo> m_loop_stack;
   std::vector<std::pair<ASTNodePtr, std::string>> m_errors;
 
   llvm::LLVMContext &context;
@@ -152,8 +161,8 @@ private:
   llvm::Value *generateAddress(const std::shared_ptr<Expression> &expr);
   llvm::Value *generateStatement(const std::shared_ptr<Statement> &stmt);
 
-  llvm::Function * generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> funcDecl);
-  llvm::Function * generateFunctionBody(std::shared_ptr<FunctionDeclaration> funcDecl, llvm::Function *function);
+  llvm::Function *generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> funcDecl);
+  llvm::Function *generateFunctionBody(std::shared_ptr<FunctionDeclaration> funcDecl, llvm::Function *function);
 
   void generateVariableDeclaration(
       const std::shared_ptr<VariableDeclaration> &varDecl);
@@ -161,8 +170,8 @@ private:
       const std::shared_ptr<StructDeclaration> &structDecl);
   void generateEnumDeclaration(
       const std::shared_ptr<EnumDeclaration> &enumDecl);
-std::vector<std::pair<llvm::Function*, std::shared_ptr<FunctionDeclaration>>> generateStructMethods(
-    const std::shared_ptr<StructDeclaration> &structDecl);
+  std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> generateStructMethods(
+      const std::shared_ptr<StructDeclaration> &structDecl);
   llvm::Value *generateBinaryOp(const std::shared_ptr<Expression> &left,
                                 const std::shared_ptr<Expression> &right,
                                 std::string op, bool loadValue = true);

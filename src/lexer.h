@@ -27,6 +27,8 @@ enum class TokenType {
   IMPORT,
   EXTERN,
   PUB,
+  BREAK,
+  CONTINUE,
 
   // Operators
   EQ,

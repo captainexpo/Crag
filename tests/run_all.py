@@ -4,8 +4,11 @@ import subprocess
 import glob
 import re
 from enum import Enum
+from concurrent.futures import ProcessPoolExecutor
 from typing import Any, Optional
 from pathlib import Path
+
+
 
 def color_text(text: Any, rgb: tuple[int, int, int]) -> str:
     text = str(text)
@@ -86,18 +89,15 @@ C_YELLOW = (255, 255, 0)
 
 
 
+comp = find_compiler()
 def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str]]:
     outs: list[str] = []
     def printc(text: Any, color: tuple[int, int, int]) -> None:
         nonlocal outs
         outs.append(color_text(text, color))
-    comp = find_compiler()
     if comp is None or not isinstance(comp, str):
         printc("Compiler not found, skipping test.", C_YELLOW)
         return TestResult.SKIP, outs
-    if not isinstance(src_path, str):
-        printc("Invalid source path, skipping test.", C_YELLOW)
-        return TestResult.SKIP
     outdir = tmp_path / "out"
     outdir.mkdir(exist_ok=True)
     base = os.path.splitext(os.path.basename(src_path))[0]
@@ -133,33 +133,47 @@ def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str]]
 
 
 def main():
-    TEST_FILES = []
-    TEST_FILES += glob.glob(os.path.join(ROOT, "tests", "*.ytest"))
+    TEST_FILES = glob.glob(os.path.join(ROOT, "tests", "*.ytest"))
 
-    total = len(TEST_FILES)
     passed = 0
     failed = 0
     skipped = 0
     fails = []
     skips = []
+
     import tempfile
     with tempfile.TemporaryDirectory() as tmpdirname:
-        tmp_path = os.path.abspath(tmpdirname)
-        for test_path in TEST_FILES:
-            result, out = run_unit_test(Path(tmp_path), test_path)
-            if result == TestResult.PASS:
-                print(color_text(".", C_GREEN), end="", flush=True)
-                passed += 1
-            elif result == TestResult.FAIL:
-                print(color_text("F", C_RED), end="", flush=True)
-                failed += 1
-                fails.extend([test_path] + out)
-            else:
-                print(color_text("S", C_YELLOW), end="", flush=True)
-                skipped += 1
-                skips.extend([test_path] + out)
+        tmp_path = Path(tmpdirname)
+
+        # Create executor once
+        with ProcessPoolExecutor() as pool:
+            # Submit each test exactly once
+            futures = {
+                pool.submit(run_unit_test, tmp_path, test_path): test_path
+                for test_path in TEST_FILES
+            }
+
+            # Process results
+            for future in futures:
+                test_path = futures[future]
+                result, out = future.result()
+
+                if result == TestResult.PASS:
+                    print(color_text(".", C_GREEN), end="", flush=True)
+                    passed += 1
+                elif result == TestResult.FAIL:
+                    print(color_text("F", C_RED), end="", flush=True)
+                    failed += 1
+                    fails.extend([test_path] + out)
+                else:
+                    print(color_text("S", C_YELLOW), end="", flush=True)
+                    skipped += 1
+                    skips.extend([test_path] + out)
+
         print()
+
     print(f"Passed: {color_text(passed, C_GREEN)}, Failed: {color_text(failed, C_RED)}, Skipped: {color_text(skipped, C_YELLOW)}")
+
     if skipped > 0:
         print("Skipped details:")
         for output in skips:
@@ -168,6 +182,7 @@ def main():
         print("Failure details:")
         for output in fails:
             print(output)
+
     exit(failed)
 
 if __name__ == "__main__":

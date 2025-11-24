@@ -34,7 +34,7 @@ int globalVals = 0;
 #define CUR_SCOPE m_scopeStack.back()
 
 // Public API stubs
-void IRGenerator::generate(std::shared_ptr<Module> module) {
+void LLVMCodegen::generate(std::shared_ptr<Module> module) {
 
   std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> funcDecls;
 
@@ -75,7 +75,7 @@ void IRGenerator::generate(std::shared_ptr<Module> module) {
   }
 }
 
-int IRGenerator::outputObjFile(const std::string &filename) {
+int LLVMCodegen::outputObjFile(const std::string &filename) {
   // REF:
   // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html Make
 
@@ -126,7 +126,7 @@ int IRGenerator::outputObjFile(const std::string &filename) {
   return 0;
 }
 
-void IRGenerator::printIR(const std::string &filename) {
+void LLVMCodegen::printIR(const std::string &filename) {
   if (m_llvm_module) {
     std::error_code ec;
     llvm::raw_fd_ostream out(filename, ec, llvm::sys::fs::OF_None);
@@ -137,7 +137,7 @@ void IRGenerator::printIR(const std::string &filename) {
   }
 }
 
-llvm::Type *IRGenerator::getLLVMType(const std::shared_ptr<Type> &type) {
+llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type) {
 
   if (IS_INSTANCE(type, I32))
     return llvm::Type::getInt32Ty(context);
@@ -206,7 +206,7 @@ llvm::Type *IRGenerator::getLLVMType(const std::shared_ptr<Type> &type) {
 }
 
 llvm::Value *
-IRGenerator::generateAddress(const std::shared_ptr<Expression> &expr) {
+LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &expr) {
   if (IS_INSTANCE(expr, VarAccess)) {
     auto var = std::dynamic_pointer_cast<VarAccess>(expr);
     return CUR_SCOPE.get(canonicalizeNonexternName(var->name))->value;
@@ -235,7 +235,7 @@ IRGenerator::generateAddress(const std::shared_ptr<Expression> &expr) {
 }
 
 llvm::Value *
-IRGenerator::generateExpression(const std::shared_ptr<Expression> &expr,
+LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
                                 bool loadValue) {
   if (IS_INSTANCE(expr, BinaryOperation)) {
     auto binOp = std::dynamic_pointer_cast<BinaryOperation>(expr);
@@ -302,7 +302,7 @@ std::string llvmTypeToString(llvm::Type *ty) {
 }
 
 llvm::Value *
-IRGenerator::generateCast(const std::shared_ptr<TypeCast> &typeCast,
+LLVMCodegen::generateCast(const std::shared_ptr<TypeCast> &typeCast,
                           bool loadValue) {
   llvm::Value *val = generateExpression(typeCast->expr);
   llvm::Type *destType = getLLVMType(typeCast->target_type);
@@ -353,7 +353,7 @@ IRGenerator::generateCast(const std::shared_ptr<TypeCast> &typeCast,
 }
 
 llvm::Value *
-IRGenerator::generateStatement(const std::shared_ptr<Statement> &stmt) {
+LLVMCodegen::generateStatement(const std::shared_ptr<Statement> &stmt) {
   if (IS_INSTANCE(stmt, VariableDeclaration)) {
     generateVariableDeclaration(
         std::dynamic_pointer_cast<VariableDeclaration>(stmt));
@@ -375,6 +375,14 @@ IRGenerator::generateStatement(const std::shared_ptr<Statement> &stmt) {
   } else if (IS_INSTANCE(stmt, ReturnStatement)) {
     return generateReturnStatement(
         std::dynamic_pointer_cast<ReturnStatement>(stmt));
+  } else if (IS_INSTANCE(stmt, BreakStatement)) {
+    llvm::Value *val = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
+    m_builder.CreateBr(m_loop_stack.back().breakBB);
+    return val;
+  } else if (IS_INSTANCE(stmt, ContinueStatement)) {
+    llvm::Value *val = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
+    m_builder.CreateBr(m_loop_stack.back().continueBB);
+    return val;
   } else {
 
     throw CodeGenError(stmt, "Unknown statement type: " + stmt->str());
@@ -382,7 +390,7 @@ IRGenerator::generateStatement(const std::shared_ptr<Statement> &stmt) {
   return nullptr;
 }
 
-llvm::Function *IRGenerator::generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> func) {
+llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> func) {
   llvm::FunctionType *fType =
       llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type));
 
@@ -405,7 +413,7 @@ llvm::Function *IRGenerator::generateFunctionDefinition(std::shared_ptr<Function
   return function;
 }
 
-llvm::Function *IRGenerator::generateFunctionBody(std::shared_ptr<FunctionDeclaration> func, llvm::Function *function) {
+llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclaration> func, llvm::Function *function) {
   if (func->is_extern || !func->body) {
     return function; // No body to generate
   }
@@ -507,7 +515,7 @@ llvm::Function *IRGenerator::generateFunctionBody(std::shared_ptr<FunctionDeclar
 //
 //   return function;
 // }
-void IRGenerator::generateVariableDeclaration(
+void LLVMCodegen::generateVariableDeclaration(
     const std::shared_ptr<VariableDeclaration> &varDecl) {
 
   bool is_global = m_scopeStack.size() == 1;
@@ -570,7 +578,7 @@ void IRGenerator::generateVariableDeclaration(
   }
 }
 
-std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> IRGenerator::generateStructMethods(
+std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> LLVMCodegen::generateStructMethods(
     const std::shared_ptr<StructDeclaration> &structDecl) {
   std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> methods;
   for (std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>>::iterator iter = structDecl->methods.begin();
@@ -586,7 +594,7 @@ std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> I
   return methods;
 }
 
-void IRGenerator::generateStructDeclaration(
+void LLVMCodegen::generateStructDeclaration(
     const std::shared_ptr<StructDeclaration> &structDecl) {
 
   llvm::StructType *llvmStruct =
@@ -603,14 +611,14 @@ void IRGenerator::generateStructDeclaration(
   llvmStruct->setBody(fieldTypes, /*packed=*/false);
 }
 
-void IRGenerator::generateEnumDeclaration(
+void LLVMCodegen::generateEnumDeclaration(
     const std::shared_ptr<EnumDeclaration> &enumDecl) {
   // No actual code-gen here, just putting the type in global scope
   m_enumTypes[enumDecl->name] =
       std::dynamic_pointer_cast<EnumType>(enumDecl->inferred_type);
 }
 
-llvm::Value *IRGenerator::generateBinaryOp(
+llvm::Value *LLVMCodegen::generateBinaryOp(
     const std::shared_ptr<Expression> &left,
     const std::shared_ptr<Expression> &right,
     std::string op, bool loadValue) {
@@ -752,7 +760,7 @@ llvm::Value *IRGenerator::generateBinaryOp(
 }
 
 llvm::Value *
-IRGenerator::generateUnaryOp(const std::shared_ptr<Expression> &operand,
+LLVMCodegen::generateUnaryOp(const std::shared_ptr<Expression> &operand,
                              std::string op, bool loadValue) {
   auto val = generateExpression(operand);
   if (op == "-") {
@@ -770,7 +778,7 @@ IRGenerator::generateUnaryOp(const std::shared_ptr<Expression> &operand,
   throw CodeGenError(operand, "Unsupported unary operator: " + op);
 }
 
-llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
+llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
                                           bool loadValue) {
 
   if (IS_INSTANCE(lit->inferred_type, I32)) {
@@ -846,7 +854,7 @@ llvm::Value *IRGenerator::generateLiteral(const std::shared_ptr<Literal> &lit,
 }
 
 llvm::Value *
-IRGenerator::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
+LLVMCodegen::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
                                bool loadValue) {
   auto *sym = CUR_SCOPE.get(canonicalizeNonexternName(varAccess->name));
   if (!sym) {
@@ -862,7 +870,7 @@ IRGenerator::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
   return m_builder.CreateLoad(sym->type, v, varAccess->name);
 }
 
-llvm::Value *IRGenerator::generateEnumAccess(const std::shared_ptr<EnumAccess> &enumAccess, bool loadValue) {
+llvm::Value *LLVMCodegen::generateEnumAccess(const std::shared_ptr<EnumAccess> &enumAccess, bool loadValue) {
   auto it = m_enumTypes.find(enumAccess->enum_name);
   if (it == m_enumTypes.end()) {
     throw CodeGenError(enumAccess, "Unknown enum type: " + enumAccess->enum_name);
@@ -877,7 +885,7 @@ llvm::Value *IRGenerator::generateEnumAccess(const std::shared_ptr<EnumAccess> &
   return generateLiteral(literal, loadValue);
 }
 
-llvm::Value *IRGenerator::generateMethodCall(const std::shared_ptr<MethodCall> &methodCall, bool loadValue) {
+llvm::Value *LLVMCodegen::generateMethodCall(const std::shared_ptr<MethodCall> &methodCall, bool loadValue) {
 
   auto structAccess = methodCall->object;
   llvm::Value *objPtr = generateAddress(std::static_pointer_cast<Expression>(structAccess));
@@ -925,7 +933,7 @@ llvm::Value *IRGenerator::generateMethodCall(const std::shared_ptr<MethodCall> &
   return m_builder.CreateCall(calleeValue, argsV, calleeValue->getFunctionType()->getReturnType() != llvm::Type::getVoidTy(context) ? "methodcalltmp" : "");
 }
 llvm::Value *
-IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
+LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
                               bool loadValue) {
   std::vector<llvm::Value *> argsV;
   for (const auto &arg : funcCall->args) {
@@ -980,7 +988,7 @@ IRGenerator::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
 
   return m_builder.CreateCall(funcTy, calleeValue, argsV, funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
 }
-llvm::Value *IRGenerator::generateOffsetAccess(
+llvm::Value *LLVMCodegen::generateOffsetAccess(
     const std::shared_ptr<OffsetAccess> &offsetAccess, bool loadValue) {
 
   llvm::Value *basePtr = generateExpression(
@@ -1008,7 +1016,7 @@ llvm::Value *IRGenerator::generateOffsetAccess(
     return gep;
 }
 
-llvm::Value *IRGenerator::generateFieldAccess(
+llvm::Value *LLVMCodegen::generateFieldAccess(
     const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
 
   if (!fieldAccess || !fieldAccess->base) {
@@ -1141,7 +1149,7 @@ llvm::Value *IRGenerator::generateFieldAccess(
   return gep;
 }
 
-llvm::Value *IRGenerator::generateModuleAccess(const std::shared_ptr<ModuleAccess> &moduleAccess,
+llvm::Value *LLVMCodegen::generateModuleAccess(const std::shared_ptr<ModuleAccess> &moduleAccess,
                                                bool loadValue) {
   // Same as variable access, but with namespaced name
 
@@ -1176,7 +1184,7 @@ llvm::Value *IRGenerator::generateModuleAccess(const std::shared_ptr<ModuleAcces
   return m_builder.CreateLoad(sym->type, v, var_name);
 }
 
-llvm::Value *IRGenerator::generateStructInitializer(
+llvm::Value *LLVMCodegen::generateStructInitializer(
     const std::shared_ptr<StructInitializer> &structInit, bool loadValue) {
   auto it = m_structTypes.find(structInit->struct_type->name);
   if (it == m_structTypes.end()) {
@@ -1203,7 +1211,7 @@ llvm::Value *IRGenerator::generateStructInitializer(
 }
 
 llvm::Value *
-IRGenerator::generateBlock(const std::shared_ptr<Block> &blockNode) {
+LLVMCodegen::generateBlock(const std::shared_ptr<Block> &blockNode) {
   auto parent_scope = !m_scopeStack.empty() ? std::make_shared<Scope>(CUR_SCOPE)
                                             : std::make_shared<Scope>(nullptr);
   m_scopeStack.push_back(*parent_scope);
@@ -1219,7 +1227,7 @@ IRGenerator::generateBlock(const std::shared_ptr<Block> &blockNode) {
 }
 
 llvm::Value *
-IRGenerator::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
+LLVMCodegen::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
 
   // Condition generation
   llvm::Value *condV = generateExpression(ifStmt->condition);
@@ -1245,7 +1253,7 @@ IRGenerator::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
   return nullptr;
 }
 
-llvm::Value *IRGenerator::generateWhileStatement(
+llvm::Value *LLVMCodegen::generateWhileStatement(
     const std::shared_ptr<WhileStatement> &whileStmt) {
   llvm::Function *theFunction = m_builder.GetInsertBlock()->getParent();
   auto cond_block =
@@ -1254,6 +1262,10 @@ llvm::Value *IRGenerator::generateWhileStatement(
       llvm::BasicBlock::Create(context, "while.body", theFunction);
   auto after_block =
       llvm::BasicBlock::Create(context, "while.end", theFunction);
+  m_loop_stack.push_back(LoopInfo{
+      .breakBB = after_block,
+      .continueBB = cond_block,
+  });
   m_builder.CreateBr(cond_block);
   m_builder.SetInsertPoint(cond_block);
   auto condition = generateExpression(whileStmt->condition);
@@ -1264,10 +1276,11 @@ llvm::Value *IRGenerator::generateWhileStatement(
   generateStatement(whileStmt->body);
   m_builder.CreateBr(cond_block);
   m_builder.SetInsertPoint(after_block);
+  m_loop_stack.pop_back();
   return nullptr;
 }
 
-llvm::Value *IRGenerator::generateForStatement(
+llvm::Value *LLVMCodegen::generateForStatement(
     const std::shared_ptr<ForStatement> &forStmt) {
 
   llvm::Function *theFunction = m_builder.GetInsertBlock()->getParent();
@@ -1279,6 +1292,10 @@ llvm::Value *IRGenerator::generateForStatement(
       llvm::BasicBlock::Create(context, "for.body", theFunction);
   auto after_block =
       llvm::BasicBlock::Create(context, "for.end", theFunction);
+  m_loop_stack.push_back(LoopInfo{
+      .breakBB = after_block,
+      .continueBB = cond_block,
+  });
   m_builder.CreateBr(cond_block);
   m_builder.SetInsertPoint(cond_block);
   llvm::Value *condition = nullptr;
@@ -1296,10 +1313,11 @@ llvm::Value *IRGenerator::generateForStatement(
     generateStatement(forStmt->increment);
   m_builder.CreateBr(cond_block);
   m_builder.SetInsertPoint(after_block);
+  m_loop_stack.pop_back();
   return nullptr;
 }
 
-llvm::Value *IRGenerator::generateReturnStatement(
+llvm::Value *LLVMCodegen::generateReturnStatement(
     const std::shared_ptr<ReturnStatement> &retStmt) {
   if (retStmt->value == nullptr) {
     auto retInstr = m_builder.CreateRetVoid();
@@ -1349,7 +1367,7 @@ llvm::Value *IRGenerator::generateReturnStatement(
   return retInstr;
 }
 
-llvm::Value *IRGenerator::generateExpressionStatement(
+llvm::Value *LLVMCodegen::generateExpressionStatement(
     const std::shared_ptr<ExpressionStatement> &exprStmt) {
   return generateExpression(exprStmt->expression);
 }

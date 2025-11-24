@@ -45,6 +45,10 @@ std::string tokenTypeName(TokenType type) {
     return "EXTERN";
   case TokenType::PUB:
     return "PUB";
+  case TokenType::BREAK:
+    return "BREAK";
+  case TokenType::CONTINUE:
+    return "CONTINUE";
   case TokenType::QUESTION:
     return "QUESTION";
   case TokenType::EQ:
@@ -153,6 +157,8 @@ Lexer::Lexer(const std::string &src) : code(src) {
       {"import", TokenType::IMPORT},
       {"extern", TokenType::EXTERN},
       {"pub", TokenType::PUB},
+      {"break", TokenType::BREAK},
+      {"continue", TokenType::CONTINUE},
   };
 }
 

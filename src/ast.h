@@ -2,7 +2,6 @@
 #define AST_H
 
 #include <cstdint>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -65,6 +64,8 @@ struct ASTVisitor {
   virtual void visit(struct FunctionDeclaration &) {}
   virtual void visit(struct ExpressionStatement &) {}
   virtual void visit(struct EnumAccess &) {}
+  virtual void visit(struct BreakStatement &) {}
+  virtual void visit(struct ContinueStatement &) {}
 };
 
 struct Type {
@@ -390,6 +391,8 @@ enum class NodeKind {
   StructInit,
   FunctionDecl,
   ExpressionStatement,
+  BreakStatement,
+  ContinueStatement,
   Unknown
 };
 
@@ -725,6 +728,24 @@ struct ReturnStatement : public Statement {
     return "ReturnStatement(" + (value ? value->toString() : "void") + ")";
   }
   NodeKind kind() const override { return NodeKind::ReturnStmt; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
+};
+
+struct BreakStatement : public Statement {
+  BreakStatement() {}
+  std::string str() const override {
+    return "BreakStatement()";
+  }
+  NodeKind kind() const override { return NodeKind::BreakStatement; }
+  void accept(ASTVisitor &v) override { v.visit(*this); }
+};
+
+struct ContinueStatement : public Statement {
+  ContinueStatement() {}
+  std::string str() const override {
+    return "ContinueStatement()";
+  }
+  NodeKind kind() const override { return NodeKind::ContinueStatement; }
   void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 

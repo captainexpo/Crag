@@ -413,6 +413,14 @@ std::shared_ptr<Statement> Parser::parse_statement(bool req_semi) {
   case TokenType::CONST:
     node = parse_variable_declaration();
     break;
+  case TokenType::BREAK:
+    node = std::make_shared<BreakStatement>();
+    consume(TokenType::BREAK);
+    break;
+  case TokenType::CONTINUE:
+    node = std::make_shared<ContinueStatement>();
+    consume(TokenType::CONTINUE);
+    break;
   default:
     node = parse_expression_statement();
   }

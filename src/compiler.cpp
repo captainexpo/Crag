@@ -22,7 +22,6 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
   auto moduleResolver = ModuleResolver(std::filesystem::path(raw_filepath).parent_path());
   auto mod = moduleResolver.loadModule(std::filesystem::path(raw_filepath).filename().string());
 
-
   auto typeChecker = TypeChecker();
 
   typeChecker.check(mod);
@@ -42,7 +41,7 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
     return nullptr;
   }
 
-  auto codegen = IRGenerator("mainmod", context, moduleResolver);
+  auto codegen = LLVMCodegen("mainmod", context, moduleResolver);
   bool has_errors = false;
   for (std::string path : moduleResolver.getBestOrder()) {
     auto module = moduleResolver.getModule(path);
