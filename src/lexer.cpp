@@ -101,6 +101,8 @@ std::string tokenTypeName(TokenType type) {
     return "STAR_ASSIGN";
   case TokenType::SLASH_ASSIGN:
     return "SLASH_ASSIGN";
+  case TokenType::PERCENT_ASSIGN:
+    return "PERCENT_ASSIGN";
   case TokenType::ARROW:
     return "ARROW";
   case TokenType::TRIPLE_DOT:
@@ -320,6 +322,8 @@ std::vector<Token> Lexer::tokenize() {
       tokens.push_back({TokenType::STAR_ASSIGN, "*=", token_line, token_col});
     else if (match("/="))
       tokens.push_back({TokenType::SLASH_ASSIGN, "/=", token_line, token_col});
+    else if (match("%="))
+      tokens.push_back({TokenType::PERCENT_ASSIGN, "%=", token_line, token_col});
     else if (match("->"))
       tokens.push_back({TokenType::ARROW, "->", token_line, token_col});
     else if (match("..."))

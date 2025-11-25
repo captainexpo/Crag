@@ -517,7 +517,7 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
 // }
 void LLVMCodegen::generateVariableDeclaration(
     const std::shared_ptr<VariableDeclaration> &varDecl) {
-
+  static int varCounter = 0;
   bool is_global = m_scopeStack.size() == 1;
 
   if (is_global) {
@@ -734,7 +734,7 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
 
   // Ensure both operands have the same type
   if (l->getType() != r->getType()) {
-    throw CodeGenError(nullptr, "Type mismatch in binary op: lhs=" +
+    throw CodeGenError(left, "Type mismatch in binary op: lhs=" +
                                     llvmTypeToString(l->getType()) +
                                     " rhs=" + llvmTypeToString(r->getType()));
     return nullptr;
@@ -1223,6 +1223,7 @@ LLVMCodegen::generateBlock(const std::shared_ptr<Block> &blockNode) {
       m_errors.push_back(std::make_pair(e.node(), e.what()));
     }
   }
+  m_scopeStack.pop_back();
   return lastValue;
 }
 

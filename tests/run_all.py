@@ -157,7 +157,6 @@ def main():
             for future in futures:
                 test_path = futures[future]
                 result, out = future.result()
-
                 if result == TestResult.PASS:
                     print(color_text(".", C_GREEN), end="", flush=True)
                     passed += 1

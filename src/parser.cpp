@@ -435,19 +435,19 @@ std::shared_ptr<Block> Parser::parse_block() {
   auto block = std::make_shared<Block>();
   block->line = start_token.line;
   block->col = start_token.column;
-  try {
     while (peek().type != TokenType::RBRACE) {
       block->statements.push_back(parse_statement());
-      if (peek().type == TokenType::EOF_T) {
-        throw ParseError("Unterminated block, expected '}'", peek());
-        break;
+      try {
+        if (peek().type == TokenType::EOF_T) {
+          throw ParseError("Unterminated block, expected '}'", peek());
+          break;
+        }
+      } catch (const ParseError &e) {
+        m_errors.push_back(e);
+        synchronize();
       }
     }
     consume(TokenType::RBRACE);
-  } catch (const ParseError &e) {
-    m_errors.push_back(e);
-    synchronize();
-  }
   return block;
 }
 
@@ -623,6 +623,18 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
       break;
     }
     auto right = parse_expression(get_precedence(t) + 1);
+    if (t.value == "+=" || t.value == "-=" || t.value == "*=" ||
+        t.value == "/=") {
+      auto bin_op = std::make_shared<BinaryOperation>(
+          left, t.value.substr(0, 1), right);
+      bin_op->line = t.line;
+      bin_op->col = t.column;
+      expr = std::make_shared<BinaryOperation>(
+          left, "=", bin_op);
+      expr->line = t.line;
+      expr->col = t.column;
+      return expr;
+    }
     expr = std::make_shared<BinaryOperation>(left, t.value, right);
     expr->line = t.line;
     expr->col = t.column;
@@ -663,9 +675,9 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
   throw ParseError("Unexpected token in led", t.line, t.column);
 }
 int Parser::get_precedence(const Token &token) const {
-  switch (token.type) {
-  case TokenType::ASSIGN:
+  if (ASSIGN_OPS.count(token.type))
     return 1;
+  switch (token.type) {
   case TokenType::AS:
     return 3;
   case TokenType::RE:

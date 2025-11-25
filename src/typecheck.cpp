@@ -695,6 +695,14 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
       throw TypeCheckError(bin, "Comparison operands must have same type: " + typeName(lt) +
                                     " vs " + typeName(rt));
       return nullptr;
+    } else if (!lt->equals(rt)) {
+      // try implicit cast
+      if (canImplicitCast(rt, lt)) {
+        bin->right = std::make_shared<TypeCast>(bin->right, lt, CastType::Normal);
+      } else if (canImplicitCast(lt, rt)) {
+        bin->left = std::make_shared<TypeCast>(bin->left, rt, CastType::Normal);
+        lt = rt;
+      }
     }
     auto b = std::make_shared<Boolean>();
     bin->inferred_type = resolveType(b);

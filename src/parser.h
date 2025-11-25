@@ -89,11 +89,17 @@ private:
   // Operator categories
   const std::set<TokenType> OP_TOKENS = {
       TokenType::ASSIGN,
+      TokenType::PLUS_ASSIGN,
+      TokenType::MINUS_ASSIGN,
+      TokenType::STAR_ASSIGN,
+      TokenType::SLASH_ASSIGN,
+      TokenType::PERCENT_ASSIGN,
       TokenType::PLUS,
       TokenType::MINUS,
       TokenType::STAR,
       TokenType::SLASH,
       TokenType::CARET,
+      TokenType::PERCENT,
       TokenType::EQ,
       TokenType::NEQ,
       TokenType::LT,
@@ -111,6 +117,14 @@ private:
 
   const std::set<TokenType> POSTFIX_OPS = {TokenType::LBRACKET,
                                            TokenType::LPAREN};
+
+  const std::set<TokenType> ASSIGN_OPS = {
+      TokenType::ASSIGN,
+      TokenType::PLUS_ASSIGN,
+      TokenType::MINUS_ASSIGN,
+      TokenType::STAR_ASSIGN,
+      TokenType::SLASH_ASSIGN
+  };
 };
 
 #endif // PARSER_H

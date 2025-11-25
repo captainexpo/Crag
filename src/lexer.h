@@ -57,6 +57,7 @@ enum class TokenType {
   MINUS_ASSIGN,
   STAR_ASSIGN,
   SLASH_ASSIGN,
+  PERCENT_ASSIGN,
   ARROW,
   AS,
   RE,
