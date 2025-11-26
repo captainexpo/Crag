@@ -663,7 +663,9 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
     return nullptr;
 
   // simple numeric ops
-  if (bin->op == "+" || bin->op == "-" || bin->op == "*" || bin->op == "/") {
+  if (bin->op == "+" || bin->op == "-" || bin->op == "*" || bin->op == "/" || bin->op == "%" ||
+      bin->op == "|" || bin->op == "&" || bin->op == "^" || bin->op == "<<" ||
+      bin->op == ">>") {
 
     if (!lt->isGeneralNumeric() || !rt->isGeneralNumeric()) { // Allow pointers here
       throw TypeCheckError(bin, "Arithmetic operators require numeric operands: got " +

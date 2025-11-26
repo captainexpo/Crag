@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
 
     llvm::cl::opt<std::string> pathToRuntime(
         "runtime-path", llvm::cl::desc("Path to runtime library"),
-        llvm::cl::value_desc("path"), llvm::cl::init("runtime.a"));
+        llvm::cl::value_desc("path"), llvm::cl::init("lib/libruntime.a"));
 
     // For future use, hopefully with the QBE backend
     llvm::cl::opt<std::string> backend(
@@ -42,6 +42,15 @@ int main(int argc, char **argv) {
     llvm::cl::opt<std::string> optLevel(
         "opt-level", llvm::cl::desc("Optimization level (debug or release)"),
         llvm::cl::value_desc("level"), llvm::cl::init("debug"));
+
+    llvm::cl::opt<bool> unsafe(
+        "unsafe", llvm::cl::desc("Disable safety checks (bounds checking, null pointer checks)"),
+        llvm::cl::init(false));
+
+
+    llvm::cl::opt<bool> noRuntime(
+        "no-runtime", llvm::cl::desc("Do not link against the runtime library"),
+        llvm::cl::init(false));
 
     llvm::cl::ParseCommandLineOptions(argc, argv, std::string(PRGM_NAME) + "\n");
 
@@ -62,6 +71,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    options.do_runtime_safety = !unsafe;
+
+
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
 
     auto mod = compileModule(inputFilepath, context, options);
@@ -75,12 +87,9 @@ int main(int argc, char **argv) {
     }
 
     fs::path outputPath(outputFilepath.c_str());
+    std::string outputExt = outputPath.extension().string();
     fs::path irFilePath = outputPath;
-    if (EmitIR) {
-        irFilePath.replace_extension(".ll");
-    } else {
-        irFilePath.replace_extension(".bc");
-    }
+    irFilePath.replace_extension(".ll");
 
     std::error_code ec;
     llvm::raw_fd_ostream os(irFilePath.string(), ec);
@@ -103,8 +112,18 @@ int main(int argc, char **argv) {
     }
 
     // Run clang to compile IR to executable
-    fs::path exePath = outputPath.parent_path() / outputPath.stem();
-    std::string clangCmd = "clang " + irFilePath.string() + " " + pathToRuntime + opt + " -o " + exePath.string();
+    fs::path finalOutputFilePath = outputPath.parent_path() / outputPath.stem();
+    std::string clangCmd = "clang " + irFilePath.string()  + opt;
+    if (!noRuntime) {
+        clangCmd += " " + pathToRuntime;
+    }
+
+    if (outputExt == ".o") {
+        finalOutputFilePath += ".o";
+        clangCmd += " -c -o " + finalOutputFilePath.string();
+    } else {
+        clangCmd += " -o " + finalOutputFilePath.string();
+    }
 
     start = std::chrono::steady_clock::now();
     int ret = system(clangCmd.c_str());
@@ -117,6 +136,11 @@ count();
         return 1;
     }
 
-    std::cout << "Emitted executable to " << exePath << "\n";
-    return 0;
+    std::cout << "Emitted executable to " << finalOutputFilePath << "\n";
+
+
+    // Remove the intermediate IR file
+  if (!EmitIR && fs::exists(irFilePath))
+    fs::remove(irFilePath);
+  return 0;
 }

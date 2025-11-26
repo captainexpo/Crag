@@ -123,7 +123,8 @@ private:
       TokenType::PLUS_ASSIGN,
       TokenType::MINUS_ASSIGN,
       TokenType::STAR_ASSIGN,
-      TokenType::SLASH_ASSIGN
+      TokenType::SLASH_ASSIGN,
+      TokenType::PERCENT_ASSIGN,
   };
 };
 

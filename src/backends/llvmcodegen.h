@@ -89,8 +89,8 @@ enum RuntimePanicType {
 
 class LLVMCodegen : public Backend {
 public:
-  LLVMCodegen(std::string module_name, llvm::LLVMContext &ctx, ModuleResolver moduleResolver, OptLevel optLevel)
-      : context(ctx), m_builder(ctx), m_module_resolver(moduleResolver), m_opt_level(optLevel) {
+  LLVMCodegen(std::string module_name, llvm::LLVMContext &ctx, ModuleResolver moduleResolver, CompilerOptions options)
+      : context(ctx), m_builder(ctx), m_module_resolver(moduleResolver), m_options(options) {
 
     m_llvm_module = std::make_unique<llvm::Module>(module_name, ctx);
     m_scopeStack.push_back(Scope(nullptr));
@@ -99,7 +99,7 @@ public:
   void printIR(const std::string &filename);
   int outputObjFile(const std::string &filename);
 
-  const std::vector<std::pair<ASTNodePtr, std::string>> &errors() const {
+  const std::vector<CodeGenError> &errors() const {
     return m_errors;
   }
   bool ok() const { return m_errors.empty(); }
@@ -130,10 +130,10 @@ public:
 
 private:
 
-  OptLevel m_opt_level;
+  CompilerOptions m_options;
 
   std::vector<LoopInfo> m_loop_stack;
-  std::vector<std::pair<ASTNodePtr, std::string>> m_errors;
+  std::vector<CodeGenError> m_errors;
 
   llvm::LLVMContext &context;
   std::unique_ptr<llvm::Module> m_llvm_module;
@@ -159,8 +159,8 @@ private:
     // TODO: Don't do that :)
     if (name == "main")
       return name; // main function should not be namespaced
-    if (m_current_module->externDeclarations.find(name) !=
-        m_current_module->externDeclarations.end()) {
+    if (m_current_module->externLinkage.find(name) !=
+        m_current_module->externLinkage.end()) {
       return name;
     }
     return m_current_module->canonicalizeName(name);

@@ -9,6 +9,7 @@ enum class TokenType {
   STRING,
   CHAR,
   ID,
+  ATTRIBUTE,
 
   // Keywords
   FN,

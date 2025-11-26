@@ -521,8 +521,8 @@ std::shared_ptr<Expression> Parser::parse_nud() {
   case TokenType::CHAR: {
     if (t.value.length() != 1)
       throw ParseError("Invalid char literal", t);
-    expr = std::make_shared<Literal>(static_cast<int>(t.value[0]),
-                                     std::make_shared<U8>());
+    expr = std::make_shared<Literal>(
+        (uint64_t)(t.value[0]), std::make_shared<U8>());
     expr->line = t.line;
     expr->col = t.column;
     return expr;
@@ -561,8 +561,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
       expr->col = t.column;
       return expr;
     }
-    throw ParseError("Unexpected token in nud", t);
-    throw ParseError("Unexpected token in nud", t.line, t.column);
+    throw ParseError("Unexpected token in expression, expected prefix operator, got " + tokenTypeName(t.type) + " '" + t.value + "'", t.line, t.column);
   }
 }
 
@@ -697,6 +696,7 @@ int Parser::get_precedence(const Token &token) const {
     return 10;
   case TokenType::STAR:
   case TokenType::SLASH:
+  case TokenType::PERCENT:
     return 20;
   case TokenType::CARET:
     return 30;
@@ -846,6 +846,11 @@ std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
 
   auto func_type =
       std::make_shared<FunctionType>(param_types, ret_type, variadic);
+  std::set<std::string> attributes;
+  while (peek().type == TokenType::ATTRIBUTE) {
+    std::string attr_name = consume(TokenType::ATTRIBUTE).value;
+    attributes.insert(attr_name);
+  }
   std::shared_ptr<Statement> body = nullptr;
   if (match({TokenType::SEMICOLON})) {
     body = nullptr;
@@ -856,6 +861,7 @@ std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
       std::make_shared<FunctionDeclaration>(name, func_type, param_names, body);
   func_decl->line = start_token.line;
   func_decl->col = start_token.column;
+  func_decl->attributes = attributes;
   return func_decl;
 }
 

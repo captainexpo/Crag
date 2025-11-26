@@ -42,14 +42,20 @@ target_link_libraries(comp PRIVATE ${LLVM_LDFLAGS_LIST})
 
 # --- Runtime Library ---
 
-file(GLOB_RECURSE RUNTIME_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/builtin/*.c")
+file(GLOB_RECURSE RUNTIME_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/builtin/*.y")
 
-add_library(runtime STATIC ${RUNTIME_SRC_FILES})
-set_target_properties(runtime PROPERTIES LINKER_LANGUAGE C)
+make_directory(lib)
 
-target_include_directories(runtime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin)
-
-set_target_properties(runtime PROPERTIES
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"
+add_custom_command(
+    OUTPUT lib/runtime.o
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/comp ARGS ${RUNTIME_SRC_FILES} -o lib/runtime.o --unsafe --opt-level release --no-runtime
+    DEPENDS ${RUNTIME_SRC_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/build/comp
+    COMMENT "Compiling runtime.o"
 )
-target_link_libraries(comp PRIVATE runtime)
+
+# Create a static library for the runtime
+set_source_files_properties(lib/runtime.o PROPERTIES GENERATED TRUE)
+add_library(runtime STATIC lib/runtime.o)
+set_property(TARGET runtime PROPERTY LINKER_LANGUAGE C)
+set_target_properties(runtime PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+

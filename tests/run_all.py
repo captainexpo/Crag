@@ -7,6 +7,7 @@ from enum import Enum
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any, Optional
 from pathlib import Path
+import time
 
 
 
@@ -103,14 +104,14 @@ C_YELLOW = (255, 255, 0)
 
 
 comp = find_compiler()
-def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str]]:
+def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str], float]: # result, output lines, time
     outs: list[str] = []
     def printc(text: Any, color: tuple[int, int, int]) -> None:
         nonlocal outs
         outs.append(color_text(text, color))
     if comp is None or not isinstance(comp, str):
         printc("Compiler not found, skipping test.", C_YELLOW)
-        return TestResult.SKIP, outs
+        return TestResult.SKIP, outs, 0
     outdir = tmp_path / "out"
     outdir.mkdir(exist_ok=True)
     base = os.path.splitext(os.path.basename(src_path))[0]
@@ -122,20 +123,24 @@ def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str]]
     with open(src_file, "w") as f:
         f.write(src_code)
     cmd = [comp, str(src_file), "-o", out_base]
+
+    start_time = time.time()
+
     result = subprocess.run(cmd, capture_output=True, text=True)
     if not result.returncode == 0:
         printc("Compilation failed:\n", C_RED)
         printc(f"----------Stdout----------\n{result.stdout.strip()}\n", C_RED)
         printc(f"----------Stderr----------\n{result.stderr.strip()}\n--------------------------", C_RED)
-        return TestResult.FAIL,  outs
+        return TestResult.FAIL,  outs, time.time() - start_time
     # call the generated binary
     bin_file = out_base
     result = subprocess.run([bin_file], capture_output=True, text=True)
-
+    end_time = time.time()
+    total_time = end_time - start_time
     if result.returncode != 0:
         if not test_file_data["expect_err"].strip():
             printc(f"Execution failed:\nStdout:{result.stdout}\nStderr:\n{result.stderr}", C_RED)
-            return TestResult.FAIL, outs
+            return TestResult.FAIL, outs, time.time() - start_time
         if test_file_data["expect_err"]:
             expected_err = test_file_data["expect_err"]
             actual_err = result.stderr.rstrip()
@@ -145,12 +150,12 @@ def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str]]
                 printc(expected_err, C_RED)
                 printc("Actual Stderr:", C_RED)
                 printc(actual_err, C_RED)
-                return TestResult.FAIL, outs
+                return TestResult.FAIL, outs, total_time
             else:
-                return TestResult.PASS, outs
+                return TestResult.PASS, outs, total_time
     elif test_file_data["expect_err"].strip():
         printc("Expected execution to fail but it succeeded.", C_RED)
-        return TestResult.FAIL, outs
+        return TestResult.FAIL, outs, total_time
     actual_output = result.stdout.rstrip()
     if test_file_data["expect"]:
         if actual_output != expected_output:
@@ -159,8 +164,8 @@ def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str]]
             printc(expected_output, C_RED)
             printc("Actual Stdout:", C_RED)
             printc(actual_output, C_RED)
-            return TestResult.FAIL, outs
-    return TestResult.PASS, outs
+            return TestResult.FAIL, outs, total_time
+    return TestResult.PASS, outs, total_time
 
 
 def main():
@@ -184,10 +189,12 @@ def main():
                 for test_path in TEST_FILES
             }
 
+            total_time = 0.0
+            total_tests = len(futures)
             # Process results
             for future in futures:
                 test_path = futures[future]
-                result, out = future.result()
+                result, out, time = future.result()
                 if result == TestResult.PASS:
                     print(color_text(".", C_GREEN), end="", flush=True)
                     passed += 1
@@ -199,6 +206,7 @@ def main():
                     print(color_text("S", C_YELLOW), end="", flush=True)
                     skipped += 1
                     skips.extend([test_path] + out)
+                total_time += time
 
         print()
 

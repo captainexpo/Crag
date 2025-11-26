@@ -1,0 +1,22 @@
+
+struct File {
+    _ptr: *u8,
+    _cnt: i32,
+    _base: *u8,
+    _flag: i32,
+    _file: i32,
+    _charbuf: i32,
+    _bufsiz: i32,
+    _tmpfname: *u8,
+}
+
+extern fn fprintf(stream: *File, format: *const u8, ...) -> i32;
+extern fn abort() -> void;
+
+extern const stderr: *File;
+extern const stdout: *File;
+
+fn __panic__(msg: *const u8, line: i32, col: i32) -> void @noprefix {
+  fprintf(stderr, "PANIC: %s at line %d, col %d\n", msg, line, col);
+  abort();
+}

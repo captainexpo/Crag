@@ -13,6 +13,8 @@ std::string tokenTypeName(TokenType type) {
     return "CHAR";
   case TokenType::ID:
     return "ID";
+  case TokenType::ATTRIBUTE:
+    return "ATTRIBUTE";
   case TokenType::FN:
     return "FN";
   case TokenType::RETURN:
@@ -263,6 +265,15 @@ std::vector<Token> Lexer::tokenize() {
       TokenType type = keywords.count(val) ? keywords[val] : TokenType::ID;
 
       tokens.push_back({type, val, token_line, token_col});
+      continue;
+    }
+
+    if (c == '@') {
+      get(); // consume '@'
+      std::string val;
+      while (isalnum(peek()) || peek() == '_')
+        val += get();
+      tokens.push_back({TokenType::ATTRIBUTE, val, token_line, token_col});
       continue;
     }
 

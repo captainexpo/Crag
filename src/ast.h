@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -777,6 +778,7 @@ struct FunctionDeclaration : Declaration {
   std::shared_ptr<FunctionType> type;
   std::vector<std::string> param_names;
   std::shared_ptr<Statement> body;
+  std::set<std::string> attributes;
 
   FunctionDeclaration(std::string n, std::shared_ptr<FunctionType> t,
                       std::vector<std::string> params,

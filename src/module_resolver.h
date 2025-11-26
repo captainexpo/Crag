@@ -23,7 +23,7 @@ public:
 
   std::string source_code;
 
-  std::unordered_set<std::string> externDeclarations;
+  std::unordered_set<std::string> externLinkage; // Probably an inaccurate name, but who cares
 
   std::string canonicalizeName(const std::string &s) const {
     return canon_name + "." + s;
@@ -103,8 +103,8 @@ public:
       if (auto funcDecl = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
         if (funcDecl->is_pub)
           module->exports[funcDecl->name] = funcDecl;
-        if (funcDecl->is_extern)
-          module->externDeclarations.insert(funcDecl->name);
+        if (funcDecl->is_extern || funcDecl->attributes.count("noprefix"))
+          module->externLinkage.insert(funcDecl->name);
       } else if (auto structDecl = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
         if (structDecl->is_pub)
           module->exports[structDecl->name] = structDecl;
@@ -115,7 +115,7 @@ public:
         if (varDecl->is_pub)
           module->exports[varDecl->name] = varDecl;
         if (varDecl->is_extern)
-          module->externDeclarations.insert(varDecl->name);
+          module->externLinkage.insert(varDecl->name);
       }
     }
 

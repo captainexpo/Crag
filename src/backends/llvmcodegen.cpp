@@ -81,7 +81,10 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
 
   m_current_module = module;
 
-  emitBuiltinDeclarations();
+  if (m_options.do_runtime_safety) emitBuiltinDeclarations();
+
+  try {
+
 
   for (const auto &decl : module->ast->declarations) {
     if (IS_INSTANCE(decl, FunctionDeclaration)) {
@@ -116,6 +119,10 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
   }
   for (const auto &fnPair : funcDecls) {
     generateFunctionBody(fnPair.second, fnPair.first);
+  }
+  }
+  catch (const CodeGenError &e) {
+    m_errors.push_back(e);
   }
 }
 
@@ -281,7 +288,7 @@ LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &expr) {
 
     auto base = generateExpression(deref->pointer, true);
     // Check for null ptr
-    if (m_opt_level == Debug) {
+    if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
       llvm::Value *zero = llvm::ConstantPointerNull::get(
           llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)));
       llvm::Value *isZero = m_builder.CreateICmpNE(base, zero, "isnullptrtmp");
@@ -336,7 +343,7 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
   if (IS_INSTANCE(expr, Dereference)) {
     auto deref = std::dynamic_pointer_cast<Dereference>(expr);
     llvm::Value *ptr = generateExpression(deref->pointer, true);
-    if (m_opt_level == Debug) {
+    if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
       llvm::Value *zero = llvm::ConstantPointerNull::get(
           llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)));
       llvm::Value *isZero = m_builder.CreateICmpNE(ptr, zero, "isnullptrtmp");
@@ -741,6 +748,14 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
         [this](llvm::Value *a, llvm::Value *b) {
           return m_builder.CreateFDiv(a, b, "fdivtmp");
         }}},
+      {"%",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateSRem(a, b, "modtmp");
+        },
+        [this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateFRem(a, b, "fmodtmp");
+        }}},
+
       {"==",
        {[this](llvm::Value *a, llvm::Value *b) {
           return m_builder.CreateICmpEQ(a, b, "eqtmp");
@@ -810,7 +825,7 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
   }
 
   const OpInfo &info = it->second;
-  if (m_opt_level == Debug){
+  if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
     if (op == "/" && r->getType()->isIntegerTy()) {
       llvm::Value *zero = llvm::ConstantInt::get(r->getType(), 0);
       llvm::Value *isZero = m_builder.CreateICmpNE(r, zero, "divbyzerotmp");
@@ -1121,7 +1136,7 @@ llvm::Value* LLVMCodegen::generateArrayAccess(
   if (index->getType() != llvm::Type::getInt64Ty(context)) {
     index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
   }
-  if (m_opt_level == Debug){
+  if (m_options.opt_level == Debug && m_options.do_runtime_safety){
     llvm::Value* arraySizeVal = llvm::ConstantInt::get(
         llvm::Type::getInt64Ty(context),
         std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)->length);
@@ -1327,7 +1342,7 @@ llvm::Value *LLVMCodegen::generateModuleAccess(const std::shared_ptr<ModuleAcces
   auto var_name = moduleAccess->member_name;
   // make sure full name isn't an extern name
   auto full_name = var_name;
-  if (mod->externDeclarations.find(var_name) == mod->externDeclarations.end()) {
+  if (mod->externLinkage.find(var_name) == mod->externLinkage.end()) {
     full_name = mod->canonicalizeName(var_name);
   }
 
@@ -1376,11 +1391,7 @@ LLVMCodegen::generateBlock(const std::shared_ptr<Block> &blockNode) {
   m_scopeStack.push_back(*parent_scope);
   llvm::Value *lastValue = nullptr;
   for (const auto &stmt : blockNode->statements) {
-    try {
-      lastValue = generateStatement(stmt);
-    } catch (const CodeGenError &e) {
-      m_errors.push_back(std::make_pair(e.node(), e.what()));
-    }
+    lastValue = generateStatement(stmt);
   }
   m_scopeStack.pop_back();
   return lastValue;

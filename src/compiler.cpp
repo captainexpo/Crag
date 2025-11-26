@@ -58,7 +58,7 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
   }
 
   // Call llvm codegen directly here, should probably make it more modular later
-  auto codegen = LLVMCodegen("mainmod", context, moduleResolver, options.opt_level);
+  auto codegen = LLVMCodegen("mainmod", context, moduleResolver, options);
   bool has_errors = false;
   for (std::string path : moduleResolver.getBestOrder()) {
     auto module = moduleResolver.getModule(path);
@@ -69,9 +69,9 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
       std::cerr << "In module '" << module->canon_name << "'\n";
       std::cerr << codegen.errors().size() << " errors during code generation:\n";
       for (const auto &err : codegen.errors()) {
-        std::cerr << err.second << "\n";
-        prettyError(err.first ? err.first->line : -1,
-                    err.first ? err.first->col : -1, err.second, module->source_code);
+        std::cerr << err.what() << "\n";
+        prettyError(err.node()? err.node()->line : -1,
+                    err.node()? err.node()->col : -1, err.what(), module->source_code);
       }
       has_errors = true;
     }
