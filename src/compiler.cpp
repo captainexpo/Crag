@@ -1,8 +1,9 @@
 #include "compiler.h"
-#include "codegen.h"
 #include "module_resolver.h"
 #include "typecheck.h"
 #include "utils.h"
+#include "backend.h"
+#include "backends/llvmcodegen.h"
 #include "llvm/TargetParser/Host.h"
 #include <filesystem>
 #include <llvm/Support/TargetSelect.h>
@@ -17,17 +18,32 @@ void initializeLLVM() {
     initialized = true;
   }
 }
-std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llvm::LLVMContext &context) {
 
-  auto moduleResolver = ModuleResolver(std::filesystem::path(raw_filepath).parent_path());
-  auto mod = moduleResolver.loadModule(std::filesystem::path(raw_filepath).filename().string());
+std::string backendToString(BackendType backend) {
+  switch (backend) {
+    case LLVM:
+      return "LLVM";
+    default:
+      return "Unknown";
+  }
+}
+
+std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llvm::LLVMContext &context, CompilerOptions options) {
+
+  if (options.backend != LLVM) {
+    cleanFailure("Unsupported backend: " + backendToString(options.backend));
+  }
+
+  auto path = std::filesystem::path(raw_filepath);
+  path = std::filesystem::absolute(path);
+  auto moduleResolver = ModuleResolver(path.parent_path());
+  auto mod = moduleResolver.loadModule(path.filename().string());
 
   auto typeChecker = TypeChecker();
 
   typeChecker.check(mod);
 
   if (!typeChecker.ok()) {
-    // report errors per module
     std::cout << typeChecker.errors().size() << " errors during type checking:\n";
     for (const auto &err : typeChecker.errors()) {
       prettyError(err.first ? err.first->line : -1,
@@ -41,7 +57,8 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
     return nullptr;
   }
 
-  auto codegen = LLVMCodegen("mainmod", context, moduleResolver);
+  // Call llvm codegen directly here, should probably make it more modular later
+  auto codegen = LLVMCodegen("mainmod", context, moduleResolver, options.opt_level);
   bool has_errors = false;
   for (std::string path : moduleResolver.getBestOrder()) {
     auto module = moduleResolver.getModule(path);

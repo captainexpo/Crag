@@ -1,0 +1,19 @@
+NAME: Runtime Div Zero Error
+DESC:
+BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+  const a: i32 = 5;
+  const b: i32 = 0;
+  const c = a / (b+1);
+  printf("%d\n", a / b);
+  return 0;
+}
+
+END CODE
+BEGIN EXPECT ERR
+PANIC: Runtime Panic: Division by Zero
+ at line 8, col 18
+END EXPECT ERR

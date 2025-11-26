@@ -20,8 +20,11 @@ def parse_test_file(text: str):
     SECTION_DESC = re.compile(r"^DESC:\s*(.*)")
     BEGIN_CODE = "BEGIN CODE"
     END_CODE = "END CODE"
-    BEGIN_EXPECT = "BEGIN EXPECT"
-    END_EXPECT = "END EXPECT"
+    BEGIN_EXPECT_OUT = "BEGIN EXPECT"
+    END_EXPECT_OUT = "END EXPECT"
+
+    BEGIN_EXPECT_ERR = "BEGIN EXPECT ERR"
+    END_EXPECT_ERR = "END EXPECT ERR"
 
     lines = text.splitlines()
 
@@ -29,8 +32,9 @@ def parse_test_file(text: str):
     desc = None
     code = []
     expect = []
+    expect_err = []
 
-    mode = None  # None, "code", "expect"
+    mode = None  # None, "code", "expect", "expect_err"
 
     for line in lines:
         m = SECTION_NAME.match(line)
@@ -50,10 +54,16 @@ def parse_test_file(text: str):
             mode = None
             continue
 
-        if line.strip() == BEGIN_EXPECT:
+        if line.strip() == BEGIN_EXPECT_OUT:
             mode = "expect"
             continue
-        if line.strip() == END_EXPECT:
+        if line.strip() == END_EXPECT_OUT:
+            mode = None
+            continue
+        if line.strip() == BEGIN_EXPECT_ERR:
+            mode = "expect_err"
+            continue
+        if line.strip() == END_EXPECT_ERR:
             mode = None
             continue
 
@@ -61,12 +71,15 @@ def parse_test_file(text: str):
             code.append(line)
         elif mode == "expect":
             expect.append(line.encode("utf-8").decode("unicode_escape"))
+        elif mode == "expect_err":
+            expect_err.append(line.encode("utf-8").decode("unicode_escape"))
 
     return {
         "name": name,
         "desc": desc,
         "code": "\n".join(code).rstrip(),
         "expect": "\n".join(expect).rstrip(),
+        "expect_err": "\n".join(expect_err).rstrip(),
     }
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -118,17 +131,35 @@ def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str]]
     # call the generated binary
     bin_file = out_base
     result = subprocess.run([bin_file], capture_output=True, text=True)
+
     if result.returncode != 0:
-        printc(f"Execution failed:\nStdout{result.stdout}\nStderr:\n{result.stderr}", C_RED)
+        if not test_file_data["expect_err"].strip():
+            printc(f"Execution failed:\nStdout:{result.stdout}\nStderr:\n{result.stderr}", C_RED)
+            return TestResult.FAIL, outs
+        if test_file_data["expect_err"]:
+            expected_err = test_file_data["expect_err"]
+            actual_err = result.stderr.rstrip()
+            if actual_err != expected_err:
+                printc("Error output mismatch:", C_RED)
+                printc("Expected Stderr:", C_RED)
+                printc(expected_err, C_RED)
+                printc("Actual Stderr:", C_RED)
+                printc(actual_err, C_RED)
+                return TestResult.FAIL, outs
+            else:
+                return TestResult.PASS, outs
+    elif test_file_data["expect_err"].strip():
+        printc("Expected execution to fail but it succeeded.", C_RED)
         return TestResult.FAIL, outs
     actual_output = result.stdout.rstrip()
-    if actual_output != expected_output:
-        printc("Output mismatch:", C_RED)
-        printc("Expected Output:", C_RED)
-        printc(expected_output, C_RED)
-        printc("Actual Output:", C_RED)
-        printc(actual_output, C_RED)
-        return TestResult.FAIL, outs
+    if test_file_data["expect"]:
+        if actual_output != expected_output:
+            printc("Output mismatch:", C_RED)
+            printc("Expected Stdout:", C_RED)
+            printc(expected_output, C_RED)
+            printc("Actual Stdout:", C_RED)
+            printc(actual_output, C_RED)
+            return TestResult.FAIL, outs
     return TestResult.PASS, outs
 
 

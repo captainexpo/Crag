@@ -1,9 +1,10 @@
 #ifndef IR_H
 #define IR_H
 
-#include "ast.h"
-#include "lexer.h"
-#include "module_resolver.h"
+#include "../ast.h"
+#include "../backend.h"
+#include "../lexer.h"
+#include "../module_resolver.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -27,6 +28,8 @@ struct LoopInfo {
   llvm::BasicBlock *breakBB;
   llvm::BasicBlock *continueBB;
 };
+
+
 
 class Scope {
 public:
@@ -75,16 +78,19 @@ struct OpInfo {
   std::function<llvm::Value *(llvm::Value *, llvm::Value *)> floatOp;
 };
 
-class Codegen {
-public:
-  virtual ~Codegen() = default;
-  virtual void generate(std::shared_ptr<Module> module) = 0;
+
+
+enum RuntimePanicType {
+  OutOfBounds,
+  DivisionByZero,
+  NullPointerDereference,
+  // Add others as needed
 };
 
-class LLVMCodegen : public Codegen {
+class LLVMCodegen : public Backend {
 public:
-  LLVMCodegen(std::string module_name, llvm::LLVMContext &ctx, ModuleResolver moduleResolver)
-      : context(ctx), m_builder(ctx), m_module_resolver(moduleResolver) {
+  LLVMCodegen(std::string module_name, llvm::LLVMContext &ctx, ModuleResolver moduleResolver, OptLevel optLevel)
+      : context(ctx), m_builder(ctx), m_module_resolver(moduleResolver), m_opt_level(optLevel) {
 
     m_llvm_module = std::make_unique<llvm::Module>(module_name, ctx);
     m_scopeStack.push_back(Scope(nullptr));
@@ -123,6 +129,9 @@ public:
   }
 
 private:
+
+  OptLevel m_opt_level;
+
   std::vector<LoopInfo> m_loop_stack;
   std::vector<std::pair<ASTNodePtr, std::string>> m_errors;
 
@@ -140,6 +149,10 @@ private:
   std::vector<Scope> m_scopeStack;
 
   std::shared_ptr<ErrorUnionType> m_error_union_return_type = nullptr;
+
+  std::vector<llvm::Value*> m_runtime_panic_strings;
+
+  void emitBuiltinDeclarations();
 
   inline std::string canonicalizeNonexternName(const std::string &name) const {
     // HACK: assume extern functions are globally unique and aren't overwritten in lower scopes
@@ -190,6 +203,9 @@ private:
   llvm::Value *generateFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue = true);
   llvm::Value *generateOffsetAccess(const std::shared_ptr<OffsetAccess> &offsetAccess,
                                     bool loadValue = true);
+  llvm::Value* generateArrayAccess(
+    const std::shared_ptr<OffsetAccess>& arrayAccess, bool loadValue);
+
   llvm::Value *generateModuleAccess(const std::shared_ptr<ModuleAccess> &moduleAccess,
                                     bool loadValue = true);
   llvm::Value *generateStructInitializer(
@@ -200,7 +216,9 @@ private:
   llvm::Value *generateWhileStatement(const std::shared_ptr<WhileStatement> &whileStmt);
   llvm::Value *generateForStatement(const std::shared_ptr<ForStatement> &forStmt);
   llvm::Value *generateReturnStatement(const std::shared_ptr<ReturnStatement> &retStmt);
-  llvm::Value *generateExpressionStatement(
-      const std::shared_ptr<ExpressionStatement> &exprStmt);
+  llvm::Value *generateExpressionStatement(const std::shared_ptr<ExpressionStatement> &exprStmt);
+
+
+  llvm::Value* conditionOrPanic(llvm::Value* condition, RuntimePanicType errorType, int line, int col);
 };
 #endif

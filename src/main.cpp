@@ -1,80 +1,122 @@
-
 #include "compiler.h"
 
 #include <iostream>
+#include <filesystem>
 #include <llvm/ADT/StringRef.h>
-
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/InitLLVM.h>
 #include <llvm/Support/raw_ostream.h>
+#include <ratio>
 #include <system_error>
 
 #define PRGM_NAME "Toy Compiler"
 
-std::string stripped_file_name(const std::string &path) {
-  size_t last_slash = path.find_last_of("/\\");
-  size_t last_dot = path.find_last_of('.');
-  if (last_dot == std::string::npos || last_dot < last_slash)
-    last_dot = path.size();
-  return path.substr(last_slash + 1, last_dot - last_slash - 1);
-}
-
-std::string dirname(const std::string &path) {
-  size_t last_slash = path.find_last_of("/\\");
-  if (last_slash == std::string::npos)
-    return ".";
-  return path.substr(0, last_slash);
-}
+namespace fs = std::filesystem;
 
 int main(int argc, char **argv) {
-  llvm::InitLLVM X(argc, argv);
+    llvm::InitLLVM X(argc, argv);
+    llvm::LLVMContext context;
 
-  llvm::LLVMContext context;
+    // --- Define CLI options ---
+    llvm::cl::opt<std::string> inputFilepath(llvm::cl::Positional,
+                                             llvm::cl::desc("<source file>"),
+                                             llvm::cl::Required);
 
-  // --- Define CLI options ---
-  llvm::cl::opt<std::string> inputFilepath(llvm::cl::Positional,
-                                           llvm::cl::desc("<source file>"),
-                                           llvm::cl::Required);
+    llvm::cl::opt<std::string> outputFilepath(
+        "o", llvm::cl::desc("Specify output filename"),
+        llvm::cl::value_desc("filename"), llvm::cl::init("a.out"));
 
-  llvm::cl::opt<std::string> outputFilepath(
-      "o", llvm::cl::desc("Specify output filename"),
-      llvm::cl::value_desc("filename"), llvm::cl::init("a.o"));
+    llvm::cl::opt<bool> EmitIR(
+        "emit-ir", llvm::cl::desc("Emit LLVM IR instead of object code"),
+        llvm::cl::init(false));
 
-  llvm::cl::opt<bool> EmitIR(
-      "emit-ir", llvm::cl::desc("Emit LLVM IR instead of object code"),
-      llvm::cl::init(false));
+    llvm::cl::opt<std::string> pathToRuntime(
+        "runtime-path", llvm::cl::desc("Path to runtime library"),
+        llvm::cl::value_desc("path"), llvm::cl::init("runtime.a"));
 
-  llvm::cl::ParseCommandLineOptions(argc, argv, std::string(PRGM_NAME) + "\n");
+    // For future use, hopefully with the QBE backend
+    llvm::cl::opt<std::string> backend(
+        "backend", llvm::cl::desc("Specify backend (currently only 'llvm' is supported)"),
+        llvm::cl::value_desc("backend"), llvm::cl::init("llvm"));
 
-  auto mod = compileModule(inputFilepath, context);
-  if (!mod) {
-    std::cerr << "Compilation failed.\n";
-    return 1;
-  }
+    llvm::cl::opt<std::string> optLevel(
+        "opt-level", llvm::cl::desc("Optimization level (debug or release)"),
+        llvm::cl::value_desc("level"), llvm::cl::init("debug"));
 
-  std::string irFilePath = outputFilepath+".tmp.ll";
-  std::error_code ec;
-  llvm::raw_fd_ostream os(llvm::StringRef(irFilePath), ec);
-  if (ec) {
-    std::cerr << "Could not open output file: " << ec.message() << "\n";
-    return 1;
-  }
-  mod->print(os, nullptr);
+    llvm::cl::ParseCommandLineOptions(argc, argv, std::string(PRGM_NAME) + "\n");
 
-  if (EmitIR) {
-    std::cout << "Emitted LLVM IR to " << outputFilepath << "\n";
+    CompilerOptions options;
+    if (backend == "llvm") {
+        options.backend = LLVM;
+    } else {
+        std::cerr << "Unsupported backend: " << backend << "\n";
+        return 1;
+    }
+
+    if (optLevel == "debug") {
+        options.opt_level = Debug;
+    } else if (optLevel == "release") {
+        options.opt_level = Release;
+    } else {
+        std::cerr << "Unsupported optimization level: " << optLevel << "\n";
+        return 1;
+    }
+
+    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+
+    auto mod = compileModule(inputFilepath, context, options);
+
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    std::cout << "Compilation finished in " << duration << " micros.\n";
+    if (!mod) {
+        std::cerr << "Compilation failed.\n";
+        return 1;
+    }
+
+    fs::path outputPath(outputFilepath.c_str());
+    fs::path irFilePath = outputPath;
+    if (EmitIR) {
+        irFilePath.replace_extension(".ll");
+    } else {
+        irFilePath.replace_extension(".bc");
+    }
+
+    std::error_code ec;
+    llvm::raw_fd_ostream os(irFilePath.string(), ec);
+    if (ec) {
+        std::cerr << "Could not open output file: " << ec.message() << "\n";
+        return 1;
+    }
+    mod->print(os, nullptr);
+
+    if (EmitIR) {
+        std::cout << "Emitted LLVM IR to " << irFilePath << "\n";
+        return 0;
+    }
+
+    std::string opt;
+    if (options.opt_level == Release) {
+        opt = " -O3 ";
+    } else {
+        opt = " -O0 ";
+    }
+
+    // Run clang to compile IR to executable
+    fs::path exePath = outputPath.parent_path() / outputPath.stem();
+    std::string clangCmd = "clang " + irFilePath.string() + " " + pathToRuntime + opt + " -o " + exePath.string();
+
+    start = std::chrono::steady_clock::now();
+    int ret = system(clangCmd.c_str());
+    end = std::chrono::steady_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).
+count();
+    std::cout << "Linking finished in " << duration << " micros.\n";
+    if (ret != 0) {
+        std::cerr << "Failed to invoke clang to create executable.\n";
+        return 1;
+    }
+
+    std::cout << "Emitted executable to " << exePath << "\n";
     return 0;
-  }
-
-  // Run clang to compile output_filepath to executable
-  std::string exe_name = dirname(outputFilepath) + "/" + stripped_file_name(outputFilepath);
-  std::string clang_cmd = "clang " + irFilePath + " -o " + exe_name;
-  int ret = system(clang_cmd.c_str());
-  if (ret != 0) {
-    std::cerr << "Failed to invoke clang to create executable.\n";
-    return 1;
-  }
-  std::cout << "Emitted executable to " << exe_name << "\n";
-
-  return 0;
 }

@@ -9,8 +9,9 @@ fn sin(x: f64) -> f64 {
   let term = x;
   let sum = term;
   let n: f64 = 1;
-  while (n as i32 < 10) {
-      term = -term * x * x / (2 * n * (2 * n + 1.0));
+  while (n < 10) {
+      let den: f32 = (2 * n * (2 * n + 1.0));
+      term = -term * x * x / den;
       sum = sum + term;
       n = n + 1;
   }

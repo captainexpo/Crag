@@ -1,0 +1,18 @@
+NAME: Runtime Array Out of Bounds Error
+DESC:
+BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+  let arr: [5]i32;
+  arr[0] = 4;
+  arr[1] = arr[0];
+  return arr[5]; // Should have error
+}
+
+END CODE
+BEGIN EXPECT ERR
+PANIC: Runtime Panic: Out of Bounds
+ at line 8, col 13
+END EXPECT ERR

@@ -1,6 +1,5 @@
-#include "codegen.h"
-#include "ast.h"
-#include "module_resolver.h"
+#include "llvmcodegen.h"
+#include "../module_resolver.h"
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/BasicBlock.h>
@@ -33,12 +32,57 @@ int globalVals = 0;
 #define IS_INSTANCE(obj, type) (std::dynamic_pointer_cast<type>(obj) != nullptr)
 #define CUR_SCOPE m_scopeStack.back()
 
+
+std::string runtimePanicTypeToString(RuntimePanicType type) {
+  switch (type) {
+  case OutOfBounds:
+    return "Out of Bounds";
+  case DivisionByZero:
+    return "Division by Zero";
+  case NullPointerDereference:
+    return "Null Pointer Dereference";
+  default:
+    return "Unknown";
+  }
+}
+
+void LLVMCodegen::emitBuiltinDeclarations() {
+  llvm::FunctionType *panicType = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {
+    llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)), // Error message
+    llvm::Type::getInt32Ty(context),  // Line number
+    llvm::Type::getInt32Ty(context)   // Column number
+  }, false);
+  llvm::Function::Create(panicType, llvm::Function::ExternalLinkage, "__panic__", m_llvm_module.get());
+
+
+  // Prepare runtime panic strings
+  m_runtime_panic_strings.clear();
+  m_runtime_panic_strings.resize(3, nullptr);
+  for (const auto &type : {OutOfBounds, DivisionByZero, NullPointerDereference}) {
+      // String literal → create global string
+      auto strVal = "Runtime Panic: " + runtimePanicTypeToString(type) + "\n";
+      auto strName = "g" + std::to_string(globalVals++);
+      auto strType = llvm::ArrayType::get(llvm::Type::getInt8Ty(context),
+                                          strVal.size() + 1);
+      auto strConstant =
+          llvm::ConstantDataArray::getString(context, strVal, true);
+      auto globalStr = new llvm::GlobalVariable(
+          *m_llvm_module, strType, true, llvm::GlobalValue::PrivateLinkage,
+          strConstant, strName);
+      m_runtime_panic_strings[type] = globalStr;
+  }
+
+}
+
 // Public API stubs
 void LLVMCodegen::generate(std::shared_ptr<Module> module) {
 
   std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> funcDecls;
 
   m_current_module = module;
+
+  emitBuiltinDeclarations();
+
   for (const auto &decl : module->ast->declarations) {
     if (IS_INSTANCE(decl, FunctionDeclaration)) {
       auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl);
@@ -174,7 +218,7 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type) {
   }
   if (IS_INSTANCE(type, ArrayType)) {
     auto arrType = std::dynamic_pointer_cast<ArrayType>(type);
-    return llvm::ArrayType::get(getLLVMType(arrType->base), arrType->length);
+    return llvm::ArrayType::get(getLLVMType(arrType->element_type), arrType->length);
   }
   if (IS_INSTANCE(type, FunctionType)) {
     auto funcType = std::dynamic_pointer_cast<FunctionType>(type);
@@ -227,9 +271,23 @@ LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &expr) {
     if (binOp->op == "=") {
       return generateAddress(binOp->left);
     }
+    else {
+      throw CodeGenError(expr,
+                         "Left operand of binary operation is not an lvalue: " +
+                             expr->str());
+    }
   } else if (IS_INSTANCE(expr, Dereference)) {
     auto deref = std::dynamic_pointer_cast<Dereference>(expr);
-    return generateExpression(deref->pointer, true);
+
+    auto base = generateExpression(deref->pointer, true);
+    // Check for null ptr
+    if (m_opt_level == Debug) {
+      llvm::Value *zero = llvm::ConstantPointerNull::get(
+          llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)));
+      llvm::Value *isZero = m_builder.CreateICmpNE(base, zero, "isnullptrtmp");
+      conditionOrPanic(isZero, NullPointerDereference, expr->line, expr->col);
+    }
+    return base;
   }
   throw CodeGenError(expr, "Expression is not an lvalue: " + expr->str());
 }
@@ -278,10 +336,15 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
   if (IS_INSTANCE(expr, Dereference)) {
     auto deref = std::dynamic_pointer_cast<Dereference>(expr);
     llvm::Value *ptr = generateExpression(deref->pointer, true);
-    if (loadValue) {
+    if (m_opt_level == Debug) {
+      llvm::Value *zero = llvm::ConstantPointerNull::get(
+          llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)));
+      llvm::Value *isZero = m_builder.CreateICmpNE(ptr, zero, "isnullptrtmp");
+      conditionOrPanic(isZero, NullPointerDereference, expr->line, expr->col);
+    }
+    if (loadValue)
       return m_builder.CreateLoad(getLLVMType(deref->inferred_type), ptr,
                                   "derefloadtmp");
-    }
     return ptr;
   }
   if (IS_INSTANCE(expr, MethodCall)) {
@@ -747,7 +810,17 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
   }
 
   const OpInfo &info = it->second;
-
+  if (m_opt_level == Debug){
+    if (op == "/" && r->getType()->isIntegerTy()) {
+      llvm::Value *zero = llvm::ConstantInt::get(r->getType(), 0);
+      llvm::Value *isZero = m_builder.CreateICmpNE(r, zero, "divbyzerotmp");
+      conditionOrPanic(isZero, DivisionByZero, left->line, left->col);
+    } else if ((op == "/" || op == "%") && r->getType()->isFloatingPointTy()) {
+      llvm::Value *zero = llvm::ConstantFP::get(r->getType(), 0.0);
+      llvm::Value *isZero = m_builder.CreateFCmpUNE(r, zero, "fpdivbyzerotmp");
+      conditionOrPanic(isZero, DivisionByZero, left->line, left->col);
+    }
+  }
   if (ty->isIntegerTy())
     return info.intOp(l, r);
   else if (ty->isFloatingPointTy())
@@ -988,8 +1061,95 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
 
   return m_builder.CreateCall(funcTy, calleeValue, argsV, funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
 }
+llvm::Value* LLVMCodegen::conditionOrPanic(llvm::Value* condition, RuntimePanicType panicType, int line, int col) {
+
+  llvm::Function *curFunc = m_builder.GetInsertBlock()->getParent();
+  llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(context, "then", curFunc);
+  llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(context, "else", curFunc);
+  llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(context, "ifcont", curFunc);
+
+  m_builder.CreateCondBr(condition, thenBB, elseBB);
+
+  m_builder.SetInsertPoint(thenBB);
+  // Then block: condition is true, continue execution
+  m_builder.CreateBr(mergeBB);
+  m_builder.SetInsertPoint(elseBB);
+  // Else block: condition is false, emit panic
+
+  // Get panic function (will be extern declared)
+  llvm::Function* panicFunc = m_llvm_module->getFunction("__panic__");
+  llvm::FunctionType* panicFuncTy = panicFunc->getFunctionType();
+
+  std::vector<llvm::Value*> panicArgs = {
+    m_runtime_panic_strings[panicType],
+    llvm::ConstantInt::get(context, llvm::APInt(32, line)),
+    llvm::ConstantInt::get(context, llvm::APInt(32, col)),
+  };
+  m_builder.CreateCall(panicFuncTy, panicFunc, panicArgs);
+
+  m_builder.CreateBr(mergeBB);
+  m_builder.SetInsertPoint(mergeBB);
+
+  return nullptr; // No meaningful value to return
+}
+llvm::Value* LLVMCodegen::generateArrayAccess(
+  const std::shared_ptr<OffsetAccess>& arrayAccess, bool loadValue) {
+  if (!arrayAccess || !arrayAccess->base || !arrayAccess->index) {
+    throw CodeGenError(nullptr, "Invalid array access: missing base or index expression");
+  }
+  llvm::Value *basePtr = generateAddress(
+      std::static_pointer_cast<Expression>(arrayAccess->base));
+  if (!basePtr) {
+    throw CodeGenError(arrayAccess, "Failed to generate base address for array access");
+  }
+  llvm::Value *index = generateExpression(arrayAccess->index);
+  if (!index) {
+    throw CodeGenError(arrayAccess->index, "Failed to generate index for array access");
+  }
+  if (!arrayAccess->base->inferred_type ||
+      arrayAccess->base->inferred_type->kind() != TypeKind::Array) {
+    throw CodeGenError(arrayAccess->base, "Base expression is not of array type: " +
+                                              (arrayAccess->base->inferred_type ? arrayAccess->base->inferred_type->str() : "null"));
+  }
+  llvm::Type *elementType = getLLVMType(
+      std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)->element_type);
+  if (!elementType) {
+    throw CodeGenError(arrayAccess, "Unknown element type for array access: " +
+                                         arrayAccess->base->inferred_type->str());
+  }
+  // Condition check for index within bounds
+  if (index->getType() != llvm::Type::getInt64Ty(context)) {
+    index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
+  }
+  if (m_opt_level == Debug){
+    llvm::Value* arraySizeVal = llvm::ConstantInt::get(
+        llvm::Type::getInt64Ty(context),
+        std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)->length);
+    llvm::Value* indexInBounds = m_builder.CreateICmpULT(
+        index, arraySizeVal, "index_in_bounds");
+    conditionOrPanic(indexInBounds, OutOfBounds, arrayAccess->line, arrayAccess->col);
+  }
+
+
+  // Gep instruction
+  llvm::Value *gep =
+      m_builder.CreateGEP(elementType, basePtr, index, "array_access");
+  // Load the value at the computed address
+  if (loadValue)
+    return m_builder.CreateLoad(elementType, gep, "load_array_elem");
+  else
+    return gep;
+}
+
 llvm::Value *LLVMCodegen::generateOffsetAccess(
     const std::shared_ptr<OffsetAccess> &offsetAccess, bool loadValue) {
+
+  if (!offsetAccess || !offsetAccess->base || !offsetAccess->index) {
+    throw CodeGenError(nullptr, "Invalid offset access: missing base or index expression");
+  }
+  if (offsetAccess->base->inferred_type->kind() == TypeKind::Array){
+    return generateArrayAccess(offsetAccess, loadValue);
+  }
 
   llvm::Value *basePtr = generateExpression(
       std::static_pointer_cast<Expression>(offsetAccess->base));
@@ -1004,7 +1164,6 @@ llvm::Value *LLVMCodegen::generateOffsetAccess(
   if (!resultType) {
     throw CodeGenError(offsetAccess, "Unknown type for offset access: " +
                                          offsetAccess->inferred_type->str());
-    return nullptr;
   }
   // Gep instruction
   llvm::Value *gep =

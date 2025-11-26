@@ -3,6 +3,11 @@
 #include <sstream>
 
 
+void cleanFailure(std::string message) {
+  std::cerr << "Fatal Error: " << message << "\n";
+  exit(1);
+}
+
 void prettyError(int line, int col, const std::string &msg,const std::string &source) {
   std::istringstream srcStream(source);
   std::string srcLine;

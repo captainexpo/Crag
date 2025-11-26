@@ -1,4 +1,3 @@
-```plaintext
 NAME: ArrayList Example
 DESC: Test dynamic array behavior from examples/arraylist.y
 BEGIN CODE
@@ -107,5 +106,3 @@ list[8] = 80
 list[9] = 90
 After set: list[5] = 1234
 END EXPECT
-
-``` 

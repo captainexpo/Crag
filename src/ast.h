@@ -232,21 +232,21 @@ struct PointerType : Type {
 
 struct ArrayType : Type {
   TypeKind kind() const override { return TypeKind::Array; }
-  std::shared_ptr<Type> base;
+  std::shared_ptr<Type> element_type;
   int length;
 
   ArrayType(std::shared_ptr<Type> b, int len)
-      : base(std::move(b)), length(len) {}
+      : element_type(std::move(b)), length(len) {}
 
   std::string str() const override {
-    return "[" + std::to_string(length) + "]" + base->str();
+    return "[" + std::to_string(length) + "]" + element_type->str();
   }
 
   bool equals(const std::shared_ptr<Type> &other) const override {
     auto o = dynamic_cast<ArrayType *>(other.get());
     if (!o)
       return false;
-    return length == o->length && base->equals(o->base);
+    return length == o->length && element_type->equals(o->element_type);
   }
 };
 

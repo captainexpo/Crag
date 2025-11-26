@@ -174,7 +174,7 @@ TypeChecker::resolveType(const std::shared_ptr<Type> &t) const {
     return std::make_shared<PointerType>(bt, pt->pointer_const);
   }
   if (auto at = std::dynamic_pointer_cast<ArrayType>(t)) {
-    auto bt = resolveType(at->base);
+    auto bt = resolveType(at->element_type);
     if (!bt)
       return nullptr;
     return std::make_shared<ArrayType>(bt, at->length);
@@ -959,8 +959,8 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
       auto idxt = inferExpression(oa->index);
       if (!idxt)
         throw TypeCheckError(oa, "Failed to infer type of offset access index");
-      oa->inferred_type = resolveType(at->base);
-      return at->base;
+      oa->inferred_type = resolveType(at->element_type);
+      return at->element_type;
     }
     if (auto pt = std::dynamic_pointer_cast<PointerType>(bt)) {
       // pointer indexing returns base

@@ -159,10 +159,13 @@ std::shared_ptr<Type> Parser::parse_pointer_type() {
 
 std::shared_ptr<Type> Parser::parse_array_type() {
   consume(TokenType::LBRACKET);
-  auto elem_type = parse_type();
-  consume(TokenType::SEMICOLON);
+  if (peek().type == TokenType::RBRACKET) {
+    throw ParseError("Unsized arrays not supported yet", peek().line,
+                     peek().column);
+  }
   int size = std::stoi(consume(TokenType::NUMBER).value);
   consume(TokenType::RBRACKET);
+  auto elem_type = parse_type(false);
   return std::make_shared<ArrayType>(elem_type, size);
 }
 
