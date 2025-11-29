@@ -1,9 +1,8 @@
-```plaintext
-NAME: Features (trimmed)
-DESC: Trimmed subset of examples/features.y focusing on deterministic prints.
+NAME: Features
+DESC: A miscelanneous collection of language features
 BEGIN CODE
 
-extern fn printf(_s: *const u8, ...) -> i32;
+extern fn printf(_s: *u8, ...) -> i32;
 
 fn for_loops() -> void {
   for (let i: i32 = 0; i < 3; i = i + 1) {
@@ -50,5 +49,3 @@ w = 2
 Called: other_function with x = 25
 result = 42
 END EXPECT
-
-```
