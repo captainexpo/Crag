@@ -42,7 +42,7 @@ target_link_libraries(comp PRIVATE ${LLVM_LDFLAGS_LIST})
 
 # --- Runtime Library ---
 
-file(GLOB_RECURSE RUNTIME_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/builtin/*.y")
+file(GLOB_RECURSE RUNTIME_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/builtin/*.crag")
 
 make_directory(lib)
 

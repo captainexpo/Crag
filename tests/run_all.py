@@ -173,7 +173,7 @@ def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str],
 
 
 def main():
-    TEST_FILES = glob.glob(os.path.join(ROOT, "tests", "*.ytest"))
+    TEST_FILES = glob.glob(os.path.join(ROOT, "tests", "*.cragtest"))
 
     passed = 0
     failed = 0
