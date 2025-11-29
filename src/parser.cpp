@@ -3,6 +3,7 @@
 #include "lexer.h"
 #include <algorithm>
 #include <cstddef>
+#include <iostream>
 #include <llvm/IR/Intrinsics.h>
 #include <memory>
 #include <unordered_map>
@@ -71,6 +72,13 @@ void Parser::synchronize() {
     case TokenType::ENUM:
     case TokenType::IMPORT:
     case TokenType::EXTERN:
+    case TokenType::RETURN:
+    case TokenType::IF:
+    case TokenType::FOR:
+    case TokenType::WHILE:
+    case TokenType::BREAK:
+    case TokenType::CONTINUE:
+    case TokenType::PUB:
       return;
     default:
       break;
@@ -438,9 +446,9 @@ std::shared_ptr<Block> Parser::parse_block() {
   auto block = std::make_shared<Block>();
   block->line = start_token.line;
   block->col = start_token.column;
-    while (peek().type != TokenType::RBRACE) {
-      block->statements.push_back(parse_statement());
+    while (peek().type != TokenType::RBRACE && peek().type != TokenType::EOF_T) {
       try {
+        block->statements.push_back(parse_statement());
         if (peek().type == TokenType::EOF_T) {
           throw ParseError("Unterminated block, expected '}'", peek());
           break;
@@ -458,7 +466,7 @@ std::shared_ptr<Expression> Parser::parse_expression(int min_prec) {
   auto left = parse_nud();
   while (true) {
     Token current = peek();
-    int prec = get_precedence(current);
+    int prec = get_precedence(current, false);
     if (prec < min_prec)
       break;
     if (!OP_TOKENS.count(current.type) && !POSTFIX_OPS.count(current.type))
@@ -474,7 +482,17 @@ std::shared_ptr<Expression> Parser::parse_nud() {
 
   switch (t.type) {
   case TokenType::NUMBER: {
-    if (t.value.find('.') != std::string::npos) {
+    if (t.value[1] == 'x') {
+      // Hexadecimal
+      expr = std::make_shared<Literal>(std::stoull(t.value, nullptr, 16),
+                                       std::make_shared<U64>());
+    }
+    else if (t.value[1] == 'b') {
+      // Binary
+      expr = std::make_shared<Literal>(std::stoull(t.value.substr(2), nullptr, 2),
+                                       std::make_shared<U64>());
+    }
+    else if (t.value.find('.') != std::string::npos) {
       expr = std::make_shared<Literal>(std::stof(t.value),
                                        std::make_shared<F64>());
     } else {
@@ -555,7 +573,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
 
   default:
     if (PREFIX_OPS.count(t.type)) {
-      auto right = parse_expression(get_precedence(t) + 1);
+      auto right = parse_expression(get_precedence(t, false) + 1);
       expr = std::make_shared<UnaryOperation>(t.value, right);
       expr->line = t.line;
       expr->col = t.column;
@@ -624,11 +642,15 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
     default:
       break;
     }
-    auto right = parse_expression(get_precedence(t) + 1);
+    auto right = parse_expression(get_precedence(t, false) + 1);
     if (t.value == "+=" || t.value == "-=" || t.value == "*=" ||
-        t.value == "/=") {
+        t.value == "/=" || t.value == "%=" || t.value == "&=" ||
+        t.value == "|=" || t.value == "^=" || t.value == "<<=" ||
+        t.value == ">>=") {
+      // HACK: convert to regular op and assign (probably fine for now, but I can't be bothered to deal with the "right" way. KISS)
+      auto reg_op = t.value.substr(0, t.value.length() - 1);
       auto bin_op = std::make_shared<BinaryOperation>(
-          left, t.value.substr(0, 1), right);
+          left, reg_op, right);
       bin_op->line = t.line;
       bin_op->col = t.column;
       expr = std::make_shared<BinaryOperation>(
@@ -676,21 +698,33 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
   }
   throw ParseError("Unexpected token in led", t.line, t.column);
 }
-int Parser::get_precedence(const Token &token) const {
+int Parser::get_precedence(const Token &token, bool postfix) const {
   if (ASSIGN_OPS.count(token.type))
     return 1;
   switch (token.type) {
   case TokenType::AS:
-    return 3;
   case TokenType::RE:
+    return 2;
+  case TokenType::OR:
     return 3;
+  case TokenType::AND:
+    return 4;
+  case TokenType::BOR:
+    return 5;
+  case TokenType::BXOR:
+    return 6;
+  case TokenType::SHL:
+  case TokenType::SHR:
+    return 7;
+  case TokenType::BAND:
+    return 8;
   case TokenType::EQ:
   case TokenType::NEQ:
   case TokenType::LT:
   case TokenType::LE:
   case TokenType::GT:
   case TokenType::GE:
-    return 5;
+    return 9;
   case TokenType::PLUS:
   case TokenType::MINUS:
     return 10;
@@ -700,6 +734,12 @@ int Parser::get_precedence(const Token &token) const {
     return 20;
   case TokenType::CARET:
     return 30;
+  case TokenType::BANG:
+  case TokenType::BNOT:
+    return 40;
+  case TokenType::INC:
+  case TokenType::DEC:
+    return postfix ? 50 : 40;
   case TokenType::DOT:
     return 50;
   case TokenType::DOUBLE_COLON:

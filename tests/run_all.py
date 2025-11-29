@@ -126,7 +126,11 @@ def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str],
 
     start_time = time.time()
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+    except subprocess.TimeoutExpired:
+        printc("Compilation timed out.", C_RED)
+        return TestResult.FAIL, outs, time.time() - start_time
     if not result.returncode == 0:
         printc("Compilation failed:\n", C_RED)
         printc(f"----------Stdout----------\n{result.stdout.strip()}\n", C_RED)

@@ -3,9 +3,17 @@
 #include <sstream>
 
 
-void cleanFailure(std::string message) {
+void fail(const std::string &message) {
   std::cerr << "Fatal Error: " << message << "\n";
   exit(1);
+}
+
+void warn(const std::string &message) {
+  std::cout << "Warning: " << message << "\n";
+}
+
+void info(const std::string &message) {
+  std::cout << "Info: " << message << "\n";
 }
 
 void prettyError(int line, int col, const std::string &msg,const std::string &source) {

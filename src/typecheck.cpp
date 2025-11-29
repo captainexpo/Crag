@@ -689,6 +689,19 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
     return lt;
   }
 
+  // BOOL -> BOOL
+  if (bin->op == "&&" || bin->op == "||") {
+    if (!dynamic_cast<Boolean *>(lt.get()) ||
+        !dynamic_cast<Boolean *>(rt.get())) {
+      throw TypeCheckError(bin, "Logical operators require boolean operands: got " +
+                                    typeName(lt) + " " + bin->op + " " + typeName(rt));
+      return nullptr;
+    }
+    auto b = std::make_shared<Boolean>();
+    bin->inferred_type = resolveType(b);
+    return b;
+  }
+
   // comparisons -> BOOL
   if (bin->op == "==" || bin->op == "!=" || bin->op == "<" || bin->op == ">" ||
       bin->op == "<=" || bin->op == ">=") {
@@ -762,7 +775,7 @@ TypeChecker::inferUnaryOp(const std::shared_ptr<UnaryOperation> &un) {
   if (!ot)
     return nullptr;
 
-  if (un->op == "-" || un->op == "+") {
+  if (un->op == "-" || un->op == "+" || un->op == "~") {
     // numeric
     un->inferred_type = resolveType(ot);
     return ot;

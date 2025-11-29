@@ -190,6 +190,8 @@ private:
                                 std::string op, bool loadValue = true);
   llvm::Value *generateUnaryOp(const std::shared_ptr<Expression> &operand,
                                std::string op, bool loadValue = true);
+  llvm::Value *generateLogicalOp(std::shared_ptr<Expression> left, std::shared_ptr<Expression> right, std::string op);
+
   llvm::Value *generateLiteral(const std::shared_ptr<Literal> &lit,
                                bool loadValue = true);
   llvm::Value *generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,

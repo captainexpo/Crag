@@ -65,7 +65,6 @@ public:
     std::string source = readFile(abs_path);
     Lexer lexer(source);
     auto tokens = lexer.tokenize();
-
     Parser parser(tokens);
     auto ast = parser.parse();
     if (!parser.ok()) {
@@ -82,19 +81,15 @@ public:
     module->ast = ast;
     module->source_code = source;
 
-    // insert empty adjacency entry (important before recursion)
     dependencyGraph[module->canon_name];
 
-    // Cache it BEFORE processing imports (avoids infinite recursion)
     m_module_cache[abs_path] = module;
 
-    // ---- Process declarations ----
     for (const auto &decl : ast->declarations) {
       if (auto importDecl = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
         auto importedMod = loadModule(importDecl->path);
         module->imports[importDecl->alias] = importedMod;
 
-        // Add dependency edge: module -> imported module
         dependencyGraph[module->canon_name].push_back(importedMod->canon_name);
         continue;
       }

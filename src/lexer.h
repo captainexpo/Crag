@@ -53,15 +53,25 @@ enum class TokenType {
   BXOR,
   SHL,
   SHR,
+  ARROW,
+  AS,
+  RE,
+  INC,
+  DEC,
+  BNOT,
+
+  // Assignment operators
   ASSIGN,
   PLUS_ASSIGN,
   MINUS_ASSIGN,
   STAR_ASSIGN,
   SLASH_ASSIGN,
   PERCENT_ASSIGN,
-  ARROW,
-  AS,
-  RE,
+  SHL_ASSIGN,
+  SHR_ASSIGN,
+  BAND_ASSIGN,
+  BOR_ASSIGN,
+  BXOR_ASSIGN,
 
   // Delimiters
   TRIPLE_DOT,
@@ -104,7 +114,7 @@ private:
 
   std::unordered_map<std::string, TokenType> keywords;
 
-  char peek() const;
+  char peek(int lookahead = 0) const;
   char get();
   bool match(const std::string &s);
 };

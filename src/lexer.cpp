@@ -91,8 +91,16 @@ std::string tokenTypeName(TokenType type) {
     return "BXOR";
   case TokenType::SHL:
     return "SHL";
+  case TokenType::DOUBLE_COLON:
+    return "DOUBLE_COLON";
+  case TokenType::BNOT:
+    return "BNOT";
   case TokenType::SHR:
     return "SHR";
+  case TokenType::INC:
+    return "INC";
+  case TokenType::DEC:
+    return "DEC";
   case TokenType::ASSIGN:
     return "ASSIGN";
   case TokenType::PLUS_ASSIGN:
@@ -105,6 +113,16 @@ std::string tokenTypeName(TokenType type) {
     return "SLASH_ASSIGN";
   case TokenType::PERCENT_ASSIGN:
     return "PERCENT_ASSIGN";
+  case TokenType::SHL_ASSIGN:
+    return "SHL_ASSIGN";
+  case TokenType::SHR_ASSIGN:
+    return "SHR_ASSIGN";
+  case TokenType::BAND_ASSIGN:
+    return "BAND_ASSIGN";
+  case TokenType::BOR_ASSIGN:
+    return "BOR_ASSIGN";
+  case TokenType::BXOR_ASSIGN:
+    return "BXOR_ASSIGN";
   case TokenType::ARROW:
     return "ARROW";
   case TokenType::TRIPLE_DOT:
@@ -166,7 +184,7 @@ Lexer::Lexer(const std::string &src) : code(src) {
   };
 }
 
-char Lexer::peek() const { return pos < code.size() ? code[pos] : '\0'; }
+char Lexer::peek(int lookahead) const { return (pos+lookahead) < code.size() ? code[pos+lookahead] : '\0'; }
 
 char Lexer::get() {
   char c = peek();
@@ -249,6 +267,24 @@ std::vector<Token> Lexer::tokenize() {
     }
 
     // Numbers
+    if (c == '0' && peek(1) == 'x') {
+      std::string val;
+      val += get(); // consume '0'
+      val += get(); // consume 'x'
+      while (isxdigit(peek()))
+        val += get();
+      tokens.push_back({TokenType::NUMBER, val, token_line, token_col});
+      continue;
+    }
+    if (c == '0' && peek(1) == 'b') {
+      std::string val;
+      val += get(); // consume '0'
+      val += get(); // consume 'b'
+      while (peek() == '0' || peek() == '1')
+        val += get();
+      tokens.push_back({TokenType::NUMBER, val, token_line, token_col});
+      continue;
+    }
     if (isdigit(c)) {
       std::string val;
       while (isdigit(peek()) || peek() == '.')
@@ -317,10 +353,6 @@ std::vector<Token> Lexer::tokenize() {
       tokens.push_back({TokenType::LE, "<=", token_line, token_col});
     else if (match(">="))
       tokens.push_back({TokenType::GE, ">=", token_line, token_col});
-    else if (match("<<"))
-      tokens.push_back({TokenType::SHL, "<<", token_line, token_col});
-    else if (match(">>"))
-      tokens.push_back({TokenType::SHR, ">>", token_line, token_col});
     else if (match("&&"))
       tokens.push_back({TokenType::AND, "&&", token_line, token_col});
     else if (match("||"))
@@ -335,17 +367,38 @@ std::vector<Token> Lexer::tokenize() {
       tokens.push_back({TokenType::SLASH_ASSIGN, "/=", token_line, token_col});
     else if (match("%="))
       tokens.push_back({TokenType::PERCENT_ASSIGN, "%=", token_line, token_col});
+    else if (match("<<="))
+      tokens.push_back({TokenType::SHL_ASSIGN, "<<=", token_line, token_col});
+    else if (match(">>="))
+      tokens.push_back({TokenType::SHR_ASSIGN, ">>=", token_line, token_col});
+    else if (match("&="))
+      tokens.push_back({TokenType::BAND_ASSIGN, "&=", token_line, token_col});
+    else if (match("|="))
+      tokens.push_back({TokenType::BOR_ASSIGN, "|=", token_line, token_col});
+    else if (match("^="))
+      tokens.push_back({TokenType::BXOR_ASSIGN, "^=", token_line, token_col});
+    else if (match("<<"))
+      tokens.push_back({TokenType::SHL, "<<", token_line, token_col});
+    else if (match(">>"))
+      tokens.push_back({TokenType::SHR, ">>", token_line, token_col});
     else if (match("->"))
       tokens.push_back({TokenType::ARROW, "->", token_line, token_col});
     else if (match("..."))
       tokens.push_back({TokenType::TRIPLE_DOT, "...", token_line, token_col});
     else if (match("::"))
       tokens.push_back({TokenType::DOUBLE_COLON, "::", token_line, token_col});
+    else if (match("++"))
+      tokens.push_back({TokenType::INC, "++", token_line, token_col});
+    else if (match("--"))
+      tokens.push_back({TokenType::DEC, "--", token_line, token_col});
     else {
       char op = get();
       switch (op) {
       case '?':
         tokens.push_back({TokenType::QUESTION, "?", token_line, token_col});
+        break;
+      case '~':
+        tokens.push_back({TokenType::BNOT, "~", token_line, token_col});
         break;
       case '=':
         tokens.push_back({TokenType::ASSIGN, "=", token_line, token_col});

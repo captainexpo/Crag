@@ -84,47 +84,72 @@ private:
   std::shared_ptr<Expression> parse_expression(int min_prec = 0);
   std::shared_ptr<Expression> parse_nud();
   std::shared_ptr<Expression> parse_led(std::shared_ptr<Expression> left);
-  int get_precedence(const Token &token) const;
+  int get_precedence(const Token &token, bool postfix) const;
 
   // Operator categories
   const std::set<TokenType> OP_TOKENS = {
-      TokenType::ASSIGN,
-      TokenType::PLUS_ASSIGN,
-      TokenType::MINUS_ASSIGN,
-      TokenType::STAR_ASSIGN,
-      TokenType::SLASH_ASSIGN,
-      TokenType::PERCENT_ASSIGN,
-      TokenType::PLUS,
-      TokenType::MINUS,
-      TokenType::STAR,
-      TokenType::SLASH,
-      TokenType::CARET,
-      TokenType::PERCENT,
-      TokenType::EQ,
-      TokenType::NEQ,
-      TokenType::LT,
-      TokenType::LE,
-      TokenType::GT,
-      TokenType::GE,
-      TokenType::DOT,
-      TokenType::AS,
-      TokenType::RE,
-      TokenType::DOUBLE_COLON,
+    TokenType::ASSIGN,
+    TokenType::PLUS_ASSIGN,
+    TokenType::MINUS_ASSIGN,
+    TokenType::STAR_ASSIGN,
+    TokenType::SLASH_ASSIGN,
+    TokenType::PERCENT_ASSIGN,
+    TokenType::PLUS,
+    TokenType::MINUS,
+    TokenType::STAR,
+    TokenType::SLASH,
+    TokenType::CARET,
+    TokenType::PERCENT,
+    TokenType::EQ,
+    TokenType::NEQ,
+    TokenType::LT,
+    TokenType::LE,
+    TokenType::GT,
+    TokenType::GE,
+    TokenType::DOT,
+    TokenType::AS,
+    TokenType::RE,
+    TokenType::DOUBLE_COLON,
+    TokenType::OR,
+    TokenType::AND,
+    TokenType::BAND,
+    TokenType::BOR,
+    TokenType::BXOR,
+    TokenType::BANG,
+    TokenType::SHL,
+    TokenType::SHR,
+    TokenType::SHL_ASSIGN,
+    TokenType::SHR_ASSIGN,
+    TokenType::BAND_ASSIGN,
+    TokenType::BOR_ASSIGN,
+    TokenType::BXOR_ASSIGN,
   };
 
-  const std::set<TokenType> PREFIX_OPS = {TokenType::BAND, TokenType::STAR,
-                                          TokenType::MINUS, TokenType::BANG};
+  const std::set<TokenType> PREFIX_OPS = {
+    TokenType::STAR,
+    TokenType::MINUS,
+    TokenType::BANG,
+    TokenType::BAND,
+    TokenType::BNOT,
+  };
 
-  const std::set<TokenType> POSTFIX_OPS = {TokenType::LBRACKET,
-                                           TokenType::LPAREN};
+  const std::set<TokenType> POSTFIX_OPS = {
+    TokenType::LBRACKET,
+    TokenType::LPAREN,
+  };
 
   const std::set<TokenType> ASSIGN_OPS = {
-      TokenType::ASSIGN,
-      TokenType::PLUS_ASSIGN,
-      TokenType::MINUS_ASSIGN,
-      TokenType::STAR_ASSIGN,
-      TokenType::SLASH_ASSIGN,
-      TokenType::PERCENT_ASSIGN,
+    TokenType::ASSIGN,
+    TokenType::PLUS_ASSIGN,
+    TokenType::MINUS_ASSIGN,
+    TokenType::STAR_ASSIGN,
+    TokenType::SLASH_ASSIGN,
+    TokenType::PERCENT_ASSIGN,
+    TokenType::SHL_ASSIGN,
+    TokenType::SHR_ASSIGN,
+    TokenType::BAND_ASSIGN,
+    TokenType::BOR_ASSIGN,
+    TokenType::BXOR_ASSIGN,
   };
 };
 

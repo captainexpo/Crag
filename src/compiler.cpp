@@ -31,7 +31,20 @@ std::string backendToString(BackendType backend) {
 std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llvm::LLVMContext &context, CompilerOptions options) {
 
   if (options.backend != LLVM) {
-    cleanFailure("Unsupported backend: " + backendToString(options.backend));
+    fail("Unsupported backend: " + backendToString(options.backend));
+  }
+
+  // See if file is empty or doesn't exist
+  if (raw_filepath.empty()) {
+    fail("No input file specified.");
+  }
+  if (!std::filesystem::exists(raw_filepath)) {
+    fail("Input file does not exist: " + raw_filepath);
+  }
+  if (std::filesystem::is_empty(raw_filepath)) {
+    warn("Input file is empty: " + raw_filepath);
+    info("An empty program has no code to compile. Try writing a main function.");
+    return nullptr;
   }
 
   auto path = std::filesystem::path(raw_filepath);

@@ -32,7 +32,6 @@ int globalVals = 0;
 #define IS_INSTANCE(obj, type) (std::dynamic_pointer_cast<type>(obj) != nullptr)
 #define CUR_SCOPE m_scopeStack.back()
 
-
 std::string runtimePanicTypeToString(RuntimePanicType type) {
   switch (type) {
   case OutOfBounds:
@@ -48,30 +47,29 @@ std::string runtimePanicTypeToString(RuntimePanicType type) {
 
 void LLVMCodegen::emitBuiltinDeclarations() {
   llvm::FunctionType *panicType = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {
-    llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)), // Error message
-    llvm::Type::getInt32Ty(context),  // Line number
-    llvm::Type::getInt32Ty(context)   // Column number
-  }, false);
+                                                                                              llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)), // Error message
+                                                                                              llvm::Type::getInt32Ty(context),                              // Line number
+                                                                                              llvm::Type::getInt32Ty(context)                               // Column number
+                                                                                          },
+                                                          false);
   llvm::Function::Create(panicType, llvm::Function::ExternalLinkage, "__panic__", m_llvm_module.get());
-
 
   // Prepare runtime panic strings
   m_runtime_panic_strings.clear();
   m_runtime_panic_strings.resize(3, nullptr);
   for (const auto &type : {OutOfBounds, DivisionByZero, NullPointerDereference}) {
-      // String literal → create global string
-      auto strVal = "Runtime Panic: " + runtimePanicTypeToString(type) + "\n";
-      auto strName = "g" + std::to_string(globalVals++);
-      auto strType = llvm::ArrayType::get(llvm::Type::getInt8Ty(context),
-                                          strVal.size() + 1);
-      auto strConstant =
-          llvm::ConstantDataArray::getString(context, strVal, true);
-      auto globalStr = new llvm::GlobalVariable(
-          *m_llvm_module, strType, true, llvm::GlobalValue::PrivateLinkage,
-          strConstant, strName);
-      m_runtime_panic_strings[type] = globalStr;
+    // String literal → create global string
+    auto strVal = "Runtime Panic: " + runtimePanicTypeToString(type) + "\n";
+    auto strName = "g" + std::to_string(globalVals++);
+    auto strType = llvm::ArrayType::get(llvm::Type::getInt8Ty(context),
+                                        strVal.size() + 1);
+    auto strConstant =
+        llvm::ConstantDataArray::getString(context, strVal, true);
+    auto globalStr = new llvm::GlobalVariable(
+        *m_llvm_module, strType, true, llvm::GlobalValue::PrivateLinkage,
+        strConstant, strName);
+    m_runtime_panic_strings[type] = globalStr;
   }
-
 }
 
 // Public API stubs
@@ -81,47 +79,46 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
 
   m_current_module = module;
 
-  if (m_options.do_runtime_safety) emitBuiltinDeclarations();
+  if (m_options.do_runtime_safety)
+    emitBuiltinDeclarations();
 
   try {
 
-
-  for (const auto &decl : module->ast->declarations) {
-    if (IS_INSTANCE(decl, FunctionDeclaration)) {
-      auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl);
-      llvm::Function *fn = generateFunctionDefinition(fd);
-      funcDecls.push_back({fn, fd});
-      continue;
-    }
-    if (IS_INSTANCE(decl, VariableDeclaration)) {
-      generateVariableDeclaration(
-          std::dynamic_pointer_cast<VariableDeclaration>(decl));
-      continue;
-    }
-    if (IS_INSTANCE(decl, StructDeclaration)) {
-      auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl);
-      generateStructDeclaration(sd);
-      auto sms = generateStructMethods(sd);
-      for (const auto &pair : sms) {
-        funcDecls.push_back(pair);
+    for (const auto &decl : module->ast->declarations) {
+      if (IS_INSTANCE(decl, FunctionDeclaration)) {
+        auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl);
+        llvm::Function *fn = generateFunctionDefinition(fd);
+        funcDecls.push_back({fn, fd});
+        continue;
       }
-      continue;
+      if (IS_INSTANCE(decl, VariableDeclaration)) {
+        generateVariableDeclaration(
+            std::dynamic_pointer_cast<VariableDeclaration>(decl));
+        continue;
+      }
+      if (IS_INSTANCE(decl, StructDeclaration)) {
+        auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl);
+        generateStructDeclaration(sd);
+        auto sms = generateStructMethods(sd);
+        for (const auto &pair : sms) {
+          funcDecls.push_back(pair);
+        }
+        continue;
+      }
+      if (IS_INSTANCE(decl, EnumDeclaration)) {
+        generateEnumDeclaration(
+            std::dynamic_pointer_cast<EnumDeclaration>(decl));
+        continue;
+      }
+      if (IS_INSTANCE(decl, ImportDeclaration)) {
+        continue; // Handled elsewhere
+      }
+      throw CodeGenError(decl, "Unknown top-level declaration: " + decl->str());
     }
-    if (IS_INSTANCE(decl, EnumDeclaration)) {
-      generateEnumDeclaration(
-          std::dynamic_pointer_cast<EnumDeclaration>(decl));
-      continue;
+    for (const auto &fnPair : funcDecls) {
+      generateFunctionBody(fnPair.second, fnPair.first);
     }
-    if (IS_INSTANCE(decl, ImportDeclaration)) {
-      continue; // Handled elsewhere
-    }
-    throw CodeGenError(decl, "Unknown top-level declaration: " + decl->str());
-  }
-  for (const auto &fnPair : funcDecls) {
-    generateFunctionBody(fnPair.second, fnPair.first);
-  }
-  }
-  catch (const CodeGenError &e) {
+  } catch (const CodeGenError &e) {
     m_errors.push_back(e);
   }
 }
@@ -277,8 +274,7 @@ LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &expr) {
     auto binOp = std::dynamic_pointer_cast<BinaryOperation>(expr);
     if (binOp->op == "=") {
       return generateAddress(binOp->left);
-    }
-    else {
+    } else {
       throw CodeGenError(expr,
                          "Left operand of binary operation is not an lvalue: " +
                              expr->str());
@@ -387,7 +383,10 @@ LLVMCodegen::generateCast(const std::shared_ptr<TypeCast> &typeCast,
     unsigned srcBits = srcType->getIntegerBitWidth();
     unsigned destBits = destType->getIntegerBitWidth();
     if (srcBits < destBits) {
-      return m_builder.CreateSExt(val, destType, "sexttmp");
+      if (typeCast->expr->inferred_type->isUnsigned() || typeCast->expr->inferred_type->kind() == TypeKind::Bool)
+        return m_builder.CreateZExt(val, destType, "zexttmp");
+      else
+        return m_builder.CreateSExt(val, destType, "sexttmp");
     } else {
       return m_builder.CreateTrunc(val, destType, "trunctmp");
     }
@@ -697,6 +696,10 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
     throw CodeGenError(nullptr, "Invalid binary operation: null operand expression");
   }
 
+  if (op == "&&" || op == "||") { // These are special :)
+    return generateLogicalOp(left, right, op);
+  }
+
   llvm::Value *l = generateExpression(left);
   llvm::Value *r = generateExpression(right);
 
@@ -718,6 +721,7 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
     m_builder.CreateStore(r, addr);
     return r;
   }
+
 
   static const std::map<std::string, OpInfo> ops = {
       {"+",
@@ -798,6 +802,31 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
         [this](llvm::Value *a, llvm::Value *b) {
           return m_builder.CreateFCmpUGE(a, b, "fgetmp");
         }}},
+      {"<<",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateShl(a, b, "shltmp");
+        },
+        nullptr}},
+      {">>",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateAShr(a, b, "shrtmp");
+        },
+        nullptr}},
+      {"&",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateAnd(a, b, "andtmp");
+        },
+        nullptr}},
+      {"|",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateOr(a, b, "ortmp");
+        },
+        nullptr}},
+      {"^",
+       {[this](llvm::Value *a, llvm::Value *b) {
+          return m_builder.CreateXor(a, b, "xortmp");
+        },
+        nullptr}},
   };
 
   // Pointer handling → cast to integer
@@ -813,8 +842,8 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
   // Ensure both operands have the same type
   if (l->getType() != r->getType()) {
     throw CodeGenError(left, "Type mismatch in binary op: lhs=" +
-                                    llvmTypeToString(l->getType()) +
-                                    " rhs=" + llvmTypeToString(r->getType()));
+                                 llvmTypeToString(l->getType()) +
+                                 " rhs=" + llvmTypeToString(r->getType()));
     return nullptr;
   }
 
@@ -856,14 +885,53 @@ LLVMCodegen::generateUnaryOp(const std::shared_ptr<Expression> &operand,
       return m_builder.CreateFNeg(val, "fnegtmp");
     }
     return m_builder.CreateNeg(val, "negtmp");
-  } else if (op == "+") {
+  } else if (op == "+")
     return val; // Unary plus is a no-op
-  } else if (op == "!") {
+  else if (op == "!")
     return m_builder.CreateNot(val, "nottmp");
-  } else if (op == "&") {
+  else if (op == "&")
     return generateAddress(operand);
+  else if (op == "~") {
+    return m_builder.CreateNot(val, "bwnottmp");
   }
+
   throw CodeGenError(operand, "Unsupported unary operator: " + op);
+}
+
+llvm::Value *LLVMCodegen::generateLogicalOp(std::shared_ptr<Expression> left, std::shared_ptr<Expression> right, std::string op) {
+  llvm::Value* valLeft = generateExpression(left);
+
+  llvm::BasicBlock* startBlock = m_builder.GetInsertBlock();
+  llvm::Function *currentFunc = startBlock->getParent();
+  llvm::BasicBlock *rhs = llvm::BasicBlock::Create(context, op == "&&" ? "land.rhs" : "lor.rhs", currentFunc);
+  llvm::BasicBlock *end = llvm::BasicBlock::Create(context, op == "&&" ? "land.end" : "lor.end", currentFunc);
+
+  llvm::Value* valRight = nullptr;
+  if (op == "&&") {
+    m_builder.CreateCondBr(valLeft, rhs, end);
+
+    m_builder.SetInsertPoint(rhs);
+    valRight = generateExpression(right);
+
+    m_builder.CreateBr(end);
+  }
+  else {
+
+    m_builder.CreateCondBr(valLeft, end, rhs);
+
+    m_builder.SetInsertPoint(rhs);
+    valRight = generateExpression(right);
+
+    m_builder.CreateBr(end);
+  }
+
+  m_builder.SetInsertPoint(end);
+  llvm::PHINode* phi = m_builder.CreatePHI(llvm::Type::getInt1Ty(context), 2, "phitmp");
+
+  phi->addIncoming(llvm::ConstantInt::get(context, llvm::APInt(1, op == "||" ? 1 : 0)), startBlock);
+  phi->addIncoming(valRight, rhs);
+
+  return phi;
 }
 
 llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
@@ -1076,12 +1144,12 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
 
   return m_builder.CreateCall(funcTy, calleeValue, argsV, funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
 }
-llvm::Value* LLVMCodegen::conditionOrPanic(llvm::Value* condition, RuntimePanicType panicType, int line, int col) {
+llvm::Value *LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicType panicType, int line, int col) {
 
   llvm::Function *curFunc = m_builder.GetInsertBlock()->getParent();
-  llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(context, "then", curFunc);
-  llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(context, "else", curFunc);
-  llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(context, "ifcont", curFunc);
+  llvm::BasicBlock *thenBB = llvm::BasicBlock::Create(context, "then", curFunc);
+  llvm::BasicBlock *elseBB = llvm::BasicBlock::Create(context, "else", curFunc);
+  llvm::BasicBlock *mergeBB = llvm::BasicBlock::Create(context, "ifcont", curFunc);
 
   m_builder.CreateCondBr(condition, thenBB, elseBB);
 
@@ -1092,13 +1160,13 @@ llvm::Value* LLVMCodegen::conditionOrPanic(llvm::Value* condition, RuntimePanicT
   // Else block: condition is false, emit panic
 
   // Get panic function (will be extern declared)
-  llvm::Function* panicFunc = m_llvm_module->getFunction("__panic__");
-  llvm::FunctionType* panicFuncTy = panicFunc->getFunctionType();
+  llvm::Function *panicFunc = m_llvm_module->getFunction("__panic__");
+  llvm::FunctionType *panicFuncTy = panicFunc->getFunctionType();
 
-  std::vector<llvm::Value*> panicArgs = {
-    m_runtime_panic_strings[panicType],
-    llvm::ConstantInt::get(context, llvm::APInt(32, line)),
-    llvm::ConstantInt::get(context, llvm::APInt(32, col)),
+  std::vector<llvm::Value *> panicArgs = {
+      m_runtime_panic_strings[panicType],
+      llvm::ConstantInt::get(context, llvm::APInt(32, line)),
+      llvm::ConstantInt::get(context, llvm::APInt(32, col)),
   };
   m_builder.CreateCall(panicFuncTy, panicFunc, panicArgs);
 
@@ -1107,8 +1175,8 @@ llvm::Value* LLVMCodegen::conditionOrPanic(llvm::Value* condition, RuntimePanicT
 
   return nullptr; // No meaningful value to return
 }
-llvm::Value* LLVMCodegen::generateArrayAccess(
-  const std::shared_ptr<OffsetAccess>& arrayAccess, bool loadValue) {
+llvm::Value *LLVMCodegen::generateArrayAccess(
+    const std::shared_ptr<OffsetAccess> &arrayAccess, bool loadValue) {
   if (!arrayAccess || !arrayAccess->base || !arrayAccess->index) {
     throw CodeGenError(nullptr, "Invalid array access: missing base or index expression");
   }
@@ -1130,21 +1198,20 @@ llvm::Value* LLVMCodegen::generateArrayAccess(
       std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)->element_type);
   if (!elementType) {
     throw CodeGenError(arrayAccess, "Unknown element type for array access: " +
-                                         arrayAccess->base->inferred_type->str());
+                                        arrayAccess->base->inferred_type->str());
   }
   // Condition check for index within bounds
   if (index->getType() != llvm::Type::getInt64Ty(context)) {
     index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
   }
-  if (m_options.opt_level == Debug && m_options.do_runtime_safety){
-    llvm::Value* arraySizeVal = llvm::ConstantInt::get(
+  if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
+    llvm::Value *arraySizeVal = llvm::ConstantInt::get(
         llvm::Type::getInt64Ty(context),
         std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)->length);
-    llvm::Value* indexInBounds = m_builder.CreateICmpULT(
+    llvm::Value *indexInBounds = m_builder.CreateICmpULT(
         index, arraySizeVal, "index_in_bounds");
     conditionOrPanic(indexInBounds, OutOfBounds, arrayAccess->line, arrayAccess->col);
   }
-
 
   // Gep instruction
   llvm::Value *gep =
@@ -1162,7 +1229,7 @@ llvm::Value *LLVMCodegen::generateOffsetAccess(
   if (!offsetAccess || !offsetAccess->base || !offsetAccess->index) {
     throw CodeGenError(nullptr, "Invalid offset access: missing base or index expression");
   }
-  if (offsetAccess->base->inferred_type->kind() == TypeKind::Array){
+  if (offsetAccess->base->inferred_type->kind() == TypeKind::Array) {
     return generateArrayAccess(offsetAccess, loadValue);
   }
 
