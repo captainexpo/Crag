@@ -1,5 +1,6 @@
 #include "llvmcodegen.h"
 #include "../module_resolver.h"
+#include <filesystem>
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/BasicBlock.h>
@@ -48,8 +49,8 @@ std::string runtimePanicTypeToString(RuntimePanicType type) {
 void LLVMCodegen::emitBuiltinDeclarations() {
   llvm::FunctionType *panicType = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {
                                                                                               llvm::PointerType::getUnqual(context), // Error message
-                                                                                              llvm::Type::getInt32Ty(context),                              // Line number
-                                                                                              llvm::Type::getInt32Ty(context)                               // Column number
+                                                                                              llvm::Type::getInt32Ty(context),       // Line number
+                                                                                              llvm::Type::getInt32Ty(context)        // Column number
                                                                                           },
                                                           false);
   llvm::Function::Create(panicType, llvm::Function::ExternalLinkage, "__panic__", m_llvm_module.get());
@@ -123,65 +124,102 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
   }
 }
 
-// int LLVMCodegen::outputObjFile(const std::string &filename) {
-//   // REF:
-//   // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html Make
-//
-//   auto targetTriple = llvm::sys::getDefaultTargetTriple();
-//   llvm::InitializeAllTargetInfos();
-//   llvm::InitializeAllTargets();
-//   llvm::InitializeAllTargetMCs();
-//   llvm::InitializeAllAsmParsers();
-//   llvm::InitializeAllAsmPrinters();
-//
-//   std::string errorStr;
-//   auto Target = llvm::TargetRegistry::lookupTarget(targetTriple, errorStr);
-//
-//   // Print an error and exit if we couldn't find the requested target.
-//   // This generally occurs if we've forgotten to initialise the
-//   // TargetRegistry or we have a bogus target triple.
-//   if (!Target) {
-//     throw CodeGenError(nullptr, "Failed to lookup target: " + errorStr);
-//     return 1;
-//   }
-//   auto CPU = "generic";
-//   auto Features = "";
-//
-//   llvm::TargetOptions opt;
-//   auto targetMachine = Target->createTargetMachine(targetTriple, CPU, Features,
-//                                                    opt, llvm::Reloc::PIC_);
-//   m_llvm_module->setDataLayout(targetMachine->createDataLayout());
-//   m_llvm_module->setTargetTriple(targetTriple);
-//
-//   std::error_code ec;
-//   llvm::raw_fd_ostream dest(filename, ec, llvm::sys::fs::OF_None);
-//
-//   if (ec) {
-//     throw CodeGenError(nullptr, "Could not open file: " + ec.message());
-//     return 1;
-//   }
-//   llvm::legacy::PassManager pass;
-//   auto FileType = llvm::CodeGenFileType::ObjectFile;
-//
-//   if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
-//     throw CodeGenError(nullptr, "TargetMachine can't emit a file of this type");
-//     return 1;
-//   }
-//
-//   pass.run(*m_llvm_module);
-//   dest.flush();
-//
-//   return 0;
-// }
-//
-void LLVMCodegen::printIR(const std::string &filename) {
+void LLVMCodegen::emitObjectToFile(const std::string &filename) {
+  // REF:
+  // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html Make
+
+  auto targetTriple = llvm::sys::getDefaultTargetTriple();
+  llvm::InitializeAllTargetInfos();
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmParsers();
+  llvm::InitializeAllAsmPrinters();
+
+  std::string errorStr;
+  auto Target = llvm::TargetRegistry::lookupTarget(targetTriple, errorStr);
+
+  // Print an error and exit if we couldn't find the requested target.
+  // This generally occurs if we've forgotten to initialise the
+  // TargetRegistry or we have a bogus target triple.
+  if (!Target) {
+    throw CodeGenError(nullptr, "Failed to lookup target: " + errorStr);
+  }
+  auto CPU = "generic";
+  auto Features = "";
+
+  // Verify the module before emitting object code
+  if (llvm::verifyModule(*m_llvm_module, &llvm::errs())) {
+    throw CodeGenError(nullptr, "Module verification failed - invalid IR");
+  }
+
+  const llvm::TargetOptions opt{};
+
+  llvm::CodeGenOptLevel opt_level = llvm::CodeGenOptLevel::Default;
+
+  m_options.opt_level == Release
+      ? opt_level = llvm::CodeGenOptLevel::Aggressive
+      : opt_level = llvm::CodeGenOptLevel::None;
+
+  const auto Triple = llvm::Triple(targetTriple);
+
+  auto targetMachine = Target->createTargetMachine(Triple, CPU, Features, opt, llvm::Reloc::Model::PIC_, std::nullopt, opt_level);
+
+  m_llvm_module->setDataLayout(targetMachine->createDataLayout());
+  m_llvm_module->setTargetTriple(Triple);
+
+  std::error_code ec;
+  llvm::raw_fd_ostream dest(filename, ec, llvm::sys::fs::OF_None);
+
+  if (ec) {
+    throw CodeGenError(nullptr, "Could not open file: " + ec.message());
+  }
+  llvm::legacy::PassManager pass;
+  auto FileType = llvm::CodeGenFileType::ObjectFile;
+
+  if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
+    throw CodeGenError(nullptr, "TargetMachine can't emit a file of this type");
+  }
+
+  pass.run(*m_llvm_module);
+  dest.flush();
+}
+
+void LLVMCodegen::emitIrToFile(const std::string &filepath) {
   if (m_llvm_module) {
     std::error_code ec;
-    llvm::raw_fd_ostream out(filename, ec, llvm::sys::fs::OF_None);
+    llvm::raw_fd_ostream out(filepath, ec, llvm::sys::fs::OF_None);
     if (ec) {
       throw CodeGenError(nullptr, "Could not open file: " + ec.message());
     }
     m_llvm_module->print(out, nullptr);
+  }
+}
+void LLVMCodegen::compileObjectFileToExecutable(const std::string &object_filepath,
+                                     const std::filesystem::path &executable_filepath,
+                                     const std::filesystem::path &runtime_path,
+                                     bool no_runtime) {
+
+  // See if clang is available
+  if (system("clang --version > /dev/null 2>&1") != 0) {
+    throw CodeGenError(nullptr, "Clang is not installed or not found in PATH.");
+  }
+  std::cout << "Compiling: " << object_filepath << " to executable...\n";
+  std::string opt = (m_options.opt_level == Release) ? " -O3 " : " -O0 ";
+
+  // Run clang to compile IR to executable
+  std::filesystem::path finalOutputFilePath = executable_filepath.parent_path() / executable_filepath.stem();
+  std::string clangCmd = "clang " + object_filepath + opt;
+
+  if (!no_runtime) {
+    clangCmd += " " + runtime_path.string();
+  }
+
+  clangCmd += " -o " + finalOutputFilePath.string();
+
+  int ret = system(clangCmd.c_str());
+
+  if (ret != 0) {
+    throw CodeGenError(nullptr, "Failed to invoke clang to create executable.");
   }
 }
 
@@ -722,7 +760,6 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
     return r;
   }
 
-
   static const std::map<std::string, OpInfo> ops = {
       {"+",
        {[this](llvm::Value *a, llvm::Value *b) {
@@ -829,8 +866,28 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
         nullptr}},
   };
 
-  // Pointer handling → cast to integer
+  // Pointer arithmetic handling
   if (ty->isPointerTy()) {
+    if (op == "+" || op == "-") {
+      // For pointer arithmetic, use GEP instruction
+      // If right operand is a pointer (from cast), convert to integer
+      if (r->getType()->isPointerTy()) {
+        r = m_builder.CreatePtrToInt(r, llvm::Type::getInt64Ty(context), "ptrtoint_offset");
+      }
+      // Ensure right operand is integer type
+      if (!r->getType()->isIntegerTy()) {
+        throw CodeGenError(right, "Cannot add/subtract non-integer to pointer");
+      }
+      // For subtraction, negate the offset
+      if (op == "-") {
+        r = m_builder.CreateNeg(r, "neg_offset");
+      }
+
+      // Use GEP for pointer arithmetic (returns pointer)
+      return m_builder.CreateGEP(llvm::Type::getInt8Ty(context), l, r, "ptrarith");
+    }
+
+    // For other operations, convert both to integers
     ty = llvm::Type::getInt64Ty(context);
     l = m_builder.CreatePtrToInt(l, ty, "ptrtoint_lhs");
     r = m_builder.CreatePtrToInt(r, ty, "ptrtoint_rhs");
@@ -899,14 +956,14 @@ LLVMCodegen::generateUnaryOp(const std::shared_ptr<Expression> &operand,
 }
 
 llvm::Value *LLVMCodegen::generateLogicalOp(std::shared_ptr<Expression> left, std::shared_ptr<Expression> right, std::string op) {
-  llvm::Value* valLeft = generateExpression(left);
+  llvm::Value *valLeft = generateExpression(left);
 
-  llvm::BasicBlock* startBlock = m_builder.GetInsertBlock();
+  llvm::BasicBlock *startBlock = m_builder.GetInsertBlock();
   llvm::Function *currentFunc = startBlock->getParent();
   llvm::BasicBlock *rhs = llvm::BasicBlock::Create(context, op == "&&" ? "land.rhs" : "lor.rhs", currentFunc);
   llvm::BasicBlock *end = llvm::BasicBlock::Create(context, op == "&&" ? "land.end" : "lor.end", currentFunc);
 
-  llvm::Value* valRight = nullptr;
+  llvm::Value *valRight = nullptr;
   if (op == "&&") {
     m_builder.CreateCondBr(valLeft, rhs, end);
 
@@ -914,8 +971,7 @@ llvm::Value *LLVMCodegen::generateLogicalOp(std::shared_ptr<Expression> left, st
     valRight = generateExpression(right);
 
     m_builder.CreateBr(end);
-  }
-  else {
+  } else {
 
     m_builder.CreateCondBr(valLeft, end, rhs);
 
@@ -926,7 +982,7 @@ llvm::Value *LLVMCodegen::generateLogicalOp(std::shared_ptr<Expression> left, st
   }
 
   m_builder.SetInsertPoint(end);
-  llvm::PHINode* phi = m_builder.CreatePHI(llvm::Type::getInt1Ty(context), 2, "phitmp");
+  llvm::PHINode *phi = m_builder.CreatePHI(llvm::Type::getInt1Ty(context), 2, "phitmp");
 
   phi->addIncoming(llvm::ConstantInt::get(context, llvm::APInt(1, op == "||" ? 1 : 0)), startBlock);
   phi->addIncoming(valRight, rhs);
@@ -1481,12 +1537,18 @@ LLVMCodegen::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
   m_builder.CreateCondBr(condV, thenBB, elseBB);
   m_builder.SetInsertPoint(thenBB);
   llvm::Value *thenV = generateStatement(ifStmt->then_branch);
-  m_builder.CreateBr(mergeBB);
+  // Only branch to merge if the then block is not already terminated
+  if (!m_builder.GetInsertBlock()->getTerminator()) {
+    m_builder.CreateBr(mergeBB);
+  }
   thenBB = m_builder.GetInsertBlock();
   m_builder.SetInsertPoint(elseBB);
   if (ifStmt->else_branch)
     llvm::Value *elseV = generateStatement(ifStmt->else_branch);
-  m_builder.CreateBr(mergeBB); // <- This is missing
+  // Only branch to merge if the else block is not already terminated
+  if (!m_builder.GetInsertBlock()->getTerminator()) {
+    m_builder.CreateBr(mergeBB);
+  }
   m_builder.SetInsertPoint(mergeBB);
   return nullptr;
 }
@@ -1512,7 +1574,10 @@ llvm::Value *LLVMCodegen::generateWhileStatement(
   m_builder.CreateCondBr(condition, body_block, after_block);
   m_builder.SetInsertPoint(body_block);
   generateStatement(whileStmt->body);
-  m_builder.CreateBr(cond_block);
+  // Only branch back to condition if the block is not already terminated
+  if (!m_builder.GetInsertBlock()->getTerminator()) {
+    m_builder.CreateBr(cond_block);
+  }
   m_builder.SetInsertPoint(after_block);
   m_loop_stack.pop_back();
   return nullptr;
@@ -1547,9 +1612,12 @@ llvm::Value *LLVMCodegen::generateForStatement(
   m_builder.CreateCondBr(condition, body_block, after_block);
   m_builder.SetInsertPoint(body_block);
   generateStatement(forStmt->body);
-  if (forStmt->increment)
-    generateStatement(forStmt->increment);
-  m_builder.CreateBr(cond_block);
+  // Only execute increment and branch if block is not already terminated
+  if (!m_builder.GetInsertBlock()->getTerminator()) {
+    if (forStmt->increment)
+      generateStatement(forStmt->increment);
+    m_builder.CreateBr(cond_block);
+  }
   m_builder.SetInsertPoint(after_block);
   m_loop_stack.pop_back();
   return nullptr;

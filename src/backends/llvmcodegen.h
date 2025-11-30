@@ -29,8 +29,6 @@ struct LoopInfo {
   llvm::BasicBlock *continueBB;
 };
 
-
-
 class Scope {
 public:
   Scope(std::shared_ptr<Scope> parent = nullptr) : m_parent(parent) {}
@@ -78,8 +76,6 @@ struct OpInfo {
   std::function<llvm::Value *(llvm::Value *, llvm::Value *)> floatOp;
 };
 
-
-
 enum RuntimePanicType {
   OutOfBounds,
   DivisionByZero,
@@ -96,8 +92,12 @@ public:
     m_scopeStack.push_back(Scope(nullptr));
   }
   void generate(std::shared_ptr<Module> module) override;
-  void printIR(const std::string &filename);
-  int outputObjFile(const std::string &filename);
+  void emitIrToFile(const std::string &filepath) override;
+  void emitObjectToFile(const std::string &filepath) override;
+  void compileObjectFileToExecutable(const std::string &object_filepath,
+                                     const std::filesystem::path &executable_filepath,
+                                     const std::filesystem::path &runtime_path,
+                                     bool no_runtime);
 
   const std::vector<CodeGenError> &errors() const {
     return m_errors;
@@ -129,7 +129,6 @@ public:
   }
 
 private:
-
   CompilerOptions m_options;
 
   std::vector<LoopInfo> m_loop_stack;
@@ -150,7 +149,7 @@ private:
 
   std::shared_ptr<ErrorUnionType> m_error_union_return_type = nullptr;
 
-  std::vector<llvm::Value*> m_runtime_panic_strings;
+  std::vector<llvm::Value *> m_runtime_panic_strings;
 
   void emitBuiltinDeclarations();
 
@@ -205,8 +204,8 @@ private:
   llvm::Value *generateFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue = true);
   llvm::Value *generateOffsetAccess(const std::shared_ptr<OffsetAccess> &offsetAccess,
                                     bool loadValue = true);
-  llvm::Value* generateArrayAccess(
-    const std::shared_ptr<OffsetAccess>& arrayAccess, bool loadValue);
+  llvm::Value *generateArrayAccess(
+      const std::shared_ptr<OffsetAccess> &arrayAccess, bool loadValue);
 
   llvm::Value *generateModuleAccess(const std::shared_ptr<ModuleAccess> &moduleAccess,
                                     bool loadValue = true);
@@ -220,7 +219,6 @@ private:
   llvm::Value *generateReturnStatement(const std::shared_ptr<ReturnStatement> &retStmt);
   llvm::Value *generateExpressionStatement(const std::shared_ptr<ExpressionStatement> &exprStmt);
 
-
-  llvm::Value* conditionOrPanic(llvm::Value* condition, RuntimePanicType errorType, int line, int col);
+  llvm::Value *conditionOrPanic(llvm::Value *condition, RuntimePanicType errorType, int line, int col);
 };
 #endif

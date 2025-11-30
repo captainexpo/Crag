@@ -10,11 +10,11 @@ from pathlib import Path
 import time
 
 
-
 def color_text(text: Any, rgb: tuple[int, int, int]) -> str:
     text = str(text)
     r, g, b = rgb
     return f"\033[38;2;{r};{g};{b}m{text}\033[0m"
+
 
 def parse_test_file(text: str):
     SECTION_NAME = re.compile(r"^NAME:\s*(.*)")
@@ -83,18 +83,22 @@ def parse_test_file(text: str):
         "expect_err": "\n".join(expect_err).rstrip(),
     }
 
+
 ROOT = os.path.dirname(os.path.dirname(__file__))
 COMP_CANDIDATES = [os.path.join(ROOT, "build", "comp"), os.path.join(ROOT, "comp")]
+
 
 def find_compiler() -> Optional[str]:
     for p in COMP_CANDIDATES:
         if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
 
+
 class TestResult(Enum):
     PASS = 1
     FAIL = 2
     SKIP = 3
+
 
 C_RED = (255, 0, 0)
 C_GREEN = (0, 255, 0)
@@ -102,13 +106,18 @@ C_BLUE = (0, 0, 255)
 C_YELLOW = (255, 255, 0)
 
 
-
 comp = find_compiler()
-def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str], float]: # result, output lines, time
+
+
+def run_unit_test(
+    tmp_path: Path, src_path: str
+) -> tuple[TestResult, list[str], float]:  # result, output lines, time
     outs: list[str] = []
+
     def printc(text: Any, color: tuple[int, int, int]) -> None:
         nonlocal outs
         outs.append(color_text(text, color))
+
     if comp is None or not isinstance(comp, str):
         printc("Compiler not found, skipping test.", C_YELLOW)
         return TestResult.SKIP, outs, 0
@@ -127,23 +136,33 @@ def run_unit_test(tmp_path: Path, src_path: str) -> tuple[TestResult, list[str],
     start_time = time.time()
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1)
     except subprocess.TimeoutExpired:
         printc("Compilation timed out.", C_RED)
         return TestResult.FAIL, outs, time.time() - start_time
     if not result.returncode == 0:
         printc("Compilation failed:\n", C_RED)
         printc(f"----------Stdout----------\n{result.stdout.strip()}\n", C_RED)
-        printc(f"----------Stderr----------\n{result.stderr.strip()}\n--------------------------", C_RED)
-        return TestResult.FAIL,  outs, time.time() - start_time
+        printc(
+            f"----------Stderr----------\n{result.stderr.strip()}\n--------------------------",
+            C_RED,
+        )
+        return TestResult.FAIL, outs, time.time() - start_time
     # call the generated binary
     bin_file = out_base
-    result = subprocess.run([bin_file], capture_output=True, text=True)
+    try:
+        result = subprocess.run([bin_file], capture_output=True, text=True, timeout=1)
+    except subprocess.TimeoutExpired:
+        printc("Execution timed out.", C_RED)
+        return TestResult.FAIL, outs, time.time() - start_time
     end_time = time.time()
     total_time = end_time - start_time
     if result.returncode != 0:
         if not test_file_data["expect_err"].strip():
-            printc(f"Execution failed:\nStdout:{result.stdout}\nStderr:\n{result.stderr}", C_RED)
+            printc(
+                f"Execution failed:\nStdout:{result.stdout}\nStderr:\n{result.stderr}",
+                C_RED,
+            )
             return TestResult.FAIL, outs, time.time() - start_time
         if test_file_data["expect_err"]:
             expected_err = test_file_data["expect_err"]
@@ -182,9 +201,9 @@ def main():
     skips = []
 
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmpdirname:
         tmp_path = Path(tmpdirname)
-
         # Create executor once
         with ProcessPoolExecutor() as pool:
             # Submit each test exactly once
@@ -198,6 +217,7 @@ def main():
             # Process results
             for future in futures:
                 test_path = futures[future]
+
                 result, out, time = future.result()
                 if result == TestResult.PASS:
                     print(color_text(".", C_GREEN), end="", flush=True)
@@ -214,7 +234,9 @@ def main():
 
         print()
 
-    print(f"Passed: {color_text(passed, C_GREEN)}, Failed: {color_text(failed, C_RED)}, Skipped: {color_text(skipped, C_YELLOW)}")
+    print(
+        f"Passed: {color_text(passed, C_GREEN)}, Failed: {color_text(failed, C_RED)}, Skipped: {color_text(skipped, C_YELLOW)}"
+    )
 
     if skipped > 0:
         print("Skipped details:")
@@ -226,6 +248,7 @@ def main():
             print(output)
 
     exit(failed)
+
 
 if __name__ == "__main__":
     main()

@@ -4,7 +4,6 @@
 #include "utils.h"
 #include "backend.h"
 #include "backends/llvmcodegen.h"
-#include "llvm/TargetParser/Host.h"
 #include <filesystem>
 #include <llvm/Support/TargetSelect.h>
 #include <memory>
@@ -28,7 +27,7 @@ std::string backendToString(BackendType backend) {
   }
 }
 
-std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llvm::LLVMContext &context, CompilerOptions options) {
+std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LLVMContext &context, CompilerOptions options) {
 
   if (options.backend != LLVM) {
     fail("Unsupported backend: " + backendToString(options.backend));
@@ -71,17 +70,17 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
   }
 
   // Call llvm codegen directly here, should probably make it more modular later
-  auto codegen = LLVMCodegen("mainmod", context, moduleResolver, options);
+  auto codegen = std::make_shared<LLVMCodegen>("mainmod", context, moduleResolver, options);
   bool has_errors = false;
   for (std::string path : moduleResolver.getBestOrder()) {
     auto module = moduleResolver.getModule(path);
     std::cout << "Generating code for module: " << path << "\n";
-    codegen.generate(module);
+    codegen->generate(module);
     // Check for errors after each module
-    if (!codegen.ok()) {
+    if (!codegen->ok()) {
       std::cerr << "In module '" << module->canon_name << "'\n";
-      std::cerr << codegen.errors().size() << " errors during code generation:\n";
-      for (const auto &err : codegen.errors()) {
+      std::cerr << codegen->errors().size() << " errors during code generation:\n";
+      for (const auto &err : codegen->errors()) {
         std::cerr << err.what() << "\n";
         prettyError(err.node()? err.node()->line : -1,
                     err.node()? err.node()->col : -1, err.what(), module->source_code);
@@ -89,8 +88,8 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
       has_errors = true;
     }
     // Set insert point back to main module after each compiled module
-    codegen.prepareForNewModule();
-    codegen.clearErrors();
+    codegen->prepareForNewModule();
+    codegen->clearErrors();
   }
   if (has_errors) {
     std::cerr << "Code generation failed due to previous errors.\n";
@@ -98,8 +97,5 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
   }
   std::cout << "Compilation succeeded.\n";
 
-  auto llvmmod = codegen.takeModule();
-  llvmmod->setDarwinTargetVariantTriple(llvm::sys::getDefaultTargetTriple());
-
-  return llvmmod;
+  return codegen;
 }

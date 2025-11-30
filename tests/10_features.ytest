@@ -1,0 +1,51 @@
+NAME: Features (trimmed)
+DESC: Trimmed subset of examples/features.y focusing on deterministic prints.
+BEGIN CODE
+
+extern fn printf(_s: *const u8, ...) -> i32;
+
+fn for_loops() -> void {
+  for (let i: i32 = 0; i < 3; i = i + 1) {
+    printf("i = %d\n", i);
+  }
+}
+
+fn while_loops() -> void {
+  let i: i32 = 0;
+  while (i < 3) {
+    printf("w = %d\n", i);
+    i = i + 1;
+  }
+}
+
+fn other_function(x: i32) -> i32 {
+  printf("Called: other_function with x = %d\n", x);
+  return 42;
+}
+
+fn function_pointers() -> void {
+  let f: fn(i32) -> i32 = &other_function;
+  let result: i32 = f(25);
+  printf("result = %d\n", result);
+}
+
+fn main(argc: i32, argv: **u8) -> i32 {
+  printf("Hello, World!\n");
+  for_loops();
+  while_loops();
+  function_pointers();
+  return 0;
+}
+
+END CODE
+BEGIN EXPECT
+Hello, World!
+i = 0
+i = 1
+i = 2
+w = 0
+w = 1
+w = 2
+Called: other_function with x = 25
+result = 42
+END EXPECT
