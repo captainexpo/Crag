@@ -99,7 +99,7 @@ std::shared_ptr<llvm::Module> compileModule(const std::string &raw_filepath, llv
   std::cout << "Compilation succeeded.\n";
 
   auto llvmmod = codegen.takeModule();
-  llvmmod->setTargetTriple(llvm::sys::getDefaultTargetTriple());
+  llvmmod->setDarwinTargetVariantTriple(llvm::sys::getDefaultTargetTriple());
 
   return llvmmod;
 }

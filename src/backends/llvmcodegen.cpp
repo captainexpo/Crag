@@ -47,7 +47,7 @@ std::string runtimePanicTypeToString(RuntimePanicType type) {
 
 void LLVMCodegen::emitBuiltinDeclarations() {
   llvm::FunctionType *panicType = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {
-                                                                                              llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)), // Error message
+                                                                                              llvm::PointerType::getUnqual(context), // Error message
                                                                                               llvm::Type::getInt32Ty(context),                              // Line number
                                                                                               llvm::Type::getInt32Ty(context)                               // Column number
                                                                                           },
@@ -123,57 +123,57 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
   }
 }
 
-int LLVMCodegen::outputObjFile(const std::string &filename) {
-  // REF:
-  // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html Make
-
-  auto targetTriple = llvm::sys::getDefaultTargetTriple();
-  llvm::InitializeAllTargetInfos();
-  llvm::InitializeAllTargets();
-  llvm::InitializeAllTargetMCs();
-  llvm::InitializeAllAsmParsers();
-  llvm::InitializeAllAsmPrinters();
-
-  std::string errorStr;
-  auto Target = llvm::TargetRegistry::lookupTarget(targetTriple, errorStr);
-
-  // Print an error and exit if we couldn't find the requested target.
-  // This generally occurs if we've forgotten to initialise the
-  // TargetRegistry or we have a bogus target triple.
-  if (!Target) {
-    throw CodeGenError(nullptr, "Failed to lookup target: " + errorStr);
-    return 1;
-  }
-  auto CPU = "generic";
-  auto Features = "";
-
-  llvm::TargetOptions opt;
-  auto targetMachine = Target->createTargetMachine(targetTriple, CPU, Features,
-                                                   opt, llvm::Reloc::PIC_);
-  m_llvm_module->setDataLayout(targetMachine->createDataLayout());
-  m_llvm_module->setTargetTriple(targetTriple);
-
-  std::error_code ec;
-  llvm::raw_fd_ostream dest(filename, ec, llvm::sys::fs::OF_None);
-
-  if (ec) {
-    throw CodeGenError(nullptr, "Could not open file: " + ec.message());
-    return 1;
-  }
-  llvm::legacy::PassManager pass;
-  auto FileType = llvm::CodeGenFileType::ObjectFile;
-
-  if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
-    throw CodeGenError(nullptr, "TargetMachine can't emit a file of this type");
-    return 1;
-  }
-
-  pass.run(*m_llvm_module);
-  dest.flush();
-
-  return 0;
-}
-
+// int LLVMCodegen::outputObjFile(const std::string &filename) {
+//   // REF:
+//   // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html Make
+//
+//   auto targetTriple = llvm::sys::getDefaultTargetTriple();
+//   llvm::InitializeAllTargetInfos();
+//   llvm::InitializeAllTargets();
+//   llvm::InitializeAllTargetMCs();
+//   llvm::InitializeAllAsmParsers();
+//   llvm::InitializeAllAsmPrinters();
+//
+//   std::string errorStr;
+//   auto Target = llvm::TargetRegistry::lookupTarget(targetTriple, errorStr);
+//
+//   // Print an error and exit if we couldn't find the requested target.
+//   // This generally occurs if we've forgotten to initialise the
+//   // TargetRegistry or we have a bogus target triple.
+//   if (!Target) {
+//     throw CodeGenError(nullptr, "Failed to lookup target: " + errorStr);
+//     return 1;
+//   }
+//   auto CPU = "generic";
+//   auto Features = "";
+//
+//   llvm::TargetOptions opt;
+//   auto targetMachine = Target->createTargetMachine(targetTriple, CPU, Features,
+//                                                    opt, llvm::Reloc::PIC_);
+//   m_llvm_module->setDataLayout(targetMachine->createDataLayout());
+//   m_llvm_module->setTargetTriple(targetTriple);
+//
+//   std::error_code ec;
+//   llvm::raw_fd_ostream dest(filename, ec, llvm::sys::fs::OF_None);
+//
+//   if (ec) {
+//     throw CodeGenError(nullptr, "Could not open file: " + ec.message());
+//     return 1;
+//   }
+//   llvm::legacy::PassManager pass;
+//   auto FileType = llvm::CodeGenFileType::ObjectFile;
+//
+//   if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
+//     throw CodeGenError(nullptr, "TargetMachine can't emit a file of this type");
+//     return 1;
+//   }
+//
+//   pass.run(*m_llvm_module);
+//   dest.flush();
+//
+//   return 0;
+// }
+//
 void LLVMCodegen::printIR(const std::string &filename) {
   if (m_llvm_module) {
     std::error_code ec;
@@ -218,7 +218,7 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type) {
   }
   if (IS_INSTANCE(type, PointerType)) {
     auto ptrType = std::dynamic_pointer_cast<PointerType>(type);
-    return llvm::PointerType::getUnqual(getLLVMType(ptrType->base));
+    return llvm::PointerType::getUnqual(context);
   }
   if (IS_INSTANCE(type, ArrayType)) {
     auto arrType = std::dynamic_pointer_cast<ArrayType>(type);
@@ -286,7 +286,7 @@ LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &expr) {
     // Check for null ptr
     if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
       llvm::Value *zero = llvm::ConstantPointerNull::get(
-          llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)));
+          llvm::PointerType::getUnqual(context));
       llvm::Value *isZero = m_builder.CreateICmpNE(base, zero, "isnullptrtmp");
       conditionOrPanic(isZero, NullPointerDereference, expr->line, expr->col);
     }
@@ -341,7 +341,7 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
     llvm::Value *ptr = generateExpression(deref->pointer, true);
     if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
       llvm::Value *zero = llvm::ConstantPointerNull::get(
-          llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)));
+          llvm::PointerType::getUnqual(context));
       llvm::Value *isZero = m_builder.CreateICmpNE(ptr, zero, "isnullptrtmp");
       conditionOrPanic(isZero, NullPointerDereference, expr->line, expr->col);
     }
@@ -1056,7 +1056,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(const std::shared_ptr<MethodCall> &
       // Update objPtr to load the pointer value
       if (objPtr) {
         objPtr = m_builder.CreateLoad(
-            llvm::PointerType::getUnqual(getLLVMType(ptrType->base)), objPtr,
+            llvm::PointerType::getUnqual(context), objPtr,
             "load_ptr_for_method");
       }
     }
@@ -1325,7 +1325,7 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
       if (structType) {
         // Adjust basePtr to dereference the pointer
         basePtr = m_builder.CreateLoad(
-            llvm::PointerType::getUnqual(getLLVMType(ptrType->base)), basePtr,
+            llvm::PointerType::getUnqual(context), basePtr,
             "load_ptr_for_field");
         if (!basePtr) {
           throw CodeGenError(fieldAccess->base,

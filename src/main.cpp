@@ -2,59 +2,61 @@
 
 #include <iostream>
 #include <filesystem>
-#include <llvm/ADT/StringRef.h>
-#include <llvm/Support/CommandLine.h>
-#include <llvm/Support/InitLLVM.h>
-#include <llvm/Support/raw_ostream.h>
-#include <ratio>
 #include <system_error>
+#include <argparse/argparse.hpp>
 
 #define PRGM_NAME "Toy Compiler"
 
 namespace fs = std::filesystem;
 
 int main(int argc, char **argv) {
-    llvm::InitLLVM X(argc, argv);
-    llvm::LLVMContext context;
+    argparse::ArgumentParser program(PRGM_NAME);
 
-    // --- Define CLI options ---
-    llvm::cl::opt<std::string> inputFilepath(llvm::cl::Positional,
-                                             llvm::cl::desc("<source file>"),
-                                             llvm::cl::Required);
+    program.add_argument("input")
+        .help("Source file to compile");
 
-    llvm::cl::opt<std::string> outputFilepath(
-        "o", llvm::cl::desc("Specify output filename"),
-        llvm::cl::value_desc("filename"), llvm::cl::init("a.out"));
+    program.add_argument("-o", "--output")
+        .default_value(std::string("a.out"))
+        .help("Specify output filename");
 
-    llvm::cl::opt<bool> EmitIR(
-        "emit-ir", llvm::cl::desc("Emit LLVM IR instead of object code"),
-        llvm::cl::init(false));
+    program.add_argument("--emit-ir")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Emit LLVM IR instead of object code");
 
-    llvm::cl::opt<std::string> pathToRuntime(
-        "runtime-path", llvm::cl::desc("Path to runtime library"),
-        llvm::cl::value_desc("path"), llvm::cl::init("lib/libruntime.a"));
+    program.add_argument("--runtime-path")
+        .default_value(std::string("lib/libruntime.a"))
+        .help("Path to runtime library");
 
-    // For future use, hopefully with the QBE backend
-    llvm::cl::opt<std::string> backend(
-        "backend", llvm::cl::desc("Specify backend (currently only 'llvm' is supported)"),
-        llvm::cl::value_desc("backend"), llvm::cl::init("llvm"));
+    program.add_argument("--backend")
+        .default_value(std::string("llvm"))
+        .help("Specify backend (currently only 'llvm' is supported)");
 
-    llvm::cl::opt<std::string> optLevel(
-        "opt-level", llvm::cl::desc("Optimization level (debug or release)"),
-        llvm::cl::value_desc("level"), llvm::cl::init("debug"));
+    program.add_argument("--opt-level")
+        .default_value(std::string("debug"))
+        .help("Optimization level (debug or release)");
 
-    llvm::cl::opt<bool> unsafe(
-        "unsafe", llvm::cl::desc("Disable safety checks (bounds checking, null pointer checks)"),
-        llvm::cl::init(false));
+    program.add_argument("--unsafe")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Disable safety checks (bounds checking, null pointer checks)");
 
+    program.add_argument("--no-runtime")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Do not link against the runtime library");
 
-    llvm::cl::opt<bool> noRuntime(
-        "no-runtime", llvm::cl::desc("Do not link against the runtime library"),
-        llvm::cl::init(false));
-
-    llvm::cl::ParseCommandLineOptions(argc, argv, std::string(PRGM_NAME) + "\n");
+    try {
+        program.parse_args(argc, argv);
+    } catch (const std::runtime_error &err) {
+        std::cerr << err.what() << "\n";
+        std::cerr << program;
+        return 1;
+    }
 
     CompilerOptions options;
+
+    std::string backend = program.get<std::string>("--backend");
     if (backend == "llvm") {
         options.backend = LLVM;
     } else {
@@ -62,6 +64,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    std::string optLevel = program.get<std::string>("--opt-level");
     if (optLevel == "debug") {
         options.opt_level = Debug;
     } else if (optLevel == "release") {
@@ -71,23 +74,29 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    options.do_runtime_safety = !unsafe;
+    options.do_runtime_safety = !program.get<bool>("--unsafe");
 
+    auto inputFilepath = program.get<std::string>("input");
+    auto outputFilepath = program.get<std::string>("--output");
+    auto EmitIR = program.get<bool>("--emit-ir");
+    auto pathToRuntime = program.get<std::string>("--runtime-path");
+    auto noRuntime = program.get<bool>("--no-runtime");
 
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
 
+    auto context = llvm::LLVMContext();
     auto mod = compileModule(inputFilepath, context, options);
 
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
     std::cout << "Compilation finished in " << duration << " micros.\n";
+
     if (!mod) {
         std::cerr << "Compilation failed.\n";
         return 1;
     }
 
-    fs::path outputPath(outputFilepath.c_str());
-    std::string outputExt = outputPath.extension().string();
+    fs::path outputPath(outputFilepath);
     fs::path irFilePath = outputPath;
     irFilePath.replace_extension(".ll");
 
@@ -104,20 +113,17 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    std::string opt;
-    if (options.opt_level == Release) {
-        opt = " -O3 ";
-    } else {
-        opt = " -O0 ";
-    }
+    std::string opt = (options.opt_level == Release) ? " -O3 " : " -O0 ";
 
     // Run clang to compile IR to executable
     fs::path finalOutputFilePath = outputPath.parent_path() / outputPath.stem();
-    std::string clangCmd = "clang " + irFilePath.string()  + opt;
+    std::string clangCmd = "clang " + irFilePath.string() + opt;
+
     if (!noRuntime) {
         clangCmd += " " + pathToRuntime;
     }
 
+    std::string outputExt = outputPath.extension().string();
     if (outputExt == ".o") {
         finalOutputFilePath += ".o";
         clangCmd += " -c -o " + finalOutputFilePath.string();
@@ -128,9 +134,9 @@ int main(int argc, char **argv) {
     start = std::chrono::steady_clock::now();
     int ret = system(clangCmd.c_str());
     end = std::chrono::steady_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).
-count();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
     std::cout << "Linking finished in " << duration << " micros.\n";
+
     if (ret != 0) {
         std::cerr << "Failed to invoke clang to create executable.\n";
         return 1;
@@ -138,9 +144,9 @@ count();
 
     std::cout << "Emitted executable to " << finalOutputFilePath << "\n";
 
+    if (!EmitIR && fs::exists(irFilePath)) {
+        fs::remove(irFilePath);
+    }
 
-    // Remove the intermediate IR file
-  if (!EmitIR && fs::exists(irFilePath))
-    fs::remove(irFilePath);
-  return 0;
+    return 0;
 }

@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(Comp LANGUAGES CXX C)
-set(CMAKE_C_COMPILER clang)
-set(CMAKE_CXX_COMPILER clang++)
+set(CMAKE_C_COMPILER gcc)
+set(CMAKE_CXX_COMPILER g++)
 
 set(CMAKE_BUILD_TYPE Debug)
 
@@ -40,8 +40,12 @@ string(STRIP "${LLVM_LDFLAGS}" LLVM_LDFLAGS_STRIPPED)
 separate_arguments(LLVM_LDFLAGS_LIST NATIVE_COMMAND "${LLVM_LDFLAGS_STRIPPED}")
 target_link_libraries(comp PRIVATE ${LLVM_LDFLAGS_LIST})
 
-# --- Runtime Library ---
 
+# Link against argparse
+find_package(argparse REQUIRED)
+target_link_libraries(comp PRIVATE argparse::argparse)
+
+# --- Runtime Library ---
 file(GLOB_RECURSE RUNTIME_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/builtin/*.crag")
 
 make_directory(lib)
