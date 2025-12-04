@@ -1,0 +1,8 @@
+pub struct Node {
+  next: *Node,
+  value: usize,
+
+  fn get_val(self: *Node) -> usize {
+    return self.value;
+  }
+}

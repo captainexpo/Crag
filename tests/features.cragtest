@@ -1,6 +1,6 @@
-NAME: Features
-DESC: A miscelanneous collection of language features
-BEGIN CODE
+//NAME: Features
+//DESC: A miscelanneous collection of language features
+//BEGIN CODE
 
 extern fn printf(_s: *u8, ...) -> i32;
 
@@ -37,15 +37,15 @@ fn main(argc: i32, argv: **u8) -> i32 {
   return 0;
 }
 
-END CODE
-BEGIN EXPECT
-Hello, World!
-i = 0
-i = 1
-i = 2
-w = 0
-w = 1
-w = 2
-Called: other_function with x = 25
-result = 42
-END EXPECT
+//END CODE
+//BEGIN EXPECT
+//Hello, World!
+//i = 0
+//i = 1
+//i = 2
+//w = 0
+//w = 1
+//w = 2
+//Called: other_function with x = 25
+//result = 42
+//END EXPECT

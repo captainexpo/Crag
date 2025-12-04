@@ -1,7 +1,7 @@
-NAME: For Loops
-DESC: Test whether for loops work
+//NAME: For Loops
+//DESC: Test whether for loops work
 
-BEGIN CODE
+//BEGIN CODE
 extern fn printf(fmt: *u8, ...) -> i32;
 
 fn main() -> i32 {
@@ -11,7 +11,7 @@ fn main() -> i32 {
   return 0;
 }
 
-END CODE
-BEGIN EXPECT
-0\n1\n2\n
-END EXPECT
+//END CODE
+//BEGIN EXPECT
+//0\n1\n2\n
+//END EXPECT

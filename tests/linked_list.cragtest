@@ -1,6 +1,6 @@
 AME: Linked List Example
-DESC: Test linked list printing from examples/linked_list.y. This is more of an all-encompassing test
-BEGIN CODE
+//DESC: Test linked list printing from examples/linked_list.y. This is more of an all-encompassing test
+//BEGIN CODE
 
 extern fn printf(_s: *const u8, ...) -> i32;
 extern fn free(_p: *u8) -> void;
@@ -55,7 +55,7 @@ fn main(argc: i32, argv: **u8) -> i32 {
   return 0;
 }
 
-END CODE
-BEGIN EXPECT
-42 -> 43 -> 44 -> 45 -> 46
-END EXPECT
+//END CODE
+//BEGIN EXPECT
+//42 -> 43 -> 44 -> 45 -> 46
+//END EXPECT

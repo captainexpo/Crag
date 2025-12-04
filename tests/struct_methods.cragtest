@@ -1,6 +1,6 @@
-NAME: Struct Methods Example
-DESC: Test struct methods from examples/struct_methods.y
-BEGIN CODE
+//NAME: Struct Methods Example
+//DESC: Test struct methods from examples/struct_methods.y
+//BEGIN CODE
 
 extern fn printf(format: *const u8, ...) -> i32;
 extern fn malloc(size: usize) -> *u8;
@@ -74,9 +74,9 @@ fn main() -> i32 {
   return 0;
 }
 
-END CODE
-BEGIN EXPECT
-Hello, World!
-Length: 14
-Comparison with 'Hello, World!': 40
-END EXPECT
+//END CODE
+//BEGIN EXPECT
+//Hello, World!
+//Length: 14
+//Comparison with 'Hello, World!': 40
+//END EXPECT

@@ -1,3 +1,4 @@
+#pragma once
 #ifndef CONST_EVAL_H
 #define CONST_EVAL_H
 

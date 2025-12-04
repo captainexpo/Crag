@@ -1,7 +1,7 @@
-NAME: Calling Functions
-DESC: Test whether calling functions works
+//NAME: Calling Functions
+//DESC: Test whether calling functions works
 
-BEGIN CODE
+//BEGIN CODE
 extern fn printf(fmt: *u8, ...) -> i32;
 
 fn print_something(something: *u8) -> void {
@@ -18,7 +18,7 @@ fn main() -> i32 {
   return 0;
 }
 
-END CODE
-BEGIN EXPECT
-Something: This is something\n13
-END EXPECT
+//END CODE
+//BEGIN EXPECT
+//Something: This is something\n13
+//END EXPECT

@@ -1,6 +1,6 @@
-NAME: Type Inference
-DESC: Verify basic type inference for numeric expression
-BEGIN CODE
+//NAME: Type Inference
+//DESC: Verify basic type inference for numeric expression
+//BEGIN CODE
 
 extern fn printf(fmt: *const u8, ...) -> i32;
 
@@ -10,7 +10,7 @@ fn main(argc: i32, argv: **u8) -> i32 {
   return 0;
 }
 
-END CODE
-BEGIN EXPECT
-4.200000
-END EXPECT
+//END CODE
+//BEGIN EXPECT
+//4.200000
+//END EXPECT

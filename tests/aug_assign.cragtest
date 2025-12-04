@@ -1,6 +1,6 @@
-NAME: Augmented Assignment
-DESC: self explanitory
-BEGIN CODE
+//NAME: Augmented Assignment
+//DESC: self explanitory
+//BEGIN CODE
 
 extern fn printf(str: *u8, ...) -> i32;
 
@@ -14,7 +14,7 @@ fn main(argc: i32, argv: **u8) -> i32 {
   return 0;
 }
 
-END CODE
-BEGIN EXPECT
-2
-END EXPECT
+//END CODE
+//BEGIN EXPECT
+//2
+//END EXPECT

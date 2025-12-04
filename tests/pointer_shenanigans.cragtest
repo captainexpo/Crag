@@ -1,0 +1,20 @@
+//NAME: Pointer Shenanigans
+//DESC:
+//BEGIN CODE
+
+extern fn printf(_s: *const u8, ...) -> i32;
+extern fn strcpy(_p: *u8, _str: *u8) -> i32;
+extern fn malloc(_size: usize) -> *u8;
+
+fn main(argc: i32, argv: **u8) -> i32 {
+
+    let p1: *u8 = malloc(1024) as *u8;
+    strcpy(p1, "Hello World!");
+    printf("%s\n", p1);
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//Hello World!
+//END EXPECT

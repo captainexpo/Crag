@@ -1,3 +1,4 @@
+#pragma once
 #ifndef IR_H
 #define IR_H
 
@@ -90,6 +91,9 @@ public:
 
     m_llvm_module = std::make_unique<llvm::Module>(module_name, ctx);
     m_scopeStack.push_back(Scope(nullptr));
+
+    if(options.do_runtime_safety) emitBuiltinDeclarations();
+
   }
   void generate(std::shared_ptr<Module> module) override;
   void emitIrToFile(const std::string &filepath) override;

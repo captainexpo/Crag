@@ -1,0 +1,10 @@
+
+pub const PI: f64 = 3.141592653589793238;
+
+pub fn sum_arr(ptr: *u8, size: usize) -> i32{
+  let sum: i32 = 0;
+  for (let i = ptr; i < ptr + (size as *u8); i+=1as*u8){
+    sum += ptr.*;
+  }
+  return sum;
+}

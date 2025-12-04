@@ -1,0 +1,18 @@
+import "other.crag" as Other
+import "math.crag" as Math
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+enum Hello(i32) {
+    Test = 0,
+    Test2,
+}
+
+fn main(argc: i32, argv: **u8) -> i32 {
+    let n: Other::Node = Other::Node {
+        value: 5,
+        next: null,
+    };
+    printf("%f", Math::PI);
+    return Hello:Test2 as i32;
+}

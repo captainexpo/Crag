@@ -1,6 +1,6 @@
-NAME: Global Variables
-DESC: Verify global constants and printing
-BEGIN CODE
+//NAME: Global Variables
+//DESC: Verify global constants and printing
+//BEGIN CODE
 extern fn printf(format: *const u8, ...) -> i32;
 
 const PI = 3.14159;
@@ -16,10 +16,10 @@ fn main(argc: i32, argv: *const *const u8) -> i32 {
     printf("TAU: %f\n", TAU);
     return 0;
 }
-END CODE
-BEGIN EXPECT
-Hello, World!
-PI: 3.141590
-E: 2.718280
-TAU: 6.283180
-END EXPECT
+//END CODE
+//BEGIN EXPECT
+//Hello, World!
+//PI: 3.141590
+//E: 2.718280
+//TAU: 6.283180
+//END EXPECT

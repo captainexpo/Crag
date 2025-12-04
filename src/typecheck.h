@@ -1,3 +1,4 @@
+#pragma once
 #ifndef TYPECHECK_H
 #define TYPECHECK_H
 
@@ -65,6 +66,7 @@ private:
   std::shared_ptr<Type> m_expected_return_type; // Current function return type
 
   std::vector<std::shared_ptr<Type>> m_expected_types; // Stack of expected types
+    std::unordered_map<std::string, std::shared_ptr<TypeChecker>> m_imported_module_checkers;
 
   // Scope helpers
   void pushScope();

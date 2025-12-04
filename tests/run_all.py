@@ -37,7 +37,8 @@ def parse_test_file(text: str):
 
     mode = None  # None, "code", "expect", "expect_err"
 
-    for line in lines:
+    for _line in lines:
+        line = _line[2:] # skip the leading comment characters
         m = SECTION_NAME.match(line)
         if m:
             name = m.group(1)
@@ -69,7 +70,7 @@ def parse_test_file(text: str):
             continue
 
         if mode == "code":
-            code.append(line)
+            code.append(_line)
         elif mode == "expect":
             expect.append(line.encode("utf-8").decode("unicode_escape"))
         elif mode == "expect_err":

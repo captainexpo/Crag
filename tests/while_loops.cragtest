@@ -1,7 +1,7 @@
-NAME: While Loops
-DESC: Test whether while loops work
+//NAME: While Loops
+//DESC: Test whether while loops work
 
-BEGIN CODE
+//BEGIN CODE
 extern fn printf(fmt: *u8, ...) -> i32;
 
 fn main() -> i32 {
@@ -15,7 +15,7 @@ fn main() -> i32 {
   return 0;
 }
 
-END CODE
-BEGIN EXPECT
-16 4\n
-END EXPECT
+//END CODE
+//BEGIN EXPECT
+//16 4\n
+//END EXPECT

@@ -1,2 +1,5 @@
 BasedOnStyle: LLVM
 ColumnLimit: 0
+IndentWidth: 4
+UseTab: Never
+IndentCaseLabels: true

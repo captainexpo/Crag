@@ -1,0 +1,244 @@
+// Simple line-based text editor (like ed)
+// Commands:
+//   a - append lines after current line
+//   d - delete current line
+//   p - print current line
+//   n - print current line with line number
+//   l - list all lines
+//   w <filename> - write to file (not implemented, just prints)
+//   q - quit
+//   <number> - go to line number
+//   . - on its own line ends append mode
+
+extern fn printf(fmt: *const u8, ...) -> i32;
+extern fn malloc(size: usize) -> *void;
+extern fn free(ptr: *u8) -> void;
+extern fn memcpy(dest: *u8, src: *const u8, n: usize) -> *u8;
+extern fn getchar() -> i32;
+extern fn strlen(s: *const u8) -> u32;
+extern fn strcmp(s1: *const u8, s2: *const u8) -> i32;
+extern fn exit(code: i32) -> void;
+
+struct Line {
+  text: *u8,
+  len: usize,
+}
+
+struct Editor {
+  lines: *Line,
+  count: usize,
+  cap: usize,
+  current: usize,
+
+  fn init(self: *Editor) -> void {
+    self.cap = 16;
+    self.lines = malloc(self.cap * 16) as *Line;
+    self.count = 0;
+    self.current = 0;
+  }
+
+  fn ensure_capacity(self: *Editor) -> void {
+    if (self.count < self.cap) return; 
+    
+    let new_cap: usize = self.cap * 2;
+    let new_lines: *Line = malloc(new_cap * 16) as *Line;
+    memcpy(new_lines as *u8, self.lines as *u8, self.count * 16);
+    free(self.lines as *u8);
+    self.lines = new_lines;
+    self.cap = new_cap;
+  }
+
+  fn insert_line(self: *Editor, text: *u8, len: usize) -> void {
+    self.ensure_capacity();
+
+    // Shift lines down
+    let i: usize = self.count;
+    while (i > self.current) {
+      self.lines[i] = self.lines[i - 1];
+      i = i - 1;
+    }
+
+    // Insert new line
+    self.lines[self.current].text = text;
+    self.lines[self.current].len = len;
+    self.count = self.count + 1;
+    self.current = self.current + 1;
+  }
+
+  fn delete_line(self: *Editor) -> void {
+    if (self.count == 0) {
+      printf("?\n");
+      return;
+    }
+    if (self.current >= self.count) {
+      self.current = self.count - 1;
+    }
+
+    free(self.lines[self.current].text);
+
+    // Shift lines up
+    let i: usize = self.current;
+    while (i < self.count - 1) {
+      self.lines[i] = self.lines[i + 1];
+      i = i + 1;
+    }
+
+    self.count = self.count - 1;
+    if (self.current >= self.count && self.count > 0) {
+      self.current = self.count - 1;
+    }
+  }
+
+  fn print_line(self: *Editor) -> void {
+    if (self.count == 0) {
+      printf("?\n");
+      return;
+    }
+    if (self.current >= self.count) {
+      printf("?\n");
+      return;
+    }
+
+    let line: Line = self.lines[self.current];
+    let i: usize = 0;
+    while (i < line.len) {
+      printf("%c", line.text[i]);
+      i = i + 1;
+    }
+    printf("\n");
+  }
+
+  fn print_numbered(self: *Editor) -> void {
+    if (self.count == 0) {
+      printf("?\n");
+      return;
+    }
+    if (self.current >= self.count) {
+      printf("?\n");
+      return;
+    }
+
+    printf("%d\t", self.current + 1);
+    self.print_line();
+  }
+
+  fn list_all(self: *Editor) -> void {
+    if (self.count == 0) {
+      return;
+    }
+
+    let i: usize = 0;
+    while (i < self.count) {
+      printf("%d\t", i + 1);
+      let line: Line = self.lines[i];
+      let j: usize = 0;
+      while (j < line.len) {
+        printf("%c", line.text[j]);
+        j = j + 1;
+      }
+      printf("\n");
+      i = i + 1;
+    }
+  }
+
+  fn go_to_line(self: *Editor, num: usize) -> void {
+    if (num == 0 || num > self.count) {
+      printf("?\n");
+      return;
+    }
+    self.current = num - 1;
+  }
+
+  fn deinit(self: *Editor) -> void {
+    let i: usize = 0;
+    while (i < self.count) {
+      free(self.lines[i].text);
+      i = i + 1;
+    }
+    free(self.lines as *u8);
+  }
+}
+
+fn read_line() -> *u8 {
+  let buffer = malloc(256) as *u8;
+  let i: usize = 0;
+  let c: i32 = getchar();
+
+  while (c != 10 && c != -1) {
+    if (i < 255) {
+      buffer[i] = c as u8;
+      i = i + 1;
+    }
+    c = getchar();
+  }
+
+  buffer[i] = 0;
+  return buffer;
+}
+
+fn parse_number(s: *u8) -> i32 {
+  let result: i32 = 0;
+  let i: usize = 0;
+
+  while (s[i] >= 48 && s[i] <= 57) {
+    result = result * 10 + ((s[i] - 48) as i32);
+    i = i + 1;
+  }
+
+  return result;
+}
+
+fn is_digit(c: u8) -> i32 {
+  if (c >= 48 && c <= 57) {
+    return 1;
+  }
+  return 0;
+}
+
+fn main() -> i32 {
+  let editor: Editor = Editor {
+    lines: null as *Line,
+    count: 0,
+    cap: 0,
+    current: 0
+  };
+  editor.init();
+
+  let running: i32 = 1;
+
+  while (running == 1) {
+    let cmd: *u8 = read_line();
+
+    if (cmd[0] == 'a') {  // 'a' - append
+      while (true) {
+        let line: *u8 = read_line();
+        if (line[0] == '.' && line[1] == 0) {  // '.' alone
+          free(line);
+          break;
+        }
+        let len: usize = strlen(line) as usize;
+        editor.insert_line(line, len);
+      }
+    } else if (cmd[0] == 'd') {  // delete
+      editor.delete_line();
+    } else if (cmd[0] == 'p') {  // print
+      editor.print_line();
+    } else if (cmd[0] == 'n') {  // numbered print
+      editor.print_numbered();
+    } else if (cmd[0] == 'l') {  // list
+      editor.list_all();
+    } else if (cmd[0] == 'q') {  // quit
+      running = 0;
+    } else if (is_digit(cmd[0]) == 1) {  // number - go to line
+      let num: i32 = parse_number(cmd);
+      editor.go_to_line(num as usize);
+    } else if (cmd[0] != 0) {
+      printf("?\n");
+    }
+
+    free(cmd);
+  }
+
+  editor.deinit();
+  return 0;
+}
