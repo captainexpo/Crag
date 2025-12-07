@@ -90,6 +90,19 @@ bool TypeChecker::canImplicitCast(const std::shared_ptr<Type> &from,
     }
     if (from_tk == TypeKind::Pointer && to_tk == TypeKind::USize)
         return true;
+    if (from_tk == TypeKind::Array){
+        auto from_array = std::dynamic_pointer_cast<ArrayType>(from);
+        assert(from_array);
+        if (to_tk == TypeKind::Array) {
+            auto to_array = std::dynamic_pointer_cast<ArrayType>(to);
+            assert(to_array);
+            if (from_array->unsized && !to_array->unsized)
+                return false;
+            if (from_array->element_type->equals(to_array->element_type))
+                return true;
+        }
+    }
+
 
     return false;
 }
@@ -193,7 +206,7 @@ TypeChecker::resolveType(const std::shared_ptr<Type> &t) const {
         auto bt = resolveType(at->element_type);
         if (!bt)
             return nullptr;
-        return std::make_shared<ArrayType>(bt, at->length);
+        return std::make_shared<ArrayType>(bt, at->length, at->unsized);
     }
     if (auto ft = std::dynamic_pointer_cast<FunctionType>(t)) {
         auto rt = resolveType(ft->ret);
@@ -414,14 +427,22 @@ void TypeChecker::checkVariableDeclaration(
         auto init_type = resolveType(inferExpression(expr));
 
         var->var_type = resolveType(var->var_type);
-        std::cout << "DEBUG: Variable " << name << " declared with type "
-                  << typeName(var->var_type) << " and initializer type "
-                  << typeName(init_type) << "\n";
 
         if (!var->var_type) {
             var->var_type = init_type; // Type inference
         }
         var->var_type->is_const = var->is_const;
+
+        // If is array literal and our var_type is array with unspecified size, infer size
+        if (auto arr_lit = std::dynamic_pointer_cast<ArrayLiteral>(expr)) {
+            if (auto arr_type = std::dynamic_pointer_cast<ArrayType>(var->var_type)) {
+                if (arr_type->unsized) {
+                    arr_type->length = static_cast<int>(arr_lit->elements.size());
+                    arr_type->unsized = false;
+                    var->var_type = arr_type;
+                }
+            }
+        }
 
         if (!init_type) {
             std::cerr << "DEBUG: init = " << init->toString() << "\n";
@@ -451,7 +472,8 @@ void TypeChecker::checkVariableDeclaration(
             throw TypeCheckError(init, "Type mismatch in initializer for variable " + name);
             goto end;
         }
-    } else {
+    }
+    else {
         throw TypeCheckError(init, "Unsupported initializer node for variable " + name);
         goto end;
     }
@@ -659,6 +681,8 @@ TypeChecker::inferExpression(const std::shared_ptr<Expression> &expr) {
         ea->inferred_type = res;
         return res;
     }
+    if (auto al = std::dynamic_pointer_cast<ArrayLiteral>(expr))
+        return inferArrayLiteral(al);
     // Unknown expression kind
     throw TypeCheckError(expr, "Type inference: unhandled expression type: " + expr->str());
 }
@@ -723,6 +747,43 @@ TypeChecker::inferLiteral(const std::shared_ptr<Literal> &lit) {
     }
     lit->inferred_type = preType;
     return lit->lit_type;
+}
+
+
+std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al) {
+    if (al->elements.empty()) {
+        throw TypeCheckError(al, "Cannot infer type of empty array literal");
+    }
+    std::shared_ptr<Type> elem_type = nullptr;
+    for (int i = 0; i < al->elements.size(); ++i) {
+        auto el = al->elements[i];
+        auto t = inferExpression(el);
+        if (!t)
+            return nullptr;
+        if (!elem_type) {
+            elem_type = t;
+        } else {
+            if (!t->equals(elem_type)) {
+                if (canImplicitCast(t, elem_type)) {
+                    // insert cast
+                    al->elements[i] = std::make_shared<TypeCast>(el, elem_type, CastType::Normal);
+                } else if (canImplicitCast(elem_type, t)) {
+                    // insert cast
+                    for (auto &e2 : al->elements) {
+                        e2 = std::make_shared<TypeCast>(e2, t, CastType::Normal);
+                    }
+                    elem_type = t;
+                } else {
+                    throw TypeCheckError(al, "Array literal element type mismatch: " +
+                                                  typeName(elem_type) + " vs " + typeName(t));
+                    return nullptr;
+                }
+            }
+        }
+    }
+    auto at = std::make_shared<ArrayType>(elem_type, al->elements.size(), false);
+    al->inferred_type = resolveType(at);
+    return at;
 }
 
 std::shared_ptr<Type>

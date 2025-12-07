@@ -335,8 +335,28 @@ std::vector<Token> Lexer::tokenize() {
       get();
       std::string val;
       if (peek() == '\\') {
-        val += get();
-        val += get();
+        get();
+        char esc = get();
+        switch (esc) {
+        case 'n':
+          val += '\n';
+          break;
+        case 't':
+          val += '\t';
+          break;
+        case 'r':
+          val += '\r';
+          break;
+        case '\\':
+          val += '\\';
+          break;
+        case '\'':
+          val += '\'';
+          break;
+        default:
+          val += esc;
+          break;
+        }
       } else
         val += get();
       get(); // consume closing '

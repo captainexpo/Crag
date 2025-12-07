@@ -1,0 +1,23 @@
+//NAME: Arrays
+//DESC: Test the array literals and stuff
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+    let arr: []u8 = {'H','E','L','L','O',0};
+    printf("%s\n", arr);
+    other(arr);
+    printf("%s\n", arr);
+    return 0;
+}
+
+fn other(arr: []u8) -> void {
+    arr[0] = 'b';
+}
+
+//END CODE
+//BEGIN EXPECT
+//HELLO
+//bELLO
+//END EXPECT

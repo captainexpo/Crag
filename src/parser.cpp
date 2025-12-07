@@ -62,8 +62,6 @@ Token Parser::consume(TokenType expected_type) {
 void Parser::synchronize() {
     advance();
     while (peek().type != TokenType::EOF_T) {
-        if (peek().type == TokenType::SEMICOLON)
-            return;
         switch (peek().type) {
             case TokenType::FN:
             case TokenType::LET:
@@ -167,7 +165,7 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
                      peek().column);
 }
 
-std::shared_ptr<Type> Parser::parse_pointer_type() {
+std::shared_ptr<PointerType> Parser::parse_pointer_type() {
     consume(TokenType::STAR);
     if (peek().type == TokenType::CONST) {
         consume(TokenType::CONST);
@@ -176,16 +174,17 @@ std::shared_ptr<Type> Parser::parse_pointer_type() {
     return std::make_shared<PointerType>(parse_type(false));
 }
 
-std::shared_ptr<Type> Parser::parse_array_type() {
+std::shared_ptr<ArrayType> Parser::parse_array_type() {
     consume(TokenType::LBRACKET);
-    if (peek().type == TokenType::RBRACKET) {
-        throw ParseError("Unsized arrays not supported yet", peek().line,
-                         peek().column);
+
+    int size = -1;
+    bool unsized = peek().type == TokenType::RBRACKET;
+    if (!unsized) {
+        size = std::stoi(consume(TokenType::NUMBER).value);
     }
-    int size = std::stoi(consume(TokenType::NUMBER).value);
     consume(TokenType::RBRACKET);
     auto elem_type = parse_type(false);
-    return std::make_shared<ArrayType>(elem_type, size);
+    return std::make_shared<ArrayType>(elem_type, size, unsized);
 }
 
 std::shared_ptr<PointerType> Parser::parse_function_ptr_type() {
@@ -598,7 +597,22 @@ std::shared_ptr<Expression> Parser::parse_nud() {
             }
             return expr;
         }
-
+        case TokenType::LBRACE: {
+            // Array literal
+            std::vector<std::shared_ptr<Expression>> elements;
+            if (peek().type != TokenType::RBRACE) {
+                while (true) {
+                    elements.push_back(parse_expression());
+                    if (!match({TokenType::COMMA}))
+                        break;
+                }
+            }
+            consume(TokenType::RBRACE);
+            expr = std::make_shared<ArrayLiteral>(elements);
+            expr->line = t.line;
+            expr->col = t.column;
+            return expr;
+        }
         default:
             if (PREFIX_OPS.count(t.type)) {
                 auto right = parse_expression(get_precedence(t, false) + 1);
@@ -607,7 +621,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                 expr->col = t.column;
                 return expr;
             }
-            throw ParseError("Unexpected token in expression, expected prefix operator, got " + tokenTypeName(t.type) + " '" + t.value + "'", t.line, t.column);
+            throw ParseError("Unexpected token in expression: '" + t.value + "'", t.line, t.column);
     }
 }
 

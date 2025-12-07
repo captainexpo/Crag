@@ -1,4 +1,6 @@
 #pragma once
+#include "src/utils.h"
+#include <cassert>
 #ifndef AST_H
 #define AST_H
 
@@ -44,6 +46,7 @@ struct ASTVisitor {
     virtual void visit(struct Program &) {}
     virtual void visit(struct BinaryOperation &) {}
     virtual void visit(struct Literal &) {}
+    virtual void visit(struct ArrayLiteral &) {}
     virtual void visit(struct FuncCall &) {}
     virtual void visit(struct StructDeclaration &) {}
     virtual void visit(struct EnumDeclaration &) {}
@@ -93,6 +96,8 @@ struct Type {
 
     virtual bool isGeneralNumeric() const { return isNumeric() || kind() == TypeKind::Pointer; }
 };
+
+
 
 struct Void : Type {
     TypeKind kind() const override { return TypeKind::Void; }
@@ -237,12 +242,17 @@ struct ArrayType : Type {
     TypeKind kind() const override { return TypeKind::Array; }
     std::shared_ptr<Type> element_type;
     int length;
+    bool unsized;
 
-    ArrayType(std::shared_ptr<Type> b, int len)
-        : element_type(std::move(b)), length(len) {}
+    ArrayType(std::shared_ptr<Type> b, int len, bool us)
+        : element_type(std::move(b)), length(len), unsized(us) {
+        if (us) ASSERT(len == -1, "Unsized array must have length -1: " + str());
+        else ASSERT(len >= 0, "Array length must be non-negative: " + str());
+    }
 
     std::string str() const override {
-        return "[" + std::to_string(length) + "]" + element_type->str();
+        return "[" + (!unsized ? std::to_string(length) : "") + "]" + element_type->str();
+
     }
 
     bool equals(const std::shared_ptr<Type> &other) const override {
@@ -659,12 +669,37 @@ struct Literal : public Expression {
                     std::ostringstream oss;
                     oss << v;
                     return oss.str();
-                } else {
+                }
+                else if constexpr (std::is_same_v<T, double>) {
+                    std::ostringstream oss;
+                    oss << v;
+                    return oss.str();
+                }
+                else {
                     return std::to_string(v);
                 }
             },
             value);
         return "Literal(" + val_str + " : " + (lit_type != nullptr ? lit_type->str() : "nullptr") + ")";
+    }
+    NodeKind kind() const override { return NodeKind::Literal; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+};
+
+struct ArrayLiteral : public Expression {
+    std::vector<ExprPtr> elements;
+
+    ArrayLiteral(std::vector<ExprPtr> elems)
+        : elements(std::move(elems)) {}
+    std::string str() const override {
+        std::string result = "ArrayLiteral([ ";
+        for (size_t i = 0; i < elements.size(); ++i) {
+            if (i > 0)
+                result += ", ";
+            result += elements[i]->toString();
+        }
+        result += " ])";
+        return result;
     }
     NodeKind kind() const override { return NodeKind::Literal; }
     void accept(ASTVisitor &v) override { v.visit(*this); }

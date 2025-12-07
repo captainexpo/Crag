@@ -242,6 +242,14 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type) {
         return llvm::Type::getVoidTy(context);
     if (IS_INSTANCE(type, USize))
         return llvm::Type::getInt64Ty(context); // Assuming 64-bit for USize
+    if (IS_INSTANCE(type, ArrayType)) {
+        auto arrType = std::dynamic_pointer_cast<ArrayType>(type);
+        if (arrType->unsized) {
+            // Treat as pointer
+            return llvm::PointerType::getUnqual(context);
+        }
+        return llvm::ArrayType::get(getLLVMType(arrType->element_type), arrType->length);
+    }
     if (IS_INSTANCE(type, StructType)) {
         auto structType = std::dynamic_pointer_cast<StructType>(type);
         auto it = m_structTypes.find(structType->name);
@@ -391,6 +399,10 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
     }
     if (IS_INSTANCE(expr, ModuleAccess)) {
         return generateModuleAccess(std::dynamic_pointer_cast<ModuleAccess>(expr),
+                                    loadValue);
+    }
+    if (IS_INSTANCE(expr, ArrayLiteral)) {
+        return generateArrayLiteral(std::dynamic_pointer_cast<ArrayLiteral>(expr),
                                     loadValue);
     }
     throw CodeGenError(expr, "Unknown expression type: " + expr->str());
@@ -735,8 +747,22 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
         return generateLogicalOp(left, right, op);
     }
 
-    llvm::Value *l = generateExpression(left);
+    llvm::Value *l = nullptr;
+    if (op == "=")
+        l = generateAddress(left);
+    else
+        l = generateExpression(left);
+
     llvm::Value *r = generateExpression(right);
+
+    // Handle assignment separately
+    if (op == "=") {
+        if (!l) {
+            throw CodeGenError(left, "Left operand of assignment is not an lvalue");
+        }
+        m_builder.CreateStore(r, l);
+        return r;
+    }
 
     if (!l || !r) {
         throw CodeGenError(nullptr, "Failed to generate LLVM value for binary operands");
@@ -745,16 +771,6 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
     llvm::Type *ty = l->getType();
     if (!ty) {
         throw CodeGenError(left, "Left operand of binary op has no type");
-    }
-
-    // Handle assignment separately
-    if (op == "=") {
-        llvm::Value *addr = generateAddress(left);
-        if (!addr) {
-            throw CodeGenError(left, "Left operand of assignment is not an lvalue");
-        }
-        m_builder.CreateStore(r, addr);
-        return r;
     }
 
     static const std::map<std::string, OpInfo> ops = {
@@ -1053,6 +1069,7 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
     } else if (IS_INSTANCE(lit->inferred_type, NullType)) {
         return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(
             getLLVMType(std::make_shared<PointerType>(std::make_shared<Void>()))));
+    } else if (IS_INSTANCE(lit->inferred_type, ArrayType)) {
     } else {
         if (!lit->inferred_type) {
             throw CodeGenError(lit, "Literal " + lit->str() + " has no inferred type");
@@ -1060,6 +1077,27 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
         throw CodeGenError(lit, "Unsupported literal type: " + lit->inferred_type->str());
     }
     return nullptr;
+}
+
+llvm::Value *LLVMCodegen::generateArrayLiteral(const std::shared_ptr<ArrayLiteral> &arrayLit, bool loadValue) {
+    auto arrayType = std::dynamic_pointer_cast<ArrayType>(arrayLit->inferred_type);
+    auto elemType = getLLVMType(arrayType->element_type);
+    int numElements = arrayType->length;
+    auto arrayLLVMType = getLLVMType(arrayType);
+
+    auto arralloc = m_builder.CreateAlloca(arrayLLVMType, nullptr, "arraytmp");
+    for (int i = 0; i < numElements; i++) {
+        llvm::Value *elemVal = generateExpression(arrayLit->elements[i]);
+        llvm::Value *idxs[] = {
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i)};
+        llvm::Value *elemPtr = m_builder.CreateGEP(arrayLLVMType, arralloc, idxs);
+        m_builder.CreateStore(elemVal, elemPtr);
+    }
+    if (loadValue) {
+        return m_builder.CreateLoad(arrayLLVMType, arralloc, "arrayloadtmp");
+    }
+    return arralloc;
 }
 
 llvm::Value *
@@ -1076,6 +1114,9 @@ LLVMCodegen::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
         return v;
     if (!loadValue)
         return v;
+    if (auto ar = std::dynamic_pointer_cast<ArrayType>(varAccess->inferred_type)) {
+        return m_builder.CreateInBoundsGEP(getLLVMType(ar), v, {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)}, "arraydecay");
+    }
     return m_builder.CreateLoad(sym->type, v, varAccess->name);
 }
 
@@ -1200,9 +1241,9 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
 llvm::Value *LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicType panicType, int line, int col) {
 
     llvm::Function *curFunc = m_builder.GetInsertBlock()->getParent();
-    llvm::BasicBlock *thenBB = llvm::BasicBlock::Create(context, "then", curFunc);
-    llvm::BasicBlock *elseBB = llvm::BasicBlock::Create(context, "else", curFunc);
-    llvm::BasicBlock *mergeBB = llvm::BasicBlock::Create(context, "ifcont", curFunc);
+    llvm::BasicBlock *thenBB = llvm::BasicBlock::Create(context, "good_check", curFunc);
+    llvm::BasicBlock *elseBB = llvm::BasicBlock::Create(context, "bad_check", curFunc);
+    llvm::BasicBlock *mergeBB = llvm::BasicBlock::Create(context, "post_check", curFunc);
 
     m_builder.CreateCondBr(condition, thenBB, elseBB);
 
@@ -1266,6 +1307,11 @@ llvm::Value *LLVMCodegen::generateArrayAccess(
         conditionOrPanic(indexInBounds, OutOfBounds, arrayAccess->line, arrayAccess->col);
     }
 
+    if (auto arrayType = std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)){
+        if (arrayType->unsized) basePtr = m_builder.CreateLoad(llvm::PointerType::getUnqual(context), basePtr);
+    }
+
+
     // Gep instruction
     llvm::Value *gep =
         m_builder.CreateGEP(elementType, basePtr, index, "array_access");
@@ -1283,6 +1329,8 @@ llvm::Value *LLVMCodegen::generateOffsetAccess(
         throw CodeGenError(nullptr, "Invalid offset access: missing base or index expression");
     }
     if (offsetAccess->base->inferred_type->kind() == TypeKind::Array) {
+        std::cout << "Generating array access for offset access\n";
+        std::cout << "load val: " << (loadValue ? "true" : "false") << "\n";
         return generateArrayAccess(offsetAccess, loadValue);
     }
 
