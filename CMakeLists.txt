@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(Comp LANGUAGES CXX C)
-set(CMAKE_C_COMPILER gcc)
-set(CMAKE_CXX_COMPILER g++)
 
+include(FetchContent)
+
+# set(CMAKE_C_COMPILER gcc)
+# set(CMAKE_CXX_COMPILER g++)
+#
 set(CMAKE_BUILD_TYPE Debug)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -42,9 +45,15 @@ separate_arguments(LLVM_LDFLAGS_LIST NATIVE_COMMAND "${LLVM_LDFLAGS_STRIPPED}")
 target_link_libraries(comp PRIVATE ${LLVM_LDFLAGS_LIST})
 
 
-# Link against argparse
-find_package(argparse REQUIRED)
-target_link_libraries(comp PRIVATE argparse::argparse)
+# find argparse
+FetchContent_Declare(
+  argparse
+  GIT_REPOSITORY https://github.com/p-ranav/argparse.git
+  GIT_TAG v3.2   # pin a version, do not use master
+)
+
+FetchContent_MakeAvailable(argparse)
+target_link_libraries(comp PRIVATE argparse)
 
 # --- Runtime Library ---
 file(GLOB_RECURSE RUNTIME_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/builtin/*.crag")
