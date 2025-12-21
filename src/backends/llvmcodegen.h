@@ -148,6 +148,7 @@ class LLVMCodegen : public Backend {
 
     std::map<std::string, llvm::Value *> m_namedValues;
     std::map<std::string, llvm::StructType *> m_structTypes;
+    std::map<std::string, llvm::StructType *> m_unionTypes;
     std::map<std::string, std::shared_ptr<EnumType>> m_enumTypes;
     std::vector<Scope> m_scopeStack;
 
@@ -184,6 +185,8 @@ class LLVMCodegen : public Backend {
         const std::shared_ptr<VariableDeclaration> &varDecl);
     void generateStructDeclaration(
         const std::shared_ptr<StructDeclaration> &structDecl);
+    void generateUnionDeclaration(
+        const std::shared_ptr<UnionDeclaration> &unionDecl);
     void generateEnumDeclaration(
         const std::shared_ptr<EnumDeclaration> &enumDecl);
     std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> generateStructMethods(
@@ -208,6 +211,9 @@ class LLVMCodegen : public Backend {
     llvm::Value *generateMethodCall(const std::shared_ptr<MethodCall> &methodCall,
                                     bool loadValue = true);
     llvm::Value *generateFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue = true);
+
+    llvm::Value *generateErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
+    llvm::Value *generateArrayFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
     llvm::Value *generateOffsetAccess(const std::shared_ptr<OffsetAccess> &offsetAccess,
                                       bool loadValue = true);
     llvm::Value *generateArrayAccess(

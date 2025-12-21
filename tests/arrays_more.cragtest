@@ -4,20 +4,22 @@
 
 extern fn printf(fmt: *u8, ...) -> i32;
 
-fn main() -> i32 {
+fn main(argc: i32) -> i32 {
     let arr: []u8 = {'H','E','L','L','O',0};
-    printf("%s\n", arr);
-    other(arr);
-    printf("%s\n", arr);
+    other(arr.ptr);
+    printf("%s\n", arr.ptr);
+    printf("Len: %d\n", arr.len);
     return 0;
 }
 
-fn other(arr: []u8) -> void {
-    arr[0] = 'b';
+fn other(arr: *u8) -> u8 {
+    arr[0] = 'B';
+    return arr[0];
 }
+
 
 //END CODE
 //BEGIN EXPECT
-//HELLO
-//bELLO
+//BELLO
+//Len: 6
 //END EXPECT

@@ -1,0 +1,29 @@
+//NAME: Type aliasing
+//DESC:
+//BEGIN CODE
+
+using number = f64;
+struct Point {
+    x: number,
+    y: number,
+}
+
+using Test = Point;
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+    let v: number;
+    v = 4.0;
+    printf("%f\n", v);
+    let p: Test = Test { x: 1.0, y: 2.0 };
+    printf("%f\n", p.x + p.y);
+    return 0;
+}
+
+
+//END CODE
+//BEGIN EXPECT
+//4.000000
+//3.000000
+//END EXPECT

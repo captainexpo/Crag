@@ -33,6 +33,8 @@ std::string tokenTypeName(TokenType type) {
     return "CONST";
   case TokenType::STRUCT:
     return "STRUCT";
+  case TokenType::UNION:
+    return "UNION";
   case TokenType::ENUM:
     return "ENUM";
   case TokenType::TRUE:
@@ -51,6 +53,10 @@ std::string tokenTypeName(TokenType type) {
     return "BREAK";
   case TokenType::CONTINUE:
     return "CONTINUE";
+  case TokenType::USING:
+    return "USING";
+  case TokenType::TYPE:
+    return "TYPE";
   case TokenType::QUESTION:
     return "QUESTION";
   case TokenType::EQ:
@@ -170,6 +176,7 @@ Lexer::Lexer(const std::string &src) : code(src) {
       {"let", TokenType::LET},
       {"const", TokenType::CONST},
       {"struct", TokenType::STRUCT},
+      {"union", TokenType::UNION},
       {"enum", TokenType::ENUM},
       {"true", TokenType::TRUE},
       {"false", TokenType::FALSE},
@@ -181,6 +188,8 @@ Lexer::Lexer(const std::string &src) : code(src) {
       {"pub", TokenType::PUB},
       {"break", TokenType::BREAK},
       {"continue", TokenType::CONTINUE},
+      {"using", TokenType::USING},
+      {"type", TokenType::TYPE},
   };
 }
 

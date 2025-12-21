@@ -79,15 +79,6 @@ bool TypeChecker::canImplicitCast(const std::shared_ptr<Type> &from,
         if (from_enum->base_type->equals(to))
             return true;
     }
-    if (from_tk == TypeKind::Array && to_tk == TypeKind::Pointer) {
-        auto from_array = std::dynamic_pointer_cast<ArrayType>(from);
-        auto to_ptr = std::dynamic_pointer_cast<PointerType>(to);
-        if (!from_array || !to_ptr)
-            return false;
-        if (from_array->element_type->equals(to_ptr->base)) {
-            return true;
-        }
-    }
     if (from_tk == TypeKind::Pointer && to_tk == TypeKind::USize)
         return true;
     if (from_tk == TypeKind::Array){
@@ -96,8 +87,8 @@ bool TypeChecker::canImplicitCast(const std::shared_ptr<Type> &from,
         if (to_tk == TypeKind::Array) {
             auto to_array = std::dynamic_pointer_cast<ArrayType>(to);
             assert(to_array);
-            if (from_array->unsized && !to_array->unsized)
-                return false;
+            // if (from_array->unsized && !to_array->unsized)
+            //     return false;
             if (from_array->element_type->equals(to_array->element_type))
                 return true;
         }
@@ -260,6 +251,8 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
         return;
 
     std::vector<std::shared_ptr<StructDeclaration>> struct_decls;
+    std::vector<std::shared_ptr<UnionDeclaration>> union_decls;
+
     for (const auto &decl : module->ast->declarations) {
         if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
             // Build a StructType and register
@@ -268,6 +261,13 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
             m_structs[sd->name] = st;
             insertSymbol(sd->name, st);
             struct_decls.push_back(sd);
+        } else if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(decl)) {
+            // Build a UnionType and register
+            auto ut = std::make_shared<UnionType>(ud->name);
+            ut->complete = false;
+            m_unions[ud->name] = ut;
+            insertSymbol(ud->name, ut);
+            union_decls.push_back(ud);
         } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
             m_functions[fd->name] = fd->type;
             insertSymbol(fd->name, fd->type);
@@ -301,6 +301,14 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 }
             }
             m_imported_module_checkers[im->alias] = import_checker;
+        } else if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
+            auto alias_type = resolveType(ta->aliased_type);
+            if (!alias_type) {
+                throw TypeCheckError(ta, "Type alias " + ta->name + " has unknown aliased type");
+                return;
+            }
+            m_type_aliases[ta->name] = alias_type;
+            insertSymbol(ta->name, alias_type);
         }
     }
 
@@ -319,6 +327,20 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
         }
 
         for (const auto &m : sd->methods) {
+
+    for (const auto &ud : union_decls) {
+        auto fields = std::vector<std::pair<std::string, std::shared_ptr<Type>>>();
+        for (const auto &f : ud->fields) {
+            fields.emplace_back(f.first, resolveType(f.second));
+        }
+        auto it = m_unions.find(ud->name);
+        if (it != m_unions.end()) {
+            it->second->fields = std::move(fields);
+            it->second->complete = true;
+        } else {
+            throw TypeCheckError(ud, "Internal error: union " + ud->name + " not found in map");
+        }
+    }
             // Type check method bodies
             checkFunctionDeclaration(m.second);
         }
@@ -344,11 +366,19 @@ void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
         checkStructDeclaration(sd);
         return;
     }
+    if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(node)) {
+        checkUnionDeclaration(ud);
+        return;
+    }
     if (auto ed = std::dynamic_pointer_cast<EnumDeclaration>(node)) {
         checkEnumDeclaration(ed);
         return;
     }
     if (auto im = std::dynamic_pointer_cast<ImportDeclaration>(node)) {
+        // Already handled in check()
+        return;
+    }
+    if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(node)) {
         // Already handled in check()
         return;
     }
@@ -360,6 +390,13 @@ void TypeChecker::checkStructDeclaration(
     // Already registered the struct type in check(); nothing else to do for
     // now.
     (void)st;
+}
+
+void TypeChecker::checkUnionDeclaration(
+    const std::shared_ptr<UnionDeclaration> &ud) {
+    // Already registered the union type in check(); nothing else to do for
+    // now.
+    (void)ud;
 }
 
 void TypeChecker::checkEnumDeclaration(
@@ -440,6 +477,20 @@ void TypeChecker::checkVariableDeclaration(
                     arr_type->length = static_cast<int>(arr_lit->elements.size());
                     arr_type->unsized = false;
                     var->var_type = arr_type;
+                }
+                else {
+                    // Check that sizes match
+                    int size = static_cast<int>(arr_lit->elements.size());
+                    if (arr_type->length < size) {
+                        throw TypeCheckError(init, "Array literal has more elements (" +
+                                                      std::to_string(size) +
+                                                      ") than variable type size (" +
+                                                      std::to_string(arr_type->length) + ")");
+                    }
+                    else {
+                        std::cout << "Setting array literal length to " << arr_type->length << "\n";
+                        arr_lit->len = arr_type->length;
+                    }
                 }
             }
         }
@@ -1065,6 +1116,28 @@ std::shared_ptr<Type> TypeChecker::inferErrorUnionFieldAccess(const std::shared_
     throw TypeCheckError(fa, "Error union has no field " + fa->field);
 }
 
+
+
+std::shared_ptr<Type> TypeChecker::inferArrayFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
+    auto base = inferExpression(std::dynamic_pointer_cast<Expression>(fa->base));
+    if (!base) {
+        throw TypeCheckError(fa, "Failed to infer type of error union field access base");
+    }
+    auto arrty = std::dynamic_pointer_cast<ArrayType>(base);
+    if (!arrty) {
+        throw TypeCheckError(fa, "Error union field access on non-error-union type: " + typeName(base));
+    }
+    if (fa->field == "ptr") {
+        fa->inferred_type = std::make_shared<PointerType>(resolveType(arrty->element_type));
+        return fa->inferred_type;
+    }
+    if (fa->field == "len") {
+        fa->inferred_type = std::make_shared<I64>();
+        return fa->inferred_type;
+    }
+    throw TypeCheckError(fa, "Error union has no field " + fa->field);
+}
+
 std::shared_ptr<Type>
 TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
     if (auto baseExpr = std::dynamic_pointer_cast<Expression>(fa->base)) {
@@ -1081,7 +1154,21 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
                 if (eut) {
                     return inferErrorUnionFieldAccess(fa);
                 }
-                throw TypeCheckError(fa, "Field access on non-struct type: " + typeName(bt));
+                auto arrt = std::dynamic_pointer_cast<ArrayType>(bt);
+                if (arrt) {
+                    return inferArrayFieldAccess(fa);
+                }
+                auto ut = std::dynamic_pointer_cast<UnionType>(bt);
+                if (ut) {
+                    // field access on union type: get the field from the union
+                    auto ft = ut->getFieldType(fa->field);
+                    if (!ft) {
+                        throw TypeCheckError(fa, "Union has no field " + fa->field);
+                    }
+                    fa->inferred_type = resolveType(ft);
+                    return ft;
+                }
+                throw TypeCheckError(fa, "Field access on disallowed type: " + typeName(bt));
             }
         }
         auto ft = st->getFieldType(fa->field);

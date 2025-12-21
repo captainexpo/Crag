@@ -52,7 +52,7 @@ make_directory(lib)
 
 add_custom_command(
     OUTPUT lib/runtime.o
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/comp ARGS ${RUNTIME_SRC_FILES} -o lib/runtime.o --unsafe --opt-level release --no-runtime
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/comp ARGS ${RUNTIME_SRC_FILES} -o lib/runtime.o --unsafe -ORelease --no-runtime
     DEPENDS ${RUNTIME_SRC_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/build/comp
     COMMENT "Compiling runtime.o"
 )

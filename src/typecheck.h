@@ -52,9 +52,13 @@ class TypeChecker {
     // Scope / symbol table: stack of name -> Type
     std::vector<std::unordered_map<std::string, std::shared_ptr<Type>>> m_scopes;
 
-    // Struct/type registry for named structs and functions
+    // Struct/type registry for named structs and functions TODO: replace them all with aliases
     std::unordered_map<std::string, std::shared_ptr<StructType>> m_structs;
+    std::unordered_map<std::string, std::shared_ptr<UnionType>> m_unions;
     std::unordered_map<std::string, std::shared_ptr<EnumType>> m_enums;
+
+    std::unordered_map<std::string, std::shared_ptr<Type>> m_type_aliases;
+    
     std::unordered_map<
         std::string,
         std::vector<std::pair<std::string, std::shared_ptr<FunctionDeclaration>>>>
@@ -87,6 +91,7 @@ class TypeChecker {
     void checkFunctionDeclaration(const std::shared_ptr<FunctionDeclaration> &fn);
     void checkVariableDeclaration(const std::shared_ptr<VariableDeclaration> &var);
     void checkStructDeclaration(const std::shared_ptr<StructDeclaration> &st);
+    void checkUnionDeclaration(const std::shared_ptr<UnionDeclaration> &ud);
     void checkEnumDeclaration(const std::shared_ptr<EnumDeclaration> &en);
 
     std::shared_ptr<Type> inferTypeCast(const std::shared_ptr<TypeCast> &tc);
@@ -101,6 +106,7 @@ class TypeChecker {
     std::shared_ptr<Type> inferFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma);
     std::shared_ptr<Type> inferErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fa);
+    std::shared_ptr<Type> inferArrayFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa);
     std::shared_ptr<Type> inferStructInit(const std::shared_ptr<StructInitializer> &init);
 };

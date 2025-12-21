@@ -1,0 +1,21 @@
+//NAME: Arrays
+//DESC: Test the array literals and stuff
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+    let arr: []i32 = {1,2,3,4};
+    other(arr);
+    return 0;
+}
+
+fn other(arr: []i32) -> void {
+    arr[5] = 'b'; // Should be error
+}
+
+//END CODE
+//BEGIN EXPECT ERR
+//PANIC: Runtime Panic: Out of Bounds
+// at line 11, col 8
+//END EXPECT

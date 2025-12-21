@@ -64,22 +64,21 @@ void Parser::synchronize() {
     while (peek().type != TokenType::EOF_T) {
         switch (peek().type) {
             case TokenType::FN:
-            case TokenType::LET:
-            case TokenType::CONST:
+            //case TokenType::LET:
+            //case TokenType::CONST:
+            case TokenType::USING:
             case TokenType::STRUCT:
             case TokenType::ENUM:
             case TokenType::IMPORT:
             case TokenType::EXTERN:
-            case TokenType::RETURN:
-            case TokenType::IF:
-            case TokenType::FOR:
-            case TokenType::WHILE:
-            case TokenType::BREAK:
-            case TokenType::CONTINUE:
+            //case TokenType::RETURN:
+            //case TokenType::IF:
+            //case TokenType::FOR:
+            //case TokenType::WHILE:
+            //case TokenType::BREAK:
+            //case TokenType::CONTINUE:
             case TokenType::PUB:
                 return;
-            default:
-                break;
         }
         advance();
     }
@@ -96,9 +95,19 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
                 t = declared_structs[name];
                 break;
             }
+            if (declared_unions.count(current.value)) {
+                std::string name = consume(TokenType::ID).value;
+                t = declared_unions[name];
+                break;
+            }
             if (declared_enums.count(current.value)) {
                 std::string name = consume(TokenType::ID).value;
                 t = declared_enums[name]->enum_type;
+                break;
+            }
+            if (declared_type_aliases.count(current.value)) {
+                std::string name = consume(TokenType::ID).value;
+                t = declared_type_aliases[name];
                 break;
             }
             if (peek(1).type == TokenType::DOUBLE_COLON) {
@@ -227,10 +236,27 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
             consume(TokenType::SEMICOLON);
             return vd;
         }
+        case TokenType::USING: {
+            // Type alias 
+            consume(TokenType::USING);
+            std::string alias_name = consume(TokenType::ID).value;
+            consume(TokenType::ASSIGN);
+            auto alias_type = parse_type();
+            consume(TokenType::SEMICOLON);
+            auto type_alias = std::make_shared<TypeAliasDeclaration>(alias_name, alias_type);
+            type_alias->is_pub = is_pub;
+            declared_type_aliases[alias_name] = alias_type;
+            return type_alias;
+        }
         case TokenType::STRUCT: {
             auto sd = parse_struct_declaration();
             sd->is_pub = is_pub;
             return sd;
+        }
+        case TokenType::UNION: {
+            auto ud = parse_union_declaration();
+            ud->is_pub = is_pub;
+            return ud;
         }
         case TokenType::ENUM: {
             auto ed = parse_enum_declaration();
@@ -404,6 +430,41 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
     struct_decl->line = start_token.line;
     struct_decl->col = start_token.column;
     return struct_decl;
+}
+
+std::shared_ptr<UnionDeclaration> Parser::parse_union_declaration() {
+    Token start_token = peek(); // Store the start token for line and col
+    consume(TokenType::UNION);
+    std::string name = consume(TokenType::ID).value;
+    declared_unions[name] = std::make_shared<UnionType>(
+        name, std::vector<std::pair<std::string, std::shared_ptr<Type>>>{});
+    consume(TokenType::LBRACE);
+    std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
+    
+    while (peek().type != TokenType::RBRACE) {
+        if (peek().type == TokenType::EOF_T) {
+            throw ParseError("Unterminated union declaration, expected '}'", peek());
+            break;
+        }
+        std::string fname = consume(TokenType::ID).value;
+        consume(TokenType::COLON);
+        auto ftype = parse_type();
+        fields.push_back({fname, ftype});
+        if (peek().type == TokenType::COMMA)
+            consume(TokenType::COMMA);
+    }
+    consume(TokenType::RBRACE);
+    
+    std::vector<std::pair<std::string, std::shared_ptr<Type>>> fmap;
+    for (size_t i = 0; i < fields.size(); ++i)
+        fmap.push_back({fields[i].first, fields[i].second});
+    auto ut = std::make_shared<UnionType>(name, fmap);
+    declared_unions[name] = ut;
+    
+    auto union_decl = std::make_shared<UnionDeclaration>(name, fields);
+    union_decl->line = start_token.line;
+    union_decl->col = start_token.column;
+    return union_decl;
 }
 
 // ---- Statements ----
@@ -819,12 +880,7 @@ std::shared_ptr<ForStatement> Parser::parse_for_statement() {
 
     std::shared_ptr<Statement> init = nullptr;
     if (peek().type != TokenType::SEMICOLON) {
-        // Parse variable declaration or expression statement
-        if (peek().type == TokenType::LET) {
-            init = parse_variable_declaration();
-        } else {
-            init = parse_expression_statement();
-        }
+        init = parse_statement(false);
     }
     consume(TokenType::SEMICOLON);
 

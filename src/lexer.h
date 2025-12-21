@@ -21,6 +21,7 @@ enum class TokenType {
   LET,
   CONST,
   STRUCT,
+  UNION,
   ENUM,
   TRUE,
   FALSE,
@@ -30,6 +31,8 @@ enum class TokenType {
   PUB,
   BREAK,
   CONTINUE,
+  USING,
+  TYPE,
 
   // Operators
   EQ,

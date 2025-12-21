@@ -103,6 +103,11 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
                 }
                 continue;
             }
+            if (IS_INSTANCE(decl, UnionDeclaration)) {
+                auto ud = std::dynamic_pointer_cast<UnionDeclaration>(decl);
+                generateUnionDeclaration(ud);
+                continue;
+            }
             if (IS_INSTANCE(decl, EnumDeclaration)) {
                 generateEnumDeclaration(
                     std::dynamic_pointer_cast<EnumDeclaration>(decl));
@@ -110,6 +115,9 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
             }
             if (IS_INSTANCE(decl, ImportDeclaration)) {
                 continue; // Handled elsewhere
+            }
+            if (IS_INSTANCE(decl, TypeAliasDeclaration)) {
+                continue; // No codegen needed
             }
             throw CodeGenError(decl, "Unknown top-level declaration: " + decl->str());
         }
@@ -242,14 +250,6 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type) {
         return llvm::Type::getVoidTy(context);
     if (IS_INSTANCE(type, USize))
         return llvm::Type::getInt64Ty(context); // Assuming 64-bit for USize
-    if (IS_INSTANCE(type, ArrayType)) {
-        auto arrType = std::dynamic_pointer_cast<ArrayType>(type);
-        if (arrType->unsized) {
-            // Treat as pointer
-            return llvm::PointerType::getUnqual(context);
-        }
-        return llvm::ArrayType::get(getLLVMType(arrType->element_type), arrType->length);
-    }
     if (IS_INSTANCE(type, StructType)) {
         auto structType = std::dynamic_pointer_cast<StructType>(type);
         auto it = m_structTypes.find(structType->name);
@@ -259,13 +259,27 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type) {
             throw CodeGenError(nullptr, "Unknown struct type: " + structType->name);
         }
     }
+    if (IS_INSTANCE(type, UnionType)) {
+        auto unionType = std::dynamic_pointer_cast<UnionType>(type);
+        auto it = m_unionTypes.find(unionType->name);
+        if (it != m_unionTypes.end()) {
+            return it->second;
+        } else {
+            throw CodeGenError(nullptr, "Unknown union type: " + unionType->name);
+        }
+    }
     if (IS_INSTANCE(type, PointerType)) {
         auto ptrType = std::dynamic_pointer_cast<PointerType>(type);
         return llvm::PointerType::getUnqual(context);
     }
     if (IS_INSTANCE(type, ArrayType)) {
         auto arrType = std::dynamic_pointer_cast<ArrayType>(type);
-        return llvm::ArrayType::get(getLLVMType(arrType->element_type), arrType->length);
+        // As struct { length (usize), data_ptr (element_type*) }
+        std::vector<llvm::Type *> elements = {
+            llvm::PointerType::getUnqual(context),
+            llvm::Type::getInt64Ty(context)};
+        auto st = llvm::StructType::get(context, elements);
+        return st;
     }
     if (IS_INSTANCE(type, FunctionType)) {
         auto funcType = std::dynamic_pointer_cast<FunctionType>(type);
@@ -463,7 +477,7 @@ LLVMCodegen::generateCast(const std::shared_ptr<TypeCast> &typeCast,
         return m_builder.CreateIntToPtr(val, destType, "inttoptrtmp");
     } else {
         throw CodeGenError(typeCast, "Unsupported cast from " + llvmTypeToString(srcType) +
-                                         " to " + llvmTypeToString(destType));
+                                         " to " + llvmTypeToString(destType) + " at " + typeCast->str());
     }
     return nullptr;
 }
@@ -725,6 +739,41 @@ void LLVMCodegen::generateStructDeclaration(
     }
 
     llvmStruct->setBody(fieldTypes, /*packed=*/false);
+}
+
+void LLVMCodegen::generateUnionDeclaration(
+    const std::shared_ptr<UnionDeclaration> &unionDecl) {
+
+    llvm::StructType *llvmUnion =
+        llvm::StructType::create(context, unionDecl->name);
+
+    m_unionTypes[unionDecl->name] = llvmUnion;
+
+    // Unions in LLVM are represented as a struct with a single field
+    // that is the size of the largest field in the union.
+    // We'll use an array of bytes (i8) to represent the union storage.
+
+    size_t maxSize = 0;
+    size_t maxAlign = 1;
+
+    for (const auto &field : unionDecl->fields) {
+        llvm::Type *ty = getLLVMType(field.second);
+        size_t fieldSize = m_llvm_module->getDataLayout().getTypeAllocSize(ty);
+        size_t fieldAlign = m_llvm_module->getDataLayout().getABITypeAlign(ty).value();
+
+        if (fieldSize > maxSize) {
+            maxSize = fieldSize;
+        }
+        if (fieldAlign > maxAlign) {
+            maxAlign = fieldAlign;
+        }
+    }
+
+    // Create a byte array of the appropriate size to hold the largest field
+    llvm::Type *storageType = llvm::ArrayType::get(
+        llvm::Type::getInt8Ty(context), maxSize);
+
+    llvmUnion->setBody({storageType}, /*packed=*/false);
 }
 
 void LLVMCodegen::generateEnumDeclaration(
@@ -1083,21 +1132,43 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(const std::shared_ptr<ArrayLitera
     auto arrayType = std::dynamic_pointer_cast<ArrayType>(arrayLit->inferred_type);
     auto elemType = getLLVMType(arrayType->element_type);
     int numElements = arrayType->length;
+    size_t actualSize = arrayLit->len;
     auto arrayLLVMType = getLLVMType(arrayType);
+    auto rawArrayType = llvm::ArrayType::get(elemType, actualSize);
 
-    auto arralloc = m_builder.CreateAlloca(arrayLLVMType, nullptr, "arraytmp");
+    auto rawArrAlloc = m_builder.CreateAlloca(rawArrayType, nullptr);
     for (int i = 0; i < numElements; i++) {
         llvm::Value *elemVal = generateExpression(arrayLit->elements[i]);
         llvm::Value *idxs[] = {
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i)};
-        llvm::Value *elemPtr = m_builder.CreateGEP(arrayLLVMType, arralloc, idxs);
+        llvm::Value *elemPtr = m_builder.CreateGEP(rawArrayType, rawArrAlloc, idxs);
         m_builder.CreateStore(elemVal, elemPtr);
     }
+
+    // Actual array as struct { i64, ptr }
+    llvm::Value *arrayStructAlloc = m_builder.CreateAlloca(arrayLLVMType, nullptr);
+    llvm::Value *lengthPtr = m_builder.CreateGEP(
+        arrayLLVMType, arrayStructAlloc,
+        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1)});
+    m_builder.CreateStore(
+        llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), actualSize),
+        lengthPtr);
+    llvm::Value *dataPtr = m_builder.CreateGEP(
+        arrayLLVMType, arrayStructAlloc,
+        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)});
+    llvm::Value *decayedPtr = m_builder.CreateInBoundsGEP(
+        rawArrayType, rawArrAlloc,
+        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)});
+    m_builder.CreateStore(decayedPtr, dataPtr);
+
     if (loadValue) {
-        return m_builder.CreateLoad(arrayLLVMType, arralloc, "arrayloadtmp");
+        return m_builder.CreateLoad(arrayLLVMType, arrayStructAlloc, "arrload");
     }
-    return arralloc;
+    return arrayStructAlloc;
 }
 
 llvm::Value *
@@ -1114,9 +1185,9 @@ LLVMCodegen::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
         return v;
     if (!loadValue)
         return v;
-    if (auto ar = std::dynamic_pointer_cast<ArrayType>(varAccess->inferred_type)) {
-        return m_builder.CreateInBoundsGEP(getLLVMType(ar), v, {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)}, "arraydecay");
-    }
+    // if (auto ar = std::dynamic_pointer_cast<ArrayType>(varAccess->inferred_type)) {
+    //     return m_builder.CreateInBoundsGEP(getLLVMType(ar), v, {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)}, "arraydecay");
+    // }
     return m_builder.CreateLoad(sym->type, v, varAccess->name);
 }
 
@@ -1271,50 +1342,58 @@ llvm::Value *LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicT
 }
 llvm::Value *LLVMCodegen::generateArrayAccess(
     const std::shared_ptr<OffsetAccess> &arrayAccess, bool loadValue) {
-    if (!arrayAccess || !arrayAccess->base || !arrayAccess->index) {
-        throw CodeGenError(nullptr, "Invalid array access: missing base or index expression");
-    }
+    // if (!arrayAccess || !arrayAccess->base || !arrayAccess->index) {
+    //     throw CodeGenError(nullptr, "Invalid array access: missing base or index expression");
+    // }
     llvm::Value *basePtr = generateAddress(
         std::static_pointer_cast<Expression>(arrayAccess->base));
-    if (!basePtr) {
-        throw CodeGenError(arrayAccess, "Failed to generate base address for array access");
-    }
+    std::cout << "Base ptr for array access: " << basePtr << "\n";
+    // if (!basePtr) {
+    //     throw CodeGenError(arrayAccess, "Failed to generate base address for array access");
+    // }
     llvm::Value *index = generateExpression(arrayAccess->index);
-    if (!index) {
-        throw CodeGenError(arrayAccess->index, "Failed to generate index for array access");
-    }
-    if (!arrayAccess->base->inferred_type ||
-        arrayAccess->base->inferred_type->kind() != TypeKind::Array) {
-        throw CodeGenError(arrayAccess->base, "Base expression is not of array type: " +
-                                                  (arrayAccess->base->inferred_type ? arrayAccess->base->inferred_type->str() : "null"));
-    }
+    // if (!index) {
+    //     throw CodeGenError(arrayAccess->index, "Failed to generate index for array access");
+    // }
+    // if (!arrayAccess->base->inferred_type ||
+    //     arrayAccess->base->inferred_type->kind() != TypeKind::Array) {
+    //     throw CodeGenError(arrayAccess->base, "Base expression is not of array type: " +
+    //                                               (arrayAccess->base->inferred_type ? arrayAccess->base->inferred_type->str() : "null"));
+    // }
     llvm::Type *elementType = getLLVMType(
         std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)->element_type);
-    if (!elementType) {
-        throw CodeGenError(arrayAccess, "Unknown element type for array access: " +
-                                            arrayAccess->base->inferred_type->str());
-    }
+    // if (!elementType) {
+    //     throw CodeGenError(arrayAccess, "Unknown element type for array access: " +
+    //                                         arrayAccess->base->inferred_type->str());
+    // }
     // Condition check for index within bounds
-    if (index->getType() != llvm::Type::getInt64Ty(context)) {
-        index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
-    }
+    // if (index->getType() != llvm::Type::getInt64Ty(context)) {
+    //     index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
+    // }
+    llvm::Value *arrLoad = m_builder.CreateLoad(
+        getLLVMType(arrayAccess->base->inferred_type), basePtr);
     if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
-        llvm::Value *arraySizeVal = llvm::ConstantInt::get(
-            llvm::Type::getInt64Ty(context),
-            std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)->length);
+        llvm::Value *arraySizeVal = m_builder.CreateExtractValue(
+            arrLoad,
+            {1}, "array_size");
+
+        // Zext index to i64 if needed
+        if (index->getType() != llvm::Type::getInt64Ty(context)) {
+            index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
+        }
         llvm::Value *indexInBounds = m_builder.CreateICmpULT(
             index, arraySizeVal, "index_in_bounds");
         conditionOrPanic(indexInBounds, OutOfBounds, arrayAccess->line, arrayAccess->col);
     }
 
-    if (auto arrayType = std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)){
-        if (arrayType->unsized) basePtr = m_builder.CreateLoad(llvm::PointerType::getUnqual(context), basePtr);
-    }
-
-
+    // data ptr
+    llvm::Value *dataPtr = m_builder.CreateExtractValue(
+        arrLoad,
+        {0}, "array_data_ptr");
     // Gep instruction
-    llvm::Value *gep =
-        m_builder.CreateGEP(elementType, basePtr, index, "array_access");
+    llvm::Value *gep = m_builder.CreateGEP(
+        elementType, dataPtr, index, "array_elem_ptr");
+
     // Load the value at the computed address
     if (loadValue)
         return m_builder.CreateLoad(elementType, gep, "load_array_elem");
@@ -1358,6 +1437,83 @@ llvm::Value *LLVMCodegen::generateOffsetAccess(
         return gep;
 }
 
+llvm::Value *LLVMCodegen::generateArrayFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
+    auto basePtr = generateAddress(
+        std::static_pointer_cast<Expression>(fieldAccess->base));
+    if (!basePtr) {
+        throw CodeGenError(fieldAccess->base, "Failed to generate address for array field base");
+    }
+    auto arr_type = std::dynamic_pointer_cast<ArrayType>(fieldAccess->base->inferred_type);
+    if (!arr_type) {
+        throw CodeGenError(fieldAccess->base, "Field access on non-array type: " + fieldAccess->base->inferred_type->str());
+    }
+    llvm::StructType *arrStructType =
+        llvm::cast<llvm::StructType>(getLLVMType(arr_type));
+
+    if (fieldAccess->field == "len") {
+        // Return index 1
+        llvm::Type *length_type = llvm::Type::getInt64Ty(context);
+        auto gep = m_builder.CreateStructGEP(arrStructType, basePtr, 1, "len_access");
+        return loadValue
+                   ? m_builder.CreateLoad(length_type, gep, "load_len")
+                   : gep;
+
+    } else if (fieldAccess->field == "ptr") {
+        // Return index 0
+        llvm::Type *data_ptr_type = llvm::PointerType::getUnqual(context);
+        auto gep = m_builder.CreateStructGEP(arrStructType, basePtr, 0, "ptr_access");
+        return loadValue
+                   ? m_builder.CreateLoad(data_ptr_type, gep, "load_ptr")
+                   : gep;
+
+    } else {
+        throw CodeGenError(fieldAccess, "Unknown field on array: " + fieldAccess->field);
+    }
+}
+
+llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
+    auto basePtr = generateAddress(
+        std::static_pointer_cast<Expression>(fieldAccess->base));
+    if (!basePtr) {
+        throw CodeGenError(fieldAccess->base, "Failed to generate address for error union field base");
+    }
+    auto eu_type = std::dynamic_pointer_cast<ErrorUnionType>(fieldAccess->base->inferred_type);
+    if (!eu_type) {
+        throw CodeGenError(fieldAccess->base, "Field access on non-error-union type: " + fieldAccess->base->inferred_type->str());
+    }
+    llvm::StructType *euStructType =
+        llvm::cast<llvm::StructType>(getLLVMType(eu_type));
+
+    if (fieldAccess->field == "ok") {
+        // Return index 0
+        llvm::Type *ok_type = getLLVMType(eu_type->valueType);
+        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 0, "error_union_ok_access");
+        return loadValue
+                   ? m_builder.CreateLoad(ok_type, gep, "load_error_union_ok")
+                   : gep;
+
+    } else if (fieldAccess->field == "err") {
+        // Return index 1
+        llvm::Type *err_type = getLLVMType(eu_type->errorType);
+        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 1, "error_union_err_access");
+        return loadValue
+                   ? m_builder.CreateLoad(err_type, gep, "load_error_union_err")
+                   : gep;
+
+    } else if (fieldAccess->field == "is_err") {
+        // Return index 2
+        llvm::Type *bool_type = llvm::Type::getInt1Ty(context);
+        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 2, "error_union_is_err_access");
+        return loadValue
+                   ? m_builder.CreateLoad(bool_type, gep, "load_error_union_is_err")
+                   : gep;
+
+    } else {
+        throw CodeGenError(fieldAccess, "Unknown field on error union: " + fieldAccess->field);
+    }
+
+}
+
 llvm::Value *LLVMCodegen::generateFieldAccess(
     const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
 
@@ -1369,53 +1525,30 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
         throw CodeGenError(fieldAccess->base, "Base expression of field access has no inferred type");
     }
 
+    if (fieldAccess->base->inferred_type->kind() == TypeKind::Array) {
+        return generateArrayFieldAccess(fieldAccess, loadValue);
+    } else if (fieldAccess->base->inferred_type->kind() == TypeKind::ErrorUnion) {
+        return generateErrorUnionFieldAccess(fieldAccess, loadValue);
+    }
+
     llvm::Value *basePtr =
         generateAddress(std::static_pointer_cast<Expression>(fieldAccess->base));
     if (!basePtr) {
         throw CodeGenError(fieldAccess->base, "Failed to generate address for field base");
     }
 
-    if (auto eu_type = std::dynamic_pointer_cast<ErrorUnionType>(fieldAccess->base->inferred_type)) {
-        llvm::StructType *euStructType =
-            llvm::cast<llvm::StructType>(getLLVMType(eu_type));
-
-        if (fieldAccess->field == "ok") {
-            // Return index 0
-            llvm::Type *ok_type = getLLVMType(eu_type->valueType);
-            auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 0, "error_union_ok_access");
-            return loadValue
-                       ? m_builder.CreateLoad(ok_type, gep, "load_error_union_ok")
-                       : gep;
-
-        } else if (fieldAccess->field == "err") {
-            // Return index 1
-            llvm::Type *err_type = getLLVMType(eu_type->errorType);
-            auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 1, "error_union_err_access");
-            return loadValue
-                       ? m_builder.CreateLoad(err_type, gep, "load_error_union_err")
-                       : gep;
-
-        } else if (fieldAccess->field == "is_err") {
-            // Return index 2
-            llvm::Type *bool_type = llvm::Type::getInt1Ty(context);
-            auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 2, "error_union_is_err_access");
-            return loadValue
-                       ? m_builder.CreateLoad(bool_type, gep, "load_error_union_is_err")
-                       : gep;
-
-        } else {
-            throw CodeGenError(fieldAccess, "Unknown field on error union: " + fieldAccess->field);
-        }
-    }
     // Check if base type is a struct or pointer-to-struct
     std::shared_ptr<StructType> structType =
         std::dynamic_pointer_cast<StructType>(fieldAccess->base->inferred_type);
+    std::shared_ptr<UnionType> unionType =
+        std::dynamic_pointer_cast<UnionType>(fieldAccess->base->inferred_type);
 
-    if (!structType) {
+    if (!structType && !unionType) {
         auto ptrType =
             std::dynamic_pointer_cast<PointerType>(fieldAccess->base->inferred_type);
         if (ptrType) {
             structType = std::dynamic_pointer_cast<StructType>(ptrType->base);
+            unionType = std::dynamic_pointer_cast<UnionType>(ptrType->base);
 
             if (!ptrType->base) {
                 throw CodeGenError(fieldAccess->base,
@@ -1423,7 +1556,7 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
                 return nullptr;
             }
 
-            if (structType) {
+            if (structType || unionType) {
                 // Adjust basePtr to dereference the pointer
                 basePtr = m_builder.CreateLoad(
                     llvm::PointerType::getUnqual(context), basePtr,
@@ -1436,11 +1569,55 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
             }
         }
 
-        if (!structType) {
+        if (!structType && !unionType) {
             throw CodeGenError(fieldAccess->base,
-                               "Field access on non-struct type: " +
+                               "Field access on non-struct/union type: " +
                                    fieldAccess->base->inferred_type->str());
             return nullptr;
+        }
+    }
+
+    // Handle union field access
+    if (unionType) {
+        auto accessee = m_unionTypes.find(unionType->name);
+        if (accessee == m_unionTypes.end() || !accessee->second) {
+            throw CodeGenError(fieldAccess->base,
+                               "Unknown or unregistered union type in field access: " +
+                                   unionType->name);
+            return nullptr;
+        }
+
+        llvm::StructType *llvmUnion = accessee->second;
+
+        // Validate field existence
+        const auto &fieldName = fieldAccess->field;
+        auto fieldType = unionType->getFieldType(fieldName);
+        if (!fieldType) {
+            throw CodeGenError(fieldAccess->base,
+                               "Union '" + unionType->name +
+                                   "' has no field named '" + fieldName + "'");
+            return nullptr;
+        }
+
+        // For unions, all fields are at offset 0 in the byte array (field 0)
+        // Get pointer to the storage (byte array)
+        llvm::Value *storagePtr = m_builder.CreateGEP(
+            llvmUnion, basePtr,
+            {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+             llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)},
+            "union_storage_ptr");
+
+        // Cast the byte array pointer to the desired field type
+        llvm::Type *targetType = getLLVMType(fieldType);
+        llvm::Value *fieldPtr = m_builder.CreateBitCast(
+            storagePtr,
+            llvm::PointerType::getUnqual(context),
+            "union_field_cast");
+
+        if (loadValue) {
+            return m_builder.CreateLoad(targetType, fieldPtr, fieldName + "_load");
+        } else {
+            return fieldPtr;
         }
     }
 
@@ -1518,8 +1695,56 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
     const std::shared_ptr<StructInitializer> &structInit, bool loadValue) {
     auto _if_type = structInit->inferred_type;
     auto if_type = std::dynamic_pointer_cast<StructType>(_if_type);
+    auto union_type = std::dynamic_pointer_cast<UnionType>(_if_type);
+
+    if (union_type) {
+        // Handle union initialization
+        auto it = m_unionTypes.find(union_type->name);
+        if (it == m_unionTypes.end()) {
+            throw CodeGenError(structInit, "Unknown union type: " + union_type->name);
+        }
+        llvm::StructType *llvmUnion = it->second;
+        llvm::Value *alloca =
+            m_builder.CreateAlloca(llvmUnion, nullptr, "uniontmp");
+
+        // Unions can only initialize one field at a time
+        if (structInit->field_values.size() != 1) {
+            throw CodeGenError(structInit, "Union initializer must have exactly one field, got " +
+                                               std::to_string(structInit->field_values.size()));
+        }
+
+        const auto &field = *structInit->field_values.begin();
+        auto fieldType = union_type->getFieldType(field.first);
+        if (!fieldType) {
+            throw CodeGenError(structInit, "Union '" + union_type->name +
+                                               "' has no field named '" + field.first + "'");
+        }
+
+        // Get pointer to the storage (byte array at field 0)
+        llvm::Value *storagePtr = m_builder.CreateGEP(
+            llvmUnion, alloca,
+            {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+             llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)},
+            "union_storage_ptr");
+
+        // Cast to the field type pointer
+        llvm::Type *targetType = getLLVMType(fieldType);
+        llvm::Value *fieldPtr = m_builder.CreateBitCast(
+            storagePtr,
+            llvm::PointerType::getUnqual(context),
+            "union_field_ptr");
+
+        // Store the value
+        llvm::Value *fieldVal = generateExpression(field.second);
+        m_builder.CreateStore(fieldVal, fieldPtr);
+
+        if (!loadValue)
+            return alloca;
+        return m_builder.CreateLoad(llvmUnion, alloca, "loadunion");
+    }
+
     if (!if_type) {
-        throw CodeGenError(structInit, "Struct initializer has non-struct inferred type: " +
+        throw CodeGenError(structInit, "Struct initializer has non-struct/union inferred type: " +
                                            (_if_type ? _if_type->str() : "null"));
     }
     auto it = m_structTypes.find(if_type->name);

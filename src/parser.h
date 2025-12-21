@@ -42,7 +42,10 @@ class Parser {
     size_t position;
 
     std::map<std::string, std::shared_ptr<StructType>> declared_structs;
+    std::map<std::string, std::shared_ptr<UnionType>> declared_unions;
     std::map<std::string, std::shared_ptr<EnumDeclaration>> declared_enums;
+
+    std::map<std::string, std::shared_ptr<Type>> declared_type_aliases;
 
     std::unordered_set<std::string> imported_modules;
 
@@ -67,6 +70,7 @@ class Parser {
     std::shared_ptr<ASTNode> parse_declaration();
     std::shared_ptr<FunctionDeclaration> parse_function_declaration();
     std::shared_ptr<StructDeclaration> parse_struct_declaration();
+    std::shared_ptr<UnionDeclaration> parse_union_declaration();
     std::shared_ptr<EnumDeclaration> parse_enum_declaration();
     std::shared_ptr<VariableDeclaration> parse_variable_declaration();
     std::shared_ptr<ImportDeclaration> parse_import_declaration();

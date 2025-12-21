@@ -28,11 +28,13 @@ enum class TypeKind {
     F64,
     Pointer,
     Struct,
+    Union,
     Array,
     Function,
     Null,
     Void,
     Enum,
+    ErrorUnion,
     Unknown,
     Qualified, // For unknown types from imported modules
 
@@ -49,8 +51,10 @@ struct ASTVisitor {
     virtual void visit(struct ArrayLiteral &) {}
     virtual void visit(struct FuncCall &) {}
     virtual void visit(struct StructDeclaration &) {}
+    virtual void visit(struct UnionDeclaration &) {}
     virtual void visit(struct EnumDeclaration &) {}
     virtual void visit(struct VariableDeclaration &) {}
+    virtual void visit(struct TypeAliasDeclaration &) {}
     virtual void visit(struct ImportDeclaration &) {}
     virtual void visit(struct VarAccess &) {}
     virtual void visit(struct Assignment &) {}
@@ -259,12 +263,12 @@ struct ArrayType : Type {
         auto o = dynamic_cast<ArrayType *>(other.get());
         if (!o)
             return false;
-        return length == o->length && element_type->equals(o->element_type);
+        return element_type->equals(o->element_type);
     }
 };
 
 struct ErrorUnionType : Type {
-    TypeKind kind() const override { return TypeKind::Unknown; } // or a new TypeKind::ErrorUnion
+    TypeKind kind() const override { return TypeKind::ErrorUnion; }
     std::shared_ptr<Type> valueType;
     std::shared_ptr<Type> errorType;
 
@@ -364,6 +368,54 @@ struct StructType : Type {
     }
 };
 
+struct UnionType : Type {
+    TypeKind kind() const override { return TypeKind::Union; }
+    std::string name;
+    std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
+    bool complete;
+
+    UnionType(std::string n,
+              std::vector<std::pair<std::string, std::shared_ptr<Type>>> f)
+        : name(std::move(n)), fields(std::move(f)), complete(true) {}
+
+    UnionType(std::string n) : name(std::move(n)), fields(), complete(false) {}
+
+    std::shared_ptr<Type> getFieldType(const std::string &fname) const {
+        for (const auto &field : fields)
+            if (field.first == fname)
+                return field.second;
+        return nullptr;
+    }
+
+    int getFieldIndex(const std::string &fname) const {
+        for (size_t i = 0; i < fields.size(); ++i)
+            if (fields[i].first == fname)
+                return static_cast<int>(i);
+        return -1;
+    }
+
+    void setFields(
+        const std::vector<std::pair<std::string, std::shared_ptr<Type>>> &f) {
+        fields = f;
+        complete = true;
+    }
+
+    std::string str() const override {
+        std::string result = "Union " + name + " { ";
+        for (const auto &field : fields)
+            result += field.first + ", ";
+        result += "}";
+        return result;
+    }
+
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        auto o = dynamic_cast<UnionType *>(other.get());
+        if (!o)
+            return false;
+        return name == o->name;
+    }
+};
+
 struct FunctionType : Type {
     TypeKind kind() const override { return TypeKind::Function; }
     std::vector<std::shared_ptr<Type>> params;
@@ -413,6 +465,7 @@ enum class NodeKind {
     Literal,
     FuncCall,
     StructDecl,
+    UnionDecl,
     EnumDecl,
     VarDecl,
     VarAccess,
@@ -688,9 +741,11 @@ struct Literal : public Expression {
 
 struct ArrayLiteral : public Expression {
     std::vector<ExprPtr> elements;
-
+    size_t len = 0;
     ArrayLiteral(std::vector<ExprPtr> elems)
-        : elements(std::move(elems)) {}
+        : elements(std::move(elems)) {
+        len = elements.size();
+    }
     std::string str() const override {
         std::string result = "ArrayLiteral([ ";
         for (size_t i = 0; i < elements.size(); ++i) {
@@ -889,6 +944,21 @@ struct VariableDeclaration : Statement, Declaration {
     void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
+
+struct TypeAliasDeclaration : Declaration {
+    std::string name;
+    std::shared_ptr<Type> aliased_type;
+
+    TypeAliasDeclaration(std::string n, std::shared_ptr<Type> t)
+        : name(std::move(n)), aliased_type(std::move(t)) {}
+    std::string str() const override {
+        return "TypeAliasDeclaration(" + name + " = " +
+               (aliased_type ? aliased_type->str() : "null") + ")";
+    }
+    NodeKind kind() const override { return NodeKind::Unknown; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+};
+
 struct ImportDeclaration : ASTNode {
     std::string path;
     std::string alias;
@@ -977,6 +1047,38 @@ struct StructDeclaration : Declaration {
         return result;
     }
     NodeKind kind() const override { return NodeKind::StructDecl; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+};
+
+struct UnionDeclaration : Declaration {
+    bool is_extern = false;
+    std::string name;
+    std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
+
+    std::pair<std::string, std::shared_ptr<Type>>
+    getField(const std::string &fname) const {
+        for (const auto &field : fields) {
+            if (field.first == fname)
+                return field;
+        }
+        return {"", nullptr};
+    }
+
+    UnionDeclaration(
+        std::string n,
+        std::vector<std::pair<std::string, std::shared_ptr<Type>>> f)
+        : name(std::move(n)), fields(std::move(f)) {}
+    
+    std::string str() const override {
+        std::string result = "UnionDeclaration(" + name + ") { ";
+        for (const auto &field : fields) {
+            result += field.first + ": " + field.second->str() + "; ";
+        }
+        result += "}";
+        return result;
+    }
+    
+    NodeKind kind() const override { return NodeKind::UnionDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 

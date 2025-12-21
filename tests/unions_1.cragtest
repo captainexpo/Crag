@@ -1,0 +1,34 @@
+//NAME: UNIONS 1
+//DESC:
+//BEGIN CODE
+
+
+struct Test {
+    x: f64,
+    y: f64,
+}
+
+union Vals {
+    a: f32,
+    b: i64,
+    T: Test,
+}
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+    let v: Vals;
+    v.a = 4.0;
+    v.T = Test {
+        x: 5.0,
+        y: 2.0,
+    };
+    printf("%lli\n", v.b);
+    return 0;
+}
+
+
+//END CODE
+//BEGIN EXPECT
+//4617315517961601024
+//END EXPECT
