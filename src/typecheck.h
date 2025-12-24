@@ -58,6 +58,8 @@ class TypeChecker {
     std::unordered_map<std::string, std::shared_ptr<EnumType>> m_enums;
 
     std::unordered_map<std::string, std::shared_ptr<Type>> m_type_aliases;
+
+    std::unordered_map<std::string, std::shared_ptr<Declaration>> m_templates;
     
     std::unordered_map<
         std::string,
@@ -79,7 +81,7 @@ class TypeChecker {
     // Type helpers
 
     std::string typeName(const std::shared_ptr<Type> &t) const;
-    std::shared_ptr<Type> resolveType(const std::shared_ptr<Type> &t) const;
+    std::shared_ptr<Type> resolveType(const std::shared_ptr<Type> &t);
 
     bool canImplicitCast(const std::shared_ptr<Type> &from, const std::shared_ptr<Type> &to);
 
@@ -109,6 +111,8 @@ class TypeChecker {
     std::shared_ptr<Type> inferArrayFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa);
     std::shared_ptr<Type> inferStructInit(const std::shared_ptr<StructInitializer> &init);
+    std::shared_ptr<Type> inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti);
+
 };
 
 #endif // TYPECHECK_H

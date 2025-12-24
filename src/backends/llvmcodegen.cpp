@@ -1128,48 +1128,69 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
     return nullptr;
 }
 
-llvm::Value *LLVMCodegen::generateArrayLiteral(const std::shared_ptr<ArrayLiteral> &arrayLit, bool loadValue) {
+llvm::Value *LLVMCodegen::generateArrayLiteral(
+    const std::shared_ptr<ArrayLiteral> &arrayLit, bool loadValue) {
+
     auto arrayType = std::dynamic_pointer_cast<ArrayType>(arrayLit->inferred_type);
     auto elemType = getLLVMType(arrayType->element_type);
-    int numElements = arrayType->length;
-    size_t actualSize = arrayLit->len;
-    auto arrayLLVMType = getLLVMType(arrayType);
-    auto rawArrayType = llvm::ArrayType::get(elemType, actualSize);
+    int numElements = arrayLit->len;
 
-    auto rawArrAlloc = m_builder.CreateAlloca(rawArrayType, nullptr);
+    // Generate actual length value
+    llvm::Value* actualSize = generateExpression(arrayType->length_expr);
+    if (!actualSize) {
+        throw CodeGenError(arrayLit, "Failed to generate length for array literal");
+    }
+    if (!actualSize->getType()->isIntegerTy()) {
+        throw CodeGenError(arrayLit, "Array length expression did not evaluate to integer type");
+    }
+    if (actualSize->getType() != llvm::Type::getInt64Ty(context)) {
+        actualSize = m_builder.CreateZExt(actualSize, llvm::Type::getInt64Ty(context), "arraylenzext");
+    }
+
+    // Allocate the raw array: [N x elemType]
+    auto arrayLLVMType = getLLVMType(arrayType);          // struct { ptr, i64 }
+    auto arrayLitType = llvm::ArrayType::get(elemType, numElements);
+    auto rawArrAlloc = m_builder.CreateAlloca(arrayLitType, nullptr, "arraylit");
+    rawArrAlloc->setAlignment(llvm::Align(alignof(void*)));
+    
+    // Store elements in array using correct GEP (2 indices for array)
     for (int i = 0; i < numElements; i++) {
-        llvm::Value *elemVal = generateExpression(arrayLit->elements[i]);
-        llvm::Value *idxs[] = {
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i)};
-        llvm::Value *elemPtr = m_builder.CreateGEP(rawArrayType, rawArrAlloc, idxs);
+        llvm::Value* elemVal = generateExpression(arrayLit->elements[i]);
+        llvm::Value* elemPtr = m_builder.CreateGEP(
+            arrayLitType,
+            rawArrAlloc,
+            { llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+              llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i) }
+        );
         m_builder.CreateStore(elemVal, elemPtr);
     }
 
-    // Actual array as struct { i64, ptr }
-    llvm::Value *arrayStructAlloc = m_builder.CreateAlloca(arrayLLVMType, nullptr);
-    llvm::Value *lengthPtr = m_builder.CreateGEP(
+    // Allocate struct { ptr, i64 }
+    llvm::Value* arrayStructAlloc = m_builder.CreateAlloca(arrayLLVMType, nullptr, "arraystruct");
+
+    // Store array length into struct
+    llvm::Value* lengthPtr = m_builder.CreateGEP(
         arrayLLVMType, arrayStructAlloc,
-        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
-         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1)});
-    m_builder.CreateStore(
-        llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), actualSize),
-        lengthPtr);
-    llvm::Value *dataPtr = m_builder.CreateGEP(
+        { llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1) }
+    );
+    m_builder.CreateStore(actualSize, lengthPtr);
+
+    // Store pointer to raw array into struct (cast to i8* or element pointer type)
+    llvm::Value* dataPtr = m_builder.CreateGEP(
         arrayLLVMType, arrayStructAlloc,
-        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
-         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)});
-    llvm::Value *decayedPtr = m_builder.CreateInBoundsGEP(
-        rawArrayType, rawArrAlloc,
-        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
-         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)});
-    m_builder.CreateStore(decayedPtr, dataPtr);
+        { llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0) }
+    );
+    llvm::Value* castedPtr = m_builder.CreateBitCast(rawArrAlloc, elemType->getPointerTo());
+    m_builder.CreateStore(castedPtr, dataPtr);
 
     if (loadValue) {
         return m_builder.CreateLoad(arrayLLVMType, arrayStructAlloc, "arrload");
     }
     return arrayStructAlloc;
 }
+
 
 llvm::Value *
 LLVMCodegen::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,

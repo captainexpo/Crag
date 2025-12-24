@@ -56,6 +56,7 @@ struct ASTVisitor {
     virtual void visit(struct VariableDeclaration &) {}
     virtual void visit(struct TypeAliasDeclaration &) {}
     virtual void visit(struct ImportDeclaration &) {}
+    virtual void visit(struct TemplateInstantiation &) {}
     virtual void visit(struct VarAccess &) {}
     virtual void visit(struct Assignment &) {}
     virtual void visit(struct IfStatement &) {}
@@ -101,6 +102,72 @@ struct Type {
     virtual bool isGeneralNumeric() const { return isNumeric() || kind() == TypeKind::Pointer; }
 };
 
+enum class NodeKind {
+    Program,
+    BinaryOp,
+    Literal,
+    FuncCall,
+    StructDecl,
+    UnionDecl,
+    EnumDecl,
+    VarDecl,
+    VarAccess,
+    Assignment,
+    IfStmt,
+    ForStmt,
+    WhileStmt,
+    ReturnStmt,
+    Block,
+    TypeCast,
+
+    FieldAccess,
+    ModuleAccess,
+    EnumAccess,
+
+    OffsetAccess,
+    MethodCall,
+    Dereference,
+    UnaryOp,
+    StructInit,
+    FunctionDecl,
+    ExpressionStatement,
+    BreakStatement,
+    ContinueStatement,
+    TemplateInstantiation,
+    ImportDeclaration,
+    TypeAliasDeclaration,
+    Unknown
+};
+
+
+struct ASTNode {
+    int line = 0;
+    int col = 0;
+    std::shared_ptr<Type> inferred_type = nullptr;
+
+    ASTNode() = default;
+    ASTNode(int l, int c) : line(l), col(c) {}
+
+    virtual ~ASTNode() = default;
+    virtual std::string str() const { return "ASTNode"; }
+    virtual NodeKind kind() const { return NodeKind::Unknown; }
+    virtual void accept(ASTVisitor &v);
+
+    std::string locationStr() const {
+        return "(line " + std::to_string(line) + ", col " + std::to_string(col) +
+               ")";
+    }
+
+    std::string toString() const {
+        if (inferred_type) {
+            return str() + " : " + inferred_type->str();
+        }
+        return str();
+    }
+};
+
+struct Statement : virtual ASTNode {};
+struct Expression : virtual ASTNode {};
 
 
 struct Void : Type {
@@ -245,17 +312,17 @@ struct PointerType : Type {
 struct ArrayType : Type {
     TypeKind kind() const override { return TypeKind::Array; }
     std::shared_ptr<Type> element_type;
-    int length;
+    std::shared_ptr<Expression> length_expr;
     bool unsized;
 
-    ArrayType(std::shared_ptr<Type> b, int len, bool us)
-        : element_type(std::move(b)), length(len), unsized(us) {
-        if (us) ASSERT(len == -1, "Unsized array must have length -1: " + str());
-        else ASSERT(len >= 0, "Array length must be non-negative: " + str());
+    ArrayType(std::shared_ptr<Type> b, std::shared_ptr<Expression> len, bool us)
+        : element_type(std::move(b)), length_expr(len), unsized(us) {
+        if (us) ASSERT(len == nullptr, "Unsized array must have length of nullptr: " + str());
+        else ASSERT(len != nullptr, "Sized array must have valid length expression: " + str());
     }
 
     std::string str() const override {
-        return "[" + (!unsized ? std::to_string(length) : "") + "]" + element_type->str();
+        return "[" + (unsized ? "unsized" : length_expr->str()) + "]" + element_type->str();
 
     }
 
@@ -263,7 +330,14 @@ struct ArrayType : Type {
         auto o = dynamic_cast<ArrayType *>(other.get());
         if (!o)
             return false;
-        return element_type->equals(o->element_type);
+        if (unsized != o->unsized)
+            return false;
+        if (!element_type->equals(o->element_type))
+            return false;
+        if (unsized)
+            return true;
+        // TODO: Better length expression comparison
+        return length_expr == o->length_expr;
     }
 };
 
@@ -314,6 +388,36 @@ struct QualifiedType : Type {
         return module_path == o->module_path && type_name == o->type_name;
     }
 
+};
+
+enum class GenericConstraintKind {
+    Any,
+    Numeric,
+    Integer,
+    Unsigned,
+    Signed,
+    Floating,
+    Pointer,
+};
+
+struct GenericType : Type {
+    TypeKind kind() const override { return TypeKind::Unknown; }
+
+    std::string name;
+    GenericConstraintKind constraint = GenericConstraintKind::Any; // Not implemented yet
+
+    GenericType(std::string n) : name(std::move(n)) {}
+
+    std::string str() const override {
+        return "Generic<" + name + ">";
+    }
+
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        auto o = dynamic_cast<GenericType *>(other.get());
+        if (!o)
+            return false;
+        return name == o->name;
+    }
 };
 
 struct FunctionDeclaration;
@@ -459,70 +563,11 @@ struct FunctionType : Type {
 
 // ----------------- AST Nodes -----------------
 
-enum class NodeKind {
-    Program,
-    BinaryOp,
-    Literal,
-    FuncCall,
-    StructDecl,
-    UnionDecl,
-    EnumDecl,
-    VarDecl,
-    VarAccess,
-    Assignment,
-    IfStmt,
-    ForStmt,
-    WhileStmt,
-    ReturnStmt,
-    Block,
-    TypeCast,
 
-    FieldAccess,
-    ModuleAccess,
-    EnumAccess,
 
-    OffsetAccess,
-    MethodCall,
-    Dereference,
-    UnaryOp,
-    StructInit,
-    FunctionDecl,
-    ExpressionStatement,
-    BreakStatement,
-    ContinueStatement,
-    Unknown
-};
-
-struct ASTNode {
-    int line = 0;
-    int col = 0;
-    std::shared_ptr<Type> inferred_type = nullptr;
-
-    ASTNode() = default;
-    ASTNode(int l, int c) : line(l), col(c) {}
-
-    virtual ~ASTNode() = default;
-    virtual std::string str() const { return "ASTNode"; }
-    virtual NodeKind kind() const { return NodeKind::Unknown; }
-    virtual void accept(ASTVisitor &v);
-
-    std::string locationStr() const {
-        return "(line " + std::to_string(line) + ", col " + std::to_string(col) +
-               ")";
-    }
-
-    std::string toString() const {
-        if (inferred_type) {
-            return str() + " : " + inferred_type->str();
-        }
-        return str();
-    }
-};
-
-struct Statement : virtual ASTNode {};
-struct Expression : virtual ASTNode {};
 struct Declaration : virtual ASTNode {
     bool is_pub;
+    std::vector<std::string> generic_params;
 };
 using ExprPtr = std::shared_ptr<Expression>;
 using StmtPtr = std::shared_ptr<Statement>;
@@ -644,6 +689,26 @@ struct FieldAccess : public Access {
         return "FieldAccess(" + base->toString() + "." + field + ")";
     }
     NodeKind kind() const override { return NodeKind::FieldAccess; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+};
+
+struct TemplateInstantiation : public Expression {
+    std::string base;
+    std::vector<std::shared_ptr<Type>> type_args;
+    TemplateInstantiation(std::string b,
+                          std::vector<std::shared_ptr<Type>> ta)
+        : base(std::move(b)), type_args(std::move(ta)) {}
+    std::string str() const override {
+        std::string result = "TemplateInstantiation(" + base + "<";
+        for (size_t i = 0; i < type_args.size(); ++i) {
+            if (i > 0)
+                result += ", ";
+            result += type_args[i]->str();
+        }
+        result += ">)";
+        return result;
+    }
+    NodeKind kind() const override { return NodeKind::TemplateInstantiation; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
@@ -955,11 +1020,11 @@ struct TypeAliasDeclaration : Declaration {
         return "TypeAliasDeclaration(" + name + " = " +
                (aliased_type ? aliased_type->str() : "null") + ")";
     }
-    NodeKind kind() const override { return NodeKind::Unknown; }
+    NodeKind kind() const override { return NodeKind::TypeAliasDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 
-struct ImportDeclaration : ASTNode {
+struct ImportDeclaration : Declaration {
     std::string path;
     std::string alias;
 
@@ -967,7 +1032,7 @@ struct ImportDeclaration : ASTNode {
     std::string str() const override {
         return "ImportDeclaration(\"" + path + "\", \"" + alias + "\")";
     }
-    NodeKind kind() const override { return NodeKind::Unknown; }
+    NodeKind kind() const override { return NodeKind::ImportDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
 };
 

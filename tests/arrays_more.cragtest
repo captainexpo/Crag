@@ -5,7 +5,7 @@
 extern fn printf(fmt: *u8, ...) -> i32;
 
 fn main(argc: i32) -> i32 {
-    let arr: []u8 = {'H','E','L','L','O',0};
+    let arr: [3+3]u8 = {'H','E','L','L','O',0};
     other(arr.ptr);
     printf("%s\n", arr.ptr);
     printf("Len: %d\n", arr.len);

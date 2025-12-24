@@ -84,6 +84,17 @@ void Parser::synchronize() {
     }
 }
 
+bool str_in_vector(const std::string &s, const std::vector<std::string> &vec, size_t* index) {
+    auto it = std::find(vec.begin(), vec.end(), s);
+    if (it != vec.end()) {
+        if (index != nullptr) {
+            *index = std::distance(vec.begin(), it);
+        }
+        return true;
+    }
+    return false;
+}
+
 // ---- Type parsing ----
 std::shared_ptr<Type> Parser::parse_type(bool top_level) {
     Token current = peek();
@@ -108,6 +119,11 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
             if (declared_type_aliases.count(current.value)) {
                 std::string name = consume(TokenType::ID).value;
                 t = declared_type_aliases[name];
+                break;
+            }
+            if (str_in_vector(current.value, current_generic_params, nullptr)) {
+                std::string name = consume(TokenType::ID).value;
+                t = std::make_shared<GenericType>(name);
                 break;
             }
             if (peek(1).type == TokenType::DOUBLE_COLON) {
@@ -186,14 +202,18 @@ std::shared_ptr<PointerType> Parser::parse_pointer_type() {
 std::shared_ptr<ArrayType> Parser::parse_array_type() {
     consume(TokenType::LBRACKET);
 
-    int size = -1;
+    std::shared_ptr<Expression> size = nullptr;
     bool unsized = peek().type == TokenType::RBRACKET;
     if (!unsized) {
-        size = std::stoi(consume(TokenType::NUMBER).value);
+        size = parse_expression();
+
+        // HACK: should probably put this in the typechecker
+        size->inferred_type = std::make_shared<I64>();    
     }
     consume(TokenType::RBRACKET);
     auto elem_type = parse_type(false);
-    return std::make_shared<ArrayType>(elem_type, size, unsized);
+    auto arrTy = std::make_shared<ArrayType>(elem_type, size, unsized);
+    return arrTy;
 }
 
 std::shared_ptr<PointerType> Parser::parse_function_ptr_type() {
@@ -618,6 +638,24 @@ std::shared_ptr<Expression> Parser::parse_nud() {
 
             std::string name = t.value;
             if (peek().type == TokenType::DOUBLE_COLON) {
+                if (peek(1).type == TokenType::LT) {
+                    // Template instantiation
+                    std::vector<std::shared_ptr<Type>> type_args;
+                    consume(TokenType::DOUBLE_COLON);
+                    consume(TokenType::LT);
+                    while (true) {
+                        type_args.push_back(parse_type());
+                        if (peek().type == TokenType::COMMA)
+                            consume(TokenType::COMMA);
+                        else
+                            break;
+                    }
+                    consume(TokenType::GT);
+                    expr = std::make_shared<TemplateInstantiation>(name, type_args);
+                    expr->line = t.line;
+                    expr->col = t.column;
+                    return expr;
+                }
                 // Module access
                 std::vector<std::string> module_path;
                 module_path.push_back(name);
@@ -936,10 +974,28 @@ std::shared_ptr<ExpressionStatement> Parser::parse_expression_statement() {
     return expr_stmt;
 }
 
+std::vector<std::string> Parser::try_parse_generic_parameters() {
+    std::vector<std::string> generic_params;
+    if (match({TokenType::LT})) {
+        while (true) {
+            std::string gpname = consume(TokenType::ID).value;
+            generic_params.push_back(gpname);
+            if (match({TokenType::COMMA}))
+                continue;
+            consume(TokenType::GT);
+            break;
+        }
+    }
+    return generic_params;
+}
+
 std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
     Token start_token = peek(); // Store the start token for line and col
     consume(TokenType::FN);
     std::string name = consume(TokenType::ID).value;
+    std::vector<std::string> generic_params = try_parse_generic_parameters();
+    this->current_generic_params = generic_params;
+
     consume(TokenType::LPAREN);
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> params;
     bool variadic = false;
@@ -985,6 +1041,9 @@ std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
     func_decl->line = start_token.line;
     func_decl->col = start_token.column;
     func_decl->attributes = attributes;
+    func_decl->generic_params = generic_params;
+
+    this->current_generic_params.clear();
     return func_decl;
 }
 

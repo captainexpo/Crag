@@ -177,7 +177,7 @@ std::string TypeChecker::typeName(const std::shared_ptr<Type> &t) const {
 }
 
 std::shared_ptr<Type>
-TypeChecker::resolveType(const std::shared_ptr<Type> &t) const {
+TypeChecker::resolveType(const std::shared_ptr<Type> &t) {
     if (!t)
         return nullptr;
 
@@ -195,9 +195,11 @@ TypeChecker::resolveType(const std::shared_ptr<Type> &t) const {
     }
     if (auto at = std::dynamic_pointer_cast<ArrayType>(t)) {
         auto bt = resolveType(at->element_type);
+        if (at->length_expr) at->length_expr->inferred_type = inferExpression(at->length_expr);
+        
         if (!bt)
             return nullptr;
-        return std::make_shared<ArrayType>(bt, at->length, at->unsized);
+        return std::make_shared<ArrayType>(bt, at->length_expr, at->unsized);
     }
     if (auto ft = std::dynamic_pointer_cast<FunctionType>(t)) {
         auto rt = resolveType(ft->ret);
@@ -255,12 +257,17 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
     for (const auto &decl : module->ast->declarations) {
         if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
-            // Build a StructType and register
-            auto st = std::make_shared<StructType>(sd->name);
-            st->complete = false;
-            m_structs[sd->name] = st;
-            insertSymbol(sd->name, st);
-            struct_decls.push_back(sd);
+            // Check if this is a generic struct
+            if (sd->generic_params.size() > 0) {
+                m_templates[sd->name] = sd;
+            } else {
+                // Build a StructType and register
+                auto st = std::make_shared<StructType>(sd->name);
+                st->complete = false;
+                m_structs[sd->name] = st;
+                insertSymbol(sd->name, st);
+                struct_decls.push_back(sd);
+            }
         } else if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(decl)) {
             // Build a UnionType and register
             auto ut = std::make_shared<UnionType>(ud->name);
@@ -269,8 +276,13 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
             insertSymbol(ud->name, ut);
             union_decls.push_back(ud);
         } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
-            m_functions[fd->name] = fd->type;
-            insertSymbol(fd->name, fd->type);
+            if (fd->generic_params.size() > 0) {
+                m_templates[fd->name] = fd;
+            }
+            else {
+                m_functions[fd->name] = fd->type;
+                insertSymbol(fd->name, fd->type);
+            }
         } else if (auto en = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
             if (!en->base_type) {
                 throw TypeCheckError(en, "Enum " + en->name + " has no base type");
@@ -420,7 +432,7 @@ void TypeChecker::checkFunctionDeclaration(
         }
     }
 
-    m_expected_return_type = fn->type->ret;
+    m_expected_return_type = fn->type->ret;    
     if (fn->body) {
         checkStatement(fn->body);
     }
@@ -474,23 +486,18 @@ void TypeChecker::checkVariableDeclaration(
         if (auto arr_lit = std::dynamic_pointer_cast<ArrayLiteral>(expr)) {
             if (auto arr_type = std::dynamic_pointer_cast<ArrayType>(var->var_type)) {
                 if (arr_type->unsized) {
-                    arr_type->length = static_cast<int>(arr_lit->elements.size());
+                    auto i64 = std::make_shared<I64>();
+                    arr_type->length_expr = std::make_shared<Literal>(static_cast<int>(arr_lit->elements.size()), i64);
+                    std::cout << "Inferred array length for variable " << name << ": "
+                              << arr_lit->elements.size() << "\n";
+                    // HACK: This is kinda dirty
+                    arr_type->length_expr->inferred_type = i64;
+
                     arr_type->unsized = false;
                     var->var_type = arr_type;
                 }
                 else {
-                    // Check that sizes match
-                    int size = static_cast<int>(arr_lit->elements.size());
-                    if (arr_type->length < size) {
-                        throw TypeCheckError(init, "Array literal has more elements (" +
-                                                      std::to_string(size) +
-                                                      ") than variable type size (" +
-                                                      std::to_string(arr_type->length) + ")");
-                    }
-                    else {
-                        std::cout << "Setting array literal length to " << arr_type->length << "\n";
-                        arr_lit->len = arr_type->length;
-                    }
+                    arr_lit->inferred_type = var->var_type;
                 }
             }
         }
@@ -732,11 +739,14 @@ TypeChecker::inferExpression(const std::shared_ptr<Expression> &expr) {
         ea->inferred_type = res;
         return res;
     }
+//    if (auto ta = std::dynamic_pointer_cast<TemplateInstantiation>(expr))
+//        return inferTemplateInstantiation(ta);
     if (auto al = std::dynamic_pointer_cast<ArrayLiteral>(expr))
         return inferArrayLiteral(al);
     // Unknown expression kind
     throw TypeCheckError(expr, "Type inference: unhandled expression type: " + expr->str());
 }
+
 
 std::shared_ptr<Type> TypeChecker::inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma) {
     if (ma->module_path.size() == 0) {
@@ -832,7 +842,10 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
             }
         }
     }
-    auto at = std::make_shared<ArrayType>(elem_type, al->elements.size(), false);
+    auto i64 = std::make_shared<I64>();
+    auto arrSizeLit = std::make_shared<Literal>(static_cast<int>(al->elements.size()), i64);
+    arrSizeLit->inferred_type = i64;
+    auto at = std::make_shared<ArrayType>(elem_type, arrSizeLit, false);
     al->inferred_type = resolveType(at);
     return at;
 }

@@ -39,6 +39,11 @@ class Parser {
     std::vector<ParseError> m_errors; // Collected errors
 
     std::vector<Token> tokens;
+
+
+    // HACK: Assume single level generics for now as that's all the language needs, but it might be expanded later (and should be)
+    std::vector<std::string> current_generic_params;
+
     size_t position;
 
     std::map<std::string, std::shared_ptr<StructType>> declared_structs;
@@ -64,9 +69,8 @@ class Parser {
     std::shared_ptr<PointerType> parse_pointer_type();
     std::shared_ptr<ArrayType> parse_array_type();
     std::shared_ptr<PointerType> parse_function_ptr_type();
-    std::vector<std::pair<std::string, std::shared_ptr<Type>>>
-    parse_parameter_def();
-
+    std::vector<std::pair<std::string, std::shared_ptr<Type>>> parse_parameter_def();
+    std::vector<std::string> try_parse_generic_parameters();
     std::shared_ptr<ASTNode> parse_declaration();
     std::shared_ptr<FunctionDeclaration> parse_function_declaration();
     std::shared_ptr<StructDeclaration> parse_struct_declaration();

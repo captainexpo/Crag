@@ -69,6 +69,8 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
         return nullptr;
     }
 
+    std::cout << mod->ast->toString();
+
 
     if (moduleResolver.hasDependencyCycle()) {
         std::cerr << "Error: Cyclic dependencies detected among modules.\n";
