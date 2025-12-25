@@ -1052,43 +1052,65 @@ llvm::Value *LLVMCodegen::generateLogicalOp(std::shared_ptr<Expression> left, st
     return phi;
 }
 
+template <typename T> T tryGetConstValue(std::shared_ptr<Literal> lit) {
+    auto val = lit->value;
+    if (std::holds_alternative<T>(val)) {
+        return std::get<T>(val);
+    }
+    std::cerr << "Failed to get constant value of requested type (" << lit->lit_type->str() << ")\n";
+    std::cerr << "Actual type: ";
+    if (std::holds_alternative<int64_t>(val)) {
+        std::cerr << "int64_t\n";
+    } else if (std::holds_alternative<uint64_t>(val)) {
+        std::cerr << "uint64_t\n";
+    } else if (std::holds_alternative<double>(val)) {
+        std::cerr << "double\n";
+    } else if (std::holds_alternative<bool>(val)) {
+        std::cerr << "bool\n";
+    } else if (std::holds_alternative<std::string>(val)) {
+        std::cerr << "string\n";
+    } else {
+        std::cerr << "unknown\n";
+    }
+    throw std::bad_variant_access();
+}
+
 llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
                                           bool loadValue) {
 
     if (IS_INSTANCE(lit->inferred_type, I32)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(32, std::get<int64_t>(lit->value)));
+                                      llvm::APInt(32, tryGetConstValue<int64_t>(lit)));
     } else if (IS_INSTANCE(lit->inferred_type, I64)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(64, std::get<int64_t>(lit->value)));
+                                      llvm::APInt(64, tryGetConstValue<int64_t>(lit)));
     } else if (IS_INSTANCE(lit->inferred_type, U8)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(8, std::get<uint64_t>(lit->value)));
+                                      llvm::APInt(8, tryGetConstValue<uint64_t>(lit)));
     } else if (IS_INSTANCE(lit->inferred_type, U32)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(32, std::get<uint64_t>(lit->value)));
+                                      llvm::APInt(32, tryGetConstValue<uint64_t>(lit)));
     } else if (IS_INSTANCE(lit->inferred_type, U64)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(64, std::get<uint64_t>(lit->value)));
+                                      llvm::APInt(64, tryGetConstValue<uint64_t>(lit)));
     } else if (IS_INSTANCE(lit->inferred_type, F32)) {
         return llvm::ConstantFP::get(m_builder.getFloatTy(),
-                                     std::get<double>(lit->value));
+                                     tryGetConstValue<double>(lit));
     } else if (IS_INSTANCE(lit->inferred_type, F64)) {
         return llvm::ConstantFP::get(m_builder.getDoubleTy(),
-                                     std::get<double>(lit->value));
+                                     tryGetConstValue<double>(lit));
     } else if (IS_INSTANCE(lit->inferred_type, Boolean)) {
         return llvm::ConstantInt::get(
-            context, llvm::APInt(1, std::get<bool>(lit->value) ? 1 : 0));
+            context, llvm::APInt(1, tryGetConstValue<bool>(lit) ? 1 : 0));
     } else if (IS_INSTANCE(lit->inferred_type, Void)) {
         return nullptr; // Void literals don't have a value
     } else if (IS_INSTANCE(lit->inferred_type, USize)) {
         return llvm::ConstantInt::get(
             context,
-            llvm::APInt(64,
-                        std::get<int64_t>(lit->value))); // Assuming 64-bit for USize
+            llvm::APInt(64, tryGetConstValue<uint64_t>(lit))); // Assuming 64-bit for USize
     } else if (IS_INSTANCE(lit->inferred_type, PointerType)) {
-        if (std::holds_alternative<int64_t>(lit->value)) {
-            int intVal = std::get<int64_t>(lit->value);
+        if (std::holds_alternative<uint64_t>(lit->value)) {
+            int intVal = tryGetConstValue<uint64_t>(lit);
             if (intVal == 0) {
                 // Null pointer literal
                 return llvm::ConstantPointerNull::get(
@@ -1098,7 +1120,7 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
             }
         } else if (std::holds_alternative<std::string>(lit->value)) {
             // String literal → create global string
-            auto strVal = std::get<std::string>(lit->value);
+            auto strVal = tryGetConstValue<std::string>(lit);
             auto strName = "g" + std::to_string(globalVals++);
             auto strType = llvm::ArrayType::get(llvm::Type::getInt8Ty(context),
                                                 strVal.size() + 1);
@@ -1182,7 +1204,7 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
         { llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
           llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0) }
     );
-    llvm::Value* castedPtr = m_builder.CreateBitCast(rawArrAlloc, elemType->getPointerTo());
+    llvm::Value* castedPtr = m_builder.CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context));
     m_builder.CreateStore(castedPtr, dataPtr);
 
     if (loadValue) {

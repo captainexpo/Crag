@@ -4,6 +4,7 @@
 
 #include <string>
 #include <iostream>
+#include <cstring>
 
 #ifndef NDEBUG
 #   define ASSERT(condition, message) \
@@ -23,6 +24,13 @@ void prettyError(int line, int col, const std::string &msg,const std::string &so
 void fail(const std::string &message);
 void warn(const std::string &message);
 void info(const std::string &message);
+
+template <typename T_in, typename T_out> T_out bitcast(const T_in &in) {
+    static_assert(sizeof(T_in) == sizeof(T_out), "bitcast: size mismatch");
+    T_out out;
+    memcpy(&out, &in, sizeof(T_in));
+    return out;
+} 
 
 
 #endif

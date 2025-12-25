@@ -4,6 +4,10 @@
 #include <cassert>
 #include <memory>
 #include <typeinfo>
+#include <bit>
+#include <cstdint>
+#include <cstring>
+#include "utils.h"
 
 TypeChecker::TypeChecker() { pushScope(); }
 
@@ -473,9 +477,10 @@ void TypeChecker::checkVariableDeclaration(
             goto end;
         }
 
-        auto init_type = resolveType(inferExpression(expr));
-
         var->var_type = resolveType(var->var_type);
+        
+        // Pass expected type to initializer inference
+        auto init_type = resolveType(inferExpression(expr, var->var_type));
 
         if (!var->var_type) {
             var->var_type = init_type; // Type inference
@@ -487,7 +492,7 @@ void TypeChecker::checkVariableDeclaration(
             if (auto arr_type = std::dynamic_pointer_cast<ArrayType>(var->var_type)) {
                 if (arr_type->unsized) {
                     auto i64 = std::make_shared<I64>();
-                    arr_type->length_expr = std::make_shared<Literal>(static_cast<int>(arr_lit->elements.size()), i64);
+                    arr_type->length_expr = std::make_shared<Literal>(static_cast<int64_t>(arr_lit->elements.size()), i64);
                     std::cout << "Inferred array length for variable " << name << ": "
                               << arr_lit->elements.size() << "\n";
                     // HACK: This is kinda dirty
@@ -571,7 +576,8 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
     if (auto ret = std::dynamic_pointer_cast<ReturnStatement>(stmt)) {
         std::shared_ptr<Type> ret_inferred = nullptr;
         if (ret->value) {
-            ret_inferred = inferExpression(ret->value);
+            // Pass expected return type to the return value inference
+            ret_inferred = inferExpression(ret->value, m_expected_return_type);
         }
         if (!m_expected_return_type) {
             if (ret->value) {
@@ -641,7 +647,8 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
     }
     if (auto asg = std::dynamic_pointer_cast<Assignment>(stmt)) {
         auto lt = inferExpression(asg->target);
-        auto rt = inferExpression(asg->value);
+        // Pass expected type (left side) to right side inference
+        auto rt = inferExpression(asg->value, lt);
         if (!lt || !rt)
             return;
         if (!lt->equals(rt)) {
@@ -687,25 +694,26 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
 
 // Expression inference — return inferred type or nullptr if error/unhandled
 std::shared_ptr<Type>
-TypeChecker::inferExpression(const std::shared_ptr<Expression> &expr) {
+TypeChecker::inferExpression(const std::shared_ptr<Expression> &expr,
+                            const std::shared_ptr<Type> &expected) {
     if (!expr)
         return nullptr;
     if (auto va = std::dynamic_pointer_cast<VarAccess>(expr))
         return inferVarAccess(va);
     if (auto lit = std::dynamic_pointer_cast<Literal>(expr))
-        return inferLiteral(lit);
+        return inferLiteral(lit, expected);
     if (auto bin = std::dynamic_pointer_cast<BinaryOperation>(expr))
-        return inferBinaryOp(bin);
+        return inferBinaryOp(bin, expected);
     if (auto un = std::dynamic_pointer_cast<UnaryOperation>(expr))
         return inferUnaryOp(un);
     if (auto call = std::dynamic_pointer_cast<FuncCall>(expr))
-        return inferFuncCall(call);
+        return inferFuncCall(call, expected);
     if (auto fa = std::dynamic_pointer_cast<FieldAccess>(expr))
         return inferFieldAccess(fa);
     if (auto oa = std::dynamic_pointer_cast<OffsetAccess>(expr))
         return inferOffsetAccess(oa);
     if (auto si = std::dynamic_pointer_cast<StructInitializer>(expr))
-        return inferStructInit(si);
+        return inferStructInit(si, expected);
     if (auto tc = std::dynamic_pointer_cast<TypeCast>(expr))
         return inferTypeCast(tc);
     if (auto d = std::dynamic_pointer_cast<Dereference>(expr))
@@ -742,7 +750,7 @@ TypeChecker::inferExpression(const std::shared_ptr<Expression> &expr) {
 //    if (auto ta = std::dynamic_pointer_cast<TemplateInstantiation>(expr))
 //        return inferTemplateInstantiation(ta);
     if (auto al = std::dynamic_pointer_cast<ArrayLiteral>(expr))
-        return inferArrayLiteral(al);
+        return inferArrayLiteral(al, expected);
     // Unknown expression kind
     throw TypeCheckError(expr, "Type inference: unhandled expression type: " + expr->str());
 }
@@ -800,25 +808,128 @@ TypeChecker::inferVarAccess(const std::shared_ptr<VarAccess> &v) {
     return *maybe;
 }
 
+
+
+uint64_t getLitValue(const std::shared_ptr<Literal> &lit) {
+    // bitcast all literals to uint64_t for simplicity
+    if (auto i8 = std::dynamic_pointer_cast<U8>(lit->lit_type)) {
+        return std::get<uint64_t>(lit->value);
+    }
+    if (auto i32 = std::dynamic_pointer_cast<U32>(lit->lit_type)) { 
+        return std::get<uint64_t>(lit->value);
+    }
+    if (auto i64 = std::dynamic_pointer_cast<U64>(lit->lit_type)) { 
+        return std::get<uint64_t>(lit->value);
+    }
+    if (auto usize = std::dynamic_pointer_cast<USize>(lit->lit_type)) { 
+        return std::get<uint64_t>(lit->value);
+    }
+    if (auto i32 = std::dynamic_pointer_cast<I32>(lit->lit_type)) { 
+        return std::get<int64_t>(lit->value);
+    }
+    if (auto i64 = std::dynamic_pointer_cast<I64>(lit->lit_type)) { 
+        return std::get<int64_t>(lit->value);
+    }
+    if (auto f32 = std::dynamic_pointer_cast<F32>(lit->lit_type)) { 
+        return bitcast<double, uint64_t>(std::get<double>(lit->value));
+    }
+    if (auto f64 = std::dynamic_pointer_cast<F64>(lit->lit_type)) { 
+        return bitcast<double, uint64_t>(std::get<double>(lit->value));
+    }
+    if (auto str = std::dynamic_pointer_cast<PointerType>(lit->lit_type)) { 
+        return std::get<uint64_t>(lit->value);
+    }
+    throw std::runtime_error("Unsupported literal type for getLitValue: " + lit->lit_type->str());
+}
+
+void setLitVal(std::shared_ptr<Literal> lit, uint64_t raw_val) {
+    if (auto i8 = std::dynamic_pointer_cast<U8>(lit->lit_type)) {
+        lit->value = static_cast<uint64_t>(raw_val);
+        return;
+    }
+    if (auto i32 = std::dynamic_pointer_cast<U32>(lit->lit_type)) { 
+        lit->value = static_cast<uint64_t>(raw_val);
+        return;
+    }
+    if (auto i64 = std::dynamic_pointer_cast<U64>(lit->lit_type)) { 
+        lit->value = static_cast<uint64_t>(raw_val);
+        return;
+    }
+    if (auto usize = std::dynamic_pointer_cast<USize>(lit->lit_type)) { 
+        lit->value = static_cast<uint64_t>(raw_val);
+        return;
+    }
+    if (auto i32 = std::dynamic_pointer_cast<I32>(lit->lit_type)) { 
+        lit->value = static_cast<int64_t>(raw_val);
+        return;
+    }
+    if (auto i64 = std::dynamic_pointer_cast<I64>(lit->lit_type)) { 
+        lit->value = static_cast<int64_t>(raw_val);
+        return;
+    }
+    if (auto f32 = std::dynamic_pointer_cast<F32>(lit->lit_type)) { 
+        lit->value = bitcast<uint64_t, double>(raw_val);
+        return;
+    }
+    if (auto f64 = std::dynamic_pointer_cast<F64>(lit->lit_type)) { 
+        lit->value = bitcast<uint64_t, double>(raw_val);
+        return;
+    }
+    if (auto str = std::dynamic_pointer_cast<PointerType>(lit->lit_type)) { 
+        lit->value = raw_val;
+        return;
+    }
+    throw std::runtime_error("Unsupported literal type for setLitVal: " + lit->lit_type->str());
+}
+
 std::shared_ptr<Type>
-TypeChecker::inferLiteral(const std::shared_ptr<Literal> &lit) {
+TypeChecker::inferLiteral(const std::shared_ptr<Literal> &lit,
+                          const std::shared_ptr<Type> &expected) {
     auto preType = resolveType(lit->lit_type);
     if (!preType) {
         throw TypeCheckError(lit, "Unknown literal type");
     }
+    
+    // Use expected type for numeric literals when possible
+    if (expected && expected->isNumeric() && lit->lit_type->isNumeric()) {
+        // Check if we can use the expected type directly
+        if (canImplicitCast(preType, expected)) {
+
+            uint64_t lit_val = getLitValue(lit);
+
+            lit->lit_type = expected;
+            lit->inferred_type = expected;
+
+            // Update the literal value to match the expected type
+            setLitVal(lit, lit_val);
+            return expected;
+        }
+    }
+    
     lit->inferred_type = preType;
     return lit->lit_type;
 }
 
 
-std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al) {
+std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
+                                                     const std::shared_ptr<Type> &expected) {
     if (al->elements.empty()) {
         throw TypeCheckError(al, "Cannot infer type of empty array literal");
     }
+    
+    // Extract expected element type from expected array type
+    std::shared_ptr<Type> expected_elem = nullptr;
+    if (expected) {
+        if (auto arr_type = std::dynamic_pointer_cast<ArrayType>(expected)) {
+            expected_elem = arr_type->element_type;
+        }
+    }
+    
     std::shared_ptr<Type> elem_type = nullptr;
     for (int i = 0; i < al->elements.size(); ++i) {
         auto el = al->elements[i];
-        auto t = inferExpression(el);
+        // Pass expected element type to each element
+        auto t = inferExpression(el, expected_elem ? expected_elem : elem_type);
         if (!t)
             return nullptr;
         if (!elem_type) {
@@ -843,7 +954,7 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
         }
     }
     auto i64 = std::make_shared<I64>();
-    auto arrSizeLit = std::make_shared<Literal>(static_cast<int>(al->elements.size()), i64);
+    auto arrSizeLit = std::make_shared<Literal>(static_cast<int64_t>(al->elements.size()), i64);
     arrSizeLit->inferred_type = i64;
     auto at = std::make_shared<ArrayType>(elem_type, arrSizeLit, false);
     al->inferred_type = resolveType(at);
@@ -851,7 +962,8 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
 }
 
 std::shared_ptr<Type>
-TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin) {
+TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
+                          const std::shared_ptr<Type> &expected) {
     auto lt = inferExpression(bin->left);
     auto rt = inferExpression(bin->right);
     if (!lt || !rt)
@@ -1054,7 +1166,8 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
 }
 
 std::shared_ptr<Type>
-TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call) {
+TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call,
+                          const std::shared_ptr<Type> &expected) {
     // infer function expression type
     std::shared_ptr<FunctionType> ftype = nullptr;
 
@@ -1086,7 +1199,9 @@ TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call) {
 
     size_t n = ftype->params.size();
     for (size_t i = 0; i < call->args.size(); ++i) {
-        auto at = inferExpression(call->args[i]);
+        // Pass expected parameter type to argument inference
+        std::shared_ptr<Type> expected_arg_type = (i < ftype->params.size()) ? ftype->params[i] : nullptr;
+        auto at = inferExpression(call->args[i], expected_arg_type);
         if (!at)
             throw TypeCheckError(call, "Failed to infer type of function call argument " +
                                            std::to_string(i));
@@ -1222,7 +1337,8 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
 }
 
 std::shared_ptr<Type>
-TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init) {
+TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
+                            const std::shared_ptr<Type> &expected) {
     std::shared_ptr<Type> _st = inferExpression(init->struct_type_expr);
     auto st = std::dynamic_pointer_cast<StructType>(_st);
     if (!st) {

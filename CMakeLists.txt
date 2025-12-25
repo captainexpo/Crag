@@ -9,11 +9,11 @@ include(FetchContent)
 #
 set(CMAKE_BUILD_TYPE Debug)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O1")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O1 -g -std=c++20")
 
 file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
@@ -49,7 +49,7 @@ target_link_libraries(comp PRIVATE ${LLVM_LDFLAGS_LIST})
 FetchContent_Declare(
   argparse
   GIT_REPOSITORY https://github.com/p-ranav/argparse.git
-  GIT_TAG v3.2   # pin a version, do not use master
+  GIT_TAG v3.2  
 )
 
 FetchContent_MakeAvailable(argparse)

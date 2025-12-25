@@ -585,7 +585,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                 expr = std::make_shared<Literal>(std::stof(t.value),
                                                  std::make_shared<F64>());
             } else {
-                expr = std::make_shared<Literal>(std::stoi(t.value),
+                expr = std::make_shared<Literal>(std::stol(t.value),
                                                  std::make_shared<I32>());
             }
             expr->line = t.line;

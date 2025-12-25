@@ -87,7 +87,8 @@ class TypeChecker {
 
     void checkNode(const std::shared_ptr<ASTNode> &node);
     void checkStatement(const std::shared_ptr<Statement> &stmt);
-    std::shared_ptr<Type> inferExpression(const std::shared_ptr<Expression> &expr);
+    std::shared_ptr<Type> inferExpression(const std::shared_ptr<Expression> &expr,
+                                         const std::shared_ptr<Type> &expected = nullptr);
 
     // Declarations
     void checkFunctionDeclaration(const std::shared_ptr<FunctionDeclaration> &fn);
@@ -99,18 +100,23 @@ class TypeChecker {
     std::shared_ptr<Type> inferTypeCast(const std::shared_ptr<TypeCast> &tc);
     std::shared_ptr<Type> inferVarAccess(const std::shared_ptr<VarAccess> &v);
     std::shared_ptr<Type> inferDereference(const std::shared_ptr<Dereference> &d);
-    std::shared_ptr<Type> inferLiteral(const std::shared_ptr<Literal> &lit);
-    std::shared_ptr<Type> inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al);
-    std::shared_ptr<Type> inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin);
+    std::shared_ptr<Type> inferLiteral(const std::shared_ptr<Literal> &lit,
+                                      const std::shared_ptr<Type> &expected = nullptr);
+    std::shared_ptr<Type> inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
+                                           const std::shared_ptr<Type> &expected = nullptr);
+    std::shared_ptr<Type> inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
+                                       const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferUnaryOp(const std::shared_ptr<UnaryOperation> &un);
-    std::shared_ptr<Type> inferFuncCall(const std::shared_ptr<FuncCall> &call);
+    std::shared_ptr<Type> inferFuncCall(const std::shared_ptr<FuncCall> &call,
+                                       const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferMethodCall(const std::shared_ptr<MethodCall> &mc);
     std::shared_ptr<Type> inferFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma);
     std::shared_ptr<Type> inferErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferArrayFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa);
-    std::shared_ptr<Type> inferStructInit(const std::shared_ptr<StructInitializer> &init);
+    std::shared_ptr<Type> inferStructInit(const std::shared_ptr<StructInitializer> &init,
+                                         const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti);
 
 };

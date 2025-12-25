@@ -69,6 +69,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
         return nullptr;
     }
 
+    std::cout << "after type checking:\n";
     std::cout << mod->ast->toString();
 
 
