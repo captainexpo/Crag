@@ -2,7 +2,7 @@
 #ifndef BACKEND_H
 #define BACKEND_H
 
-#include "ast.h"
+#include "ast/ast.h"
 #include "module_resolver.h"
 #include <memory>
 

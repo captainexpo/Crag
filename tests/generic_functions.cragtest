@@ -2,31 +2,30 @@
 //DESC:
 //BEGIN CODE
 
-fn add<T>(x: T, y: T) -> T {
-    return x + y;
-}
-
-fn map<T, U>(arr: []T, f: fn(T) -> U) -> []U {
-    let result: [arr.len]U = {0};
-    for (let i: usize = 0; i < arr.len; i = i + 1) {
-        
-    }
-    return result;
-}
+// fn add<T>(x: T, y: T) -> T {
+//     return x + y;
+// }
+//
+// fn map<T, U>(arr: []T, f: fn(T) -> U) -> []U {
+//     let result: [arr.len]U = {0};
+//     for (let i: usize = 0; i < arr.len; i = i + 1) {
+//
+//     }
+//     return result;
+// }
 
 extern fn printf(fmt: *u8, ...) -> i32;
 
+fn add<A, B>(a: A, b: B) -> B {
+    return b + a;
+}
+
+
 fn main() -> i32 {
-    let a: f64 = 1.5;
-    let b: f64 = 2.5;
-    let c = add::<f64>(a, b);
-    printf("%f\n", c);
-
-    let d: i32 = 10;
-    let e: i32 = 20;
-    let f = add::<i32>(d, e);
-    printf("%d\n", f);
-
+    let a: f32 = add::<i32, f32>(7, 7.5);
+    let b: i32 = add::<i32, i32>(3, 4);
+    printf("%f\n", a);
+    printf("%d %d\n", b, add::<i32, i32>(10, 20));  
     return 0;
 }
 

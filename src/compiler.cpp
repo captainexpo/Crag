@@ -2,7 +2,7 @@
 #include "backend.h"
 #include "backends/llvmcodegen.h"
 #include "module_resolver.h"
-#include "typecheck.h"
+#include "typechecking/typecheck.h"
 #include "utils.h"
 #include <filesystem>
 #include <llvm/Support/TargetSelect.h>
@@ -51,9 +51,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     auto moduleResolver = ModuleResolver(path.parent_path());
     auto mod = moduleResolver.loadModule(path.filename().string());
 
-
-    std::cout << mod->ast->toString();
-
+    // std::cout << mod->ast->toString();
 
     auto typeChecker = TypeChecker();
 
@@ -62,16 +60,17 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     if (!typeChecker.ok()) {
         std::cout << typeChecker.errors().size() << " errors during type checking:\n";
         for (const auto &err : typeChecker.errors()) {
-            std::cerr << err.second << "\n" << err.first->line << " " << err.first->col << "\n";
+            std::cerr << err.second << "\n"
+                      << err.first->line << " " << err.first->col << "\n";
             prettyError(err.first ? err.first->line : -1,
                         err.first ? err.first->col : -1, err.second, mod->source_code);
         }
         return nullptr;
     }
-
-    std::cout << "after type checking:\n";
-    std::cout << mod->ast->toString();
-
+    //
+    // std::cout << "after type checking:\n";
+    // std::cout << mod->ast->toString();
+    //
 
     if (moduleResolver.hasDependencyCycle()) {
         std::cerr << "Error: Cyclic dependencies detected among modules.\n";

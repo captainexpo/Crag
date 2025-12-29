@@ -2,7 +2,7 @@
 #ifndef CONST_EVAL_H
 #define CONST_EVAL_H
 
-#include "ast.h"
+#include "ast/ast.h"
 #include <cstdint>
 #include <optional>
 #include <string>

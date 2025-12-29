@@ -1,5 +1,5 @@
 #include "parser.h"
-#include "ast.h"
+#include "ast/ast.h"
 #include "lexer.h"
 #include <algorithm>
 #include <cstddef>
@@ -64,19 +64,19 @@ void Parser::synchronize() {
     while (peek().type != TokenType::EOF_T) {
         switch (peek().type) {
             case TokenType::FN:
-            //case TokenType::LET:
-            //case TokenType::CONST:
+            // case TokenType::LET:
+            // case TokenType::CONST:
             case TokenType::USING:
             case TokenType::STRUCT:
             case TokenType::ENUM:
             case TokenType::IMPORT:
             case TokenType::EXTERN:
-            //case TokenType::RETURN:
-            //case TokenType::IF:
-            //case TokenType::FOR:
-            //case TokenType::WHILE:
-            //case TokenType::BREAK:
-            //case TokenType::CONTINUE:
+            // case TokenType::RETURN:
+            // case TokenType::IF:
+            // case TokenType::FOR:
+            // case TokenType::WHILE:
+            // case TokenType::BREAK:
+            // case TokenType::CONTINUE:
             case TokenType::PUB:
                 return;
         }
@@ -84,7 +84,7 @@ void Parser::synchronize() {
     }
 }
 
-bool str_in_vector(const std::string &s, const std::vector<std::string> &vec, size_t* index) {
+bool str_in_vector(const std::string &s, const std::vector<std::string> &vec, size_t *index) {
     auto it = std::find(vec.begin(), vec.end(), s);
     if (it != vec.end()) {
         if (index != nullptr) {
@@ -208,7 +208,7 @@ std::shared_ptr<ArrayType> Parser::parse_array_type() {
         size = parse_expression();
 
         // HACK: should probably put this in the typechecker
-        size->inferred_type = std::make_shared<I64>();    
+        size->inferred_type = std::make_shared<I64>();
     }
     consume(TokenType::RBRACKET);
     auto elem_type = parse_type(false);
@@ -257,7 +257,7 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
             return vd;
         }
         case TokenType::USING: {
-            // Type alias 
+            // Type alias
             consume(TokenType::USING);
             std::string alias_name = consume(TokenType::ID).value;
             consume(TokenType::ASSIGN);
@@ -415,8 +415,14 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
     Token start_token = peek(); // Store the start token for line and col
     consume(TokenType::STRUCT);
     std::string name = consume(TokenType::ID).value;
-    declared_structs[name] = std::make_shared<StructType>(
-        name, std::vector<std::pair<std::string, std::shared_ptr<Type>>>{});
+    // Parse optional generic parameters for struct
+    std::vector<std::string> generic_params = try_parse_generic_parameters();
+    this->current_generic_params = generic_params;
+
+    if (generic_params.empty()) {
+        declared_structs[name] = std::make_shared<StructType>(
+            name, std::vector<std::pair<std::string, std::shared_ptr<Type>>>{});
+    }
     consume(TokenType::LBRACE);
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
     std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
@@ -442,13 +448,17 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fmap;
     for (size_t i = 0; i < fields.size(); ++i)
         fmap.push_back({fields[i].first, fields[i].second});
-    auto st = std::make_shared<StructType>(name, fmap);
-    st->methods = methods;
-    declared_structs[name] = st;
+    if (generic_params.empty()) {
+        auto st = std::make_shared<StructType>(name, fmap);
+        st->methods = methods;
+        declared_structs[name] = st;
+    }
     auto struct_decl = std::make_shared<StructDeclaration>(name, fields);
     struct_decl->methods = methods;
     struct_decl->line = start_token.line;
     struct_decl->col = start_token.column;
+    struct_decl->generic_params = generic_params;
+    this->current_generic_params.clear();
     return struct_decl;
 }
 
@@ -460,7 +470,7 @@ std::shared_ptr<UnionDeclaration> Parser::parse_union_declaration() {
         name, std::vector<std::pair<std::string, std::shared_ptr<Type>>>{});
     consume(TokenType::LBRACE);
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
-    
+
     while (peek().type != TokenType::RBRACE) {
         if (peek().type == TokenType::EOF_T) {
             throw ParseError("Unterminated union declaration, expected '}'", peek());
@@ -474,13 +484,13 @@ std::shared_ptr<UnionDeclaration> Parser::parse_union_declaration() {
             consume(TokenType::COMMA);
     }
     consume(TokenType::RBRACE);
-    
+
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fmap;
     for (size_t i = 0; i < fields.size(); ++i)
         fmap.push_back({fields[i].first, fields[i].second});
     auto ut = std::make_shared<UnionType>(name, fmap);
     declared_unions[name] = ut;
-    
+
     auto union_decl = std::make_shared<UnionDeclaration>(name, fields);
     union_decl->line = start_token.line;
     union_decl->col = start_token.column;
@@ -671,8 +681,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                 expr = std::make_shared<ModuleAccess>(module_path, member_name);
                 expr->line = t.line;
                 expr->col = t.column;
-            }
-            else {
+            } else {
                 expr = std::make_shared<VarAccess>(name);
                 expr->line = t.line;
                 expr->col = t.column;
@@ -798,6 +807,21 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
                 return expr;
             }
             case TokenType::LPAREN: {
+                // Check for builtin functions
+                if (auto va = std::dynamic_pointer_cast<VarAccess>(left)) {
+                    auto name = va->name;
+                    if (name == "sizeof" || name == "alignof" || name == "offsetof") {
+                        std::shared_ptr<TypeExpression> type_arg;
+                        std::vector<std::shared_ptr<Expression>> args;
+                        type_arg = std::make_shared<TypeExpression>(parse_type());
+                        args.push_back(type_arg);
+                        consume(TokenType::RPAREN);
+                        expr = std::make_shared<FuncCall>(va, args);
+                        expr->line = t.line;
+                        expr->col = t.column;
+                        return expr;
+                    }
+                }
                 std::vector<std::shared_ptr<Expression>> args;
                 if (peek().type != TokenType::RPAREN) {
                     while (true) {

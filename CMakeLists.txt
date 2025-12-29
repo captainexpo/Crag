@@ -4,14 +4,13 @@ project(Comp LANGUAGES CXX C)
 
 include(FetchContent)
 
-# set(CMAKE_C_COMPILER gcc)
-# set(CMAKE_CXX_COMPILER g++)
-#
 set(CMAKE_BUILD_TYPE Debug)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O1 -g -std=c++20")
 
@@ -40,19 +39,24 @@ execute_process(
     OUTPUT_VARIABLE LLVM_LDFLAGS
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
+
 string(STRIP "${LLVM_LDFLAGS}" LLVM_LDFLAGS_STRIPPED)
 separate_arguments(LLVM_LDFLAGS_LIST NATIVE_COMMAND "${LLVM_LDFLAGS_STRIPPED}")
 target_link_libraries(comp PRIVATE ${LLVM_LDFLAGS_LIST})
 
 
+# find_package(argparse QUIET) 
+#
+# if (NOT argparse_FOUND)
 # find argparse
-FetchContent_Declare(
-  argparse
-  GIT_REPOSITORY https://github.com/p-ranav/argparse.git
-  GIT_TAG v3.2  
-)
+  FetchContent_Declare(
+    argparse
+    GIT_REPOSITORY https://github.com/p-ranav/argparse.git
+    GIT_TAG v3.2  
+  )
 
-FetchContent_MakeAvailable(argparse)
+  FetchContent_MakeAvailable(argparse)
+# endif()
 target_link_libraries(comp PRIVATE argparse)
 
 # --- Runtime Library ---

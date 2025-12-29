@@ -2,7 +2,7 @@
 #ifndef MODULE_RESOLVER_H
 #define MODULE_RESOLVER_H
 
-#include "ast.h"
+#include "ast/ast.h"
 #include "parser.h" // assume you have a Parser class that can parse source text
 #include "utils.h"
 #include <algorithm>

@@ -2,7 +2,7 @@
 #ifndef IR_H
 #define IR_H
 
-#include "../ast.h"
+#include "../ast/ast.h"
 #include "../backend.h"
 #include "../lexer.h"
 #include "../module_resolver.h"

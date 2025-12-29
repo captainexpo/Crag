@@ -1,0 +1,21 @@
+//NAME: Function Pointers
+//DESC:
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn other(x: f32) -> f32 {
+    return 3.5 + x;
+}
+
+fn main() -> i32 {
+    let ptr: fn(f32) -> f32 = &other;
+    let result: f32 = ptr(4.5);
+    printf("%f\n", result);
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//8.000000
+//END EXPECT

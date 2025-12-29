@@ -2,9 +2,9 @@
 #ifndef TYPECHECK_H
 #define TYPECHECK_H
 
-#include "ast.h"
-#include "const_eval.h"
-#include "module_resolver.h"
+#include "../ast/ast.h"
+#include "../const_eval.h"
+#include "../module_resolver.h"
 #include <memory>
 #include <optional>
 #include <string>
@@ -60,7 +60,9 @@ class TypeChecker {
     std::unordered_map<std::string, std::shared_ptr<Type>> m_type_aliases;
 
     std::unordered_map<std::string, std::shared_ptr<Declaration>> m_templates;
-    
+
+    std::unordered_map<std::string, std::shared_ptr<Type>> m_current_generic_types;
+
     std::unordered_map<
         std::string,
         std::vector<std::pair<std::string, std::shared_ptr<FunctionDeclaration>>>>
@@ -69,7 +71,6 @@ class TypeChecker {
 
     std::shared_ptr<Type> m_expected_return_type; // Current function return type
 
-    std::vector<std::shared_ptr<Type>> m_expected_types; // Stack of expected types
     std::unordered_map<std::string, std::shared_ptr<TypeChecker>> m_imported_module_checkers;
 
     // Scope helpers
@@ -87,8 +88,8 @@ class TypeChecker {
 
     void checkNode(const std::shared_ptr<ASTNode> &node);
     void checkStatement(const std::shared_ptr<Statement> &stmt);
-    std::shared_ptr<Type> inferExpression(const std::shared_ptr<Expression> &expr,
-                                         const std::shared_ptr<Type> &expected = nullptr);
+    std::shared_ptr<Type> inferExpression(std::shared_ptr<Expression> &expr,
+                                          const std::shared_ptr<Type> &expected = nullptr);
 
     // Declarations
     void checkFunctionDeclaration(const std::shared_ptr<FunctionDeclaration> &fn);
@@ -101,14 +102,14 @@ class TypeChecker {
     std::shared_ptr<Type> inferVarAccess(const std::shared_ptr<VarAccess> &v);
     std::shared_ptr<Type> inferDereference(const std::shared_ptr<Dereference> &d);
     std::shared_ptr<Type> inferLiteral(const std::shared_ptr<Literal> &lit,
-                                      const std::shared_ptr<Type> &expected = nullptr);
-    std::shared_ptr<Type> inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
-                                           const std::shared_ptr<Type> &expected = nullptr);
-    std::shared_ptr<Type> inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
                                        const std::shared_ptr<Type> &expected = nullptr);
+    std::shared_ptr<Type> inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
+                                            const std::shared_ptr<Type> &expected = nullptr);
+    std::shared_ptr<Type> inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
+                                        const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferUnaryOp(const std::shared_ptr<UnaryOperation> &un);
     std::shared_ptr<Type> inferFuncCall(const std::shared_ptr<FuncCall> &call,
-                                       const std::shared_ptr<Type> &expected = nullptr);
+                                        const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferMethodCall(const std::shared_ptr<MethodCall> &mc);
     std::shared_ptr<Type> inferFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma);
@@ -116,9 +117,14 @@ class TypeChecker {
     std::shared_ptr<Type> inferArrayFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa);
     std::shared_ptr<Type> inferStructInit(const std::shared_ptr<StructInitializer> &init,
-                                         const std::shared_ptr<Type> &expected = nullptr);
-    std::shared_ptr<Type> inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti);
+                                          const std::shared_ptr<Type> &expected = nullptr);
+    std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti);
 
+    std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandSizeOf(const std::shared_ptr<FuncCall> &call);
+    std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandOffsetOf(const std::shared_ptr<FuncCall> &call);
+    std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandAlignOf(const std::shared_ptr<FuncCall> &call);
 };
+
+void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map<std::string, std::shared_ptr<Type>> &generic_map);
 
 #endif // TYPECHECK_H

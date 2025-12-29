@@ -1,0 +1,56 @@
+[
+{
+  "directory": "/Users/captainexpo/Documents/GitHub/Crag/build",
+  "command": "/usr/bin/c++  -I/Users/captainexpo/Documents/GitHub/Crag -I/Users/captainexpo/Documents/GitHub/Crag/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -arch arm64 -I/opt/homebrew/Cellar/llvm/21.1.6/include -std=c++17 -stdlib=libc++ -funwind-tables -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/ast.cpp.o -c /Users/captainexpo/Documents/GitHub/Crag/src/ast.cpp",
+  "file": "/Users/captainexpo/Documents/GitHub/Crag/src/ast.cpp",
+  "output": "CMakeFiles/comp.dir/src/ast.cpp.o"
+},
+{
+  "directory": "/Users/captainexpo/Documents/GitHub/Crag/build",
+  "command": "/usr/bin/c++  -I/Users/captainexpo/Documents/GitHub/Crag -I/Users/captainexpo/Documents/GitHub/Crag/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -arch arm64 -I/opt/homebrew/Cellar/llvm/21.1.6/include -std=c++17 -stdlib=libc++ -funwind-tables -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/backends/llvmcodegen.cpp.o -c /Users/captainexpo/Documents/GitHub/Crag/src/backends/llvmcodegen.cpp",
+  "file": "/Users/captainexpo/Documents/GitHub/Crag/src/backends/llvmcodegen.cpp",
+  "output": "CMakeFiles/comp.dir/src/backends/llvmcodegen.cpp.o"
+},
+{
+  "directory": "/Users/captainexpo/Documents/GitHub/Crag/build",
+  "command": "/usr/bin/c++  -I/Users/captainexpo/Documents/GitHub/Crag -I/Users/captainexpo/Documents/GitHub/Crag/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -arch arm64 -I/opt/homebrew/Cellar/llvm/21.1.6/include -std=c++17 -stdlib=libc++ -funwind-tables -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/compiler.cpp.o -c /Users/captainexpo/Documents/GitHub/Crag/src/compiler.cpp",
+  "file": "/Users/captainexpo/Documents/GitHub/Crag/src/compiler.cpp",
+  "output": "CMakeFiles/comp.dir/src/compiler.cpp.o"
+},
+{
+  "directory": "/Users/captainexpo/Documents/GitHub/Crag/build",
+  "command": "/usr/bin/c++  -I/Users/captainexpo/Documents/GitHub/Crag -I/Users/captainexpo/Documents/GitHub/Crag/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -arch arm64 -I/opt/homebrew/Cellar/llvm/21.1.6/include -std=c++17 -stdlib=libc++ -funwind-tables -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/const_eval.cpp.o -c /Users/captainexpo/Documents/GitHub/Crag/src/const_eval.cpp",
+  "file": "/Users/captainexpo/Documents/GitHub/Crag/src/const_eval.cpp",
+  "output": "CMakeFiles/comp.dir/src/const_eval.cpp.o"
+},
+{
+  "directory": "/Users/captainexpo/Documents/GitHub/Crag/build",
+  "command": "/usr/bin/c++  -I/Users/captainexpo/Documents/GitHub/Crag -I/Users/captainexpo/Documents/GitHub/Crag/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -arch arm64 -I/opt/homebrew/Cellar/llvm/21.1.6/include -std=c++17 -stdlib=libc++ -funwind-tables -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/lexer.cpp.o -c /Users/captainexpo/Documents/GitHub/Crag/src/lexer.cpp",
+  "file": "/Users/captainexpo/Documents/GitHub/Crag/src/lexer.cpp",
+  "output": "CMakeFiles/comp.dir/src/lexer.cpp.o"
+},
+{
+  "directory": "/Users/captainexpo/Documents/GitHub/Crag/build",
+  "command": "/usr/bin/c++  -I/Users/captainexpo/Documents/GitHub/Crag -I/Users/captainexpo/Documents/GitHub/Crag/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -arch arm64 -I/opt/homebrew/Cellar/llvm/21.1.6/include -std=c++17 -stdlib=libc++ -funwind-tables -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/main.cpp.o -c /Users/captainexpo/Documents/GitHub/Crag/src/main.cpp",
+  "file": "/Users/captainexpo/Documents/GitHub/Crag/src/main.cpp",
+  "output": "CMakeFiles/comp.dir/src/main.cpp.o"
+},
+{
+  "directory": "/Users/captainexpo/Documents/GitHub/Crag/build",
+  "command": "/usr/bin/c++  -I/Users/captainexpo/Documents/GitHub/Crag -I/Users/captainexpo/Documents/GitHub/Crag/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -arch arm64 -I/opt/homebrew/Cellar/llvm/21.1.6/include -std=c++17 -stdlib=libc++ -funwind-tables -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/parser.cpp.o -c /Users/captainexpo/Documents/GitHub/Crag/src/parser.cpp",
+  "file": "/Users/captainexpo/Documents/GitHub/Crag/src/parser.cpp",
+  "output": "CMakeFiles/comp.dir/src/parser.cpp.o"
+},
+{
+  "directory": "/Users/captainexpo/Documents/GitHub/Crag/build",
+  "command": "/usr/bin/c++  -I/Users/captainexpo/Documents/GitHub/Crag -I/Users/captainexpo/Documents/GitHub/Crag/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -arch arm64 -I/opt/homebrew/Cellar/llvm/21.1.6/include -std=c++17 -stdlib=libc++ -funwind-tables -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/typecheck.cpp.o -c /Users/captainexpo/Documents/GitHub/Crag/src/typecheck.cpp",
+  "file": "/Users/captainexpo/Documents/GitHub/Crag/src/typecheck.cpp",
+  "output": "CMakeFiles/comp.dir/src/typecheck.cpp.o"
+},
+{
+  "directory": "/Users/captainexpo/Documents/GitHub/Crag/build",
+  "command": "/usr/bin/c++  -I/Users/captainexpo/Documents/GitHub/Crag -I/Users/captainexpo/Documents/GitHub/Crag/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -arch arm64 -I/opt/homebrew/Cellar/llvm/21.1.6/include -std=c++17 -stdlib=libc++ -funwind-tables -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/utils.cpp.o -c /Users/captainexpo/Documents/GitHub/Crag/src/utils.cpp",
+  "file": "/Users/captainexpo/Documents/GitHub/Crag/src/utils.cpp",
+  "output": "CMakeFiles/comp.dir/src/utils.cpp.o"
+}
+]

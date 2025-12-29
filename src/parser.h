@@ -2,7 +2,7 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-#include "ast.h"
+#include "ast/ast.h"
 #include "lexer.h"
 
 #include <map>
