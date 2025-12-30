@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 
 TypeChecker::TypeChecker() { pushScope(); }
 
@@ -129,7 +130,7 @@ bool canExplicitCast(const std::shared_ptr<Type> &from,
 std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
                                   const std::shared_ptr<Type> &to) {
     if (!from || !to)
-        return nullptr;
+        throw std::runtime_error("getCastType: from or to type is null");
     if (from->equals(to))
         return to;
 
@@ -149,7 +150,8 @@ std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
         auto to_ptr = dynamic_cast<PointerType *>(to.get());
         auto from_ptr = dynamic_cast<PointerType *>(from.get());
         if (!to_ptr || !from_ptr)
-            return nullptr;
+            throw std::runtime_error(
+                "getCastType: failed to cast to/from pointer types");
 
         if (from_ptr->base->equals(to_ptr->base)) {
             if (from_ptr->pointer_const && !to_ptr->pointer_const)
@@ -174,13 +176,13 @@ std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
     return nullptr;
 }
 std::string TypeChecker::typeName(const std::shared_ptr<Type> &t) const {
-    return t ? t->str() : "<unknown>";
+    return t ? t->str() : "<no_type>";
 }
 
 std::shared_ptr<Type>
 TypeChecker::resolveType(const std::shared_ptr<Type> &t) {
     if (!t)
-        return nullptr;
+        throw std::runtime_error("resolveType: type is null");
 
     // Resolve bound generics if any (used in instantiation paths)
     if (auto gt = std::dynamic_pointer_cast<GenericType>(t)) {
@@ -197,7 +199,7 @@ TypeChecker::resolveType(const std::shared_ptr<Type> &t) {
     if (auto pt = std::dynamic_pointer_cast<PointerType>(t)) {
         auto bt = resolveType(pt->base);
         if (!bt)
-            return nullptr;
+            throw std::runtime_error("resolveType: failed to resolve pointer base type");
         return std::make_shared<PointerType>(bt, pt->pointer_const);
     }
     if (auto at = std::dynamic_pointer_cast<ArrayType>(t)) {
@@ -206,18 +208,18 @@ TypeChecker::resolveType(const std::shared_ptr<Type> &t) {
             at->length_expr->inferred_type = inferExpression(at->length_expr);
 
         if (!bt)
-            return nullptr;
+            throw std::runtime_error("resolveType: failed to resolve array element type");
         return std::make_shared<ArrayType>(bt, at->length_expr, at->unsized);
     }
     if (auto ft = std::dynamic_pointer_cast<FunctionType>(t)) {
         auto rt = resolveType(ft->ret);
         if (!rt)
-            return nullptr;
+            throw std::runtime_error("resolveType: failed to resolve function return type");
         std::vector<std::shared_ptr<Type>> pts;
         for (const auto &p : ft->params) {
             auto pt = resolveType(p);
             if (!pt)
-                return nullptr;
+                throw std::runtime_error("resolveType: failed to resolve function parameter type");
             pts.push_back(pt);
         }
         return std::make_shared<FunctionType>(pts, rt, ft->variadic);
@@ -247,6 +249,31 @@ TypeChecker::resolveType(const std::shared_ptr<Type> &t) {
             }
 
             return qt; // unknown qualified type
+        }
+    }
+    if (auto tut = std::dynamic_pointer_cast<TemplateInstanceType>(t)) {
+        // Create dummy template instance expression with resolved base and type args
+        auto base_type = resolveType(tut->base);
+        std::vector<std::shared_ptr<Type>> resolved_args;
+        for (const auto &arg : tut->type_args) {
+            auto rat = resolveType(arg);
+            resolved_args.push_back(rat);
+        }
+        if (auto struct_type = std::dynamic_pointer_cast<StructType>(base_type)) {
+            auto ti = std::make_shared<TemplateInstantiation>(struct_type->name, resolved_args);
+            auto pair = inferTemplateInstantiation(ti); // Will instantiate the template
+            auto instantiated_type = pair.first;
+            if (!instantiated_type) {
+                throw TypeCheckError(
+                    nullptr,
+                    "Failed to resolve template instantiation type for: " + tut->str());
+            }
+            return instantiated_type;
+        }
+        else{
+            throw TypeCheckError(
+                nullptr,
+                "Template instantiation base type is not a struct: " + base_type->str());
         }
     }
     // primitive types are already resolved
@@ -353,39 +380,11 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
         module->ast->declarations.end());
 
     for (const auto &sd : struct_decls) {
-        auto fields = std::vector<std::pair<std::string, std::shared_ptr<Type>>>();
-        for (const auto &f : sd->fields) {
-            fields.emplace_back(f.first, resolveType(f.second));
-        }
-        auto it = m_structs.find(sd->name);
-        if (it != m_structs.end()) {
-            it->second->fields = std::move(fields);
-            it->second->methods = sd->methods;
-            it->second->complete = true;
-        } else {
-            throw TypeCheckError(sd, "Internal error: struct " + sd->name + " not found in map");
-        }
-
-        for (const auto &m : sd->methods) {
-
-            for (const auto &ud : union_decls) {
-                auto fields = std::vector<std::pair<std::string, std::shared_ptr<Type>>>();
-                for (const auto &f : ud->fields) {
-                    fields.emplace_back(f.first, resolveType(f.second));
-                }
-                auto it = m_unions.find(ud->name);
-                if (it != m_unions.end()) {
-                    it->second->fields = std::move(fields);
-                    it->second->complete = true;
-                } else {
-                    throw TypeCheckError(ud, "Internal error: union " + ud->name + " not found in map");
-                }
-            }
-            // Type check method bodies
-            checkFunctionDeclaration(m.second);
-        }
+        checkStructDeclaration(sd);
     }
-
+    for (const auto &ud : union_decls) {
+        checkUnionDeclaration(ud);
+    }
     for (const auto &decl : module->ast->declarations) {
         checkNode(decl);
     }
@@ -403,11 +402,11 @@ void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
         return;
     }
     if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(node)) {
-        checkStructDeclaration(sd);
+        // checkStructDeclaration(sd);
         return;
     }
     if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(node)) {
-        checkUnionDeclaration(ud);
+        // checkUnionDeclaration(ud);
         return;
     }
     if (auto ed = std::dynamic_pointer_cast<EnumDeclaration>(node)) {
@@ -426,17 +425,40 @@ void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
 }
 
 void TypeChecker::checkStructDeclaration(
-    const std::shared_ptr<StructDeclaration> &st) {
-    // Already registered the struct type in check(); nothing else to do for
-    // now.
-    (void)st;
+    const std::shared_ptr<StructDeclaration> &sd) {
+    auto fields = std::vector<std::pair<std::string, std::shared_ptr<Type>>>();
+    for (const auto &f : sd->fields) {
+        fields.emplace_back(f.first, resolveType(f.second));
+    }
+    auto it = m_structs.find(sd->name);
+    if (it != m_structs.end()) {
+        it->second->fields = std::move(fields);
+        it->second->methods = sd->methods;
+        it->second->complete = true;
+    } else {
+        throw TypeCheckError(sd, "Internal error: struct " + sd->name + " not found in map");
+    }
+
+    for (const auto &m : sd->methods) {
+
+        // Type check method bodies
+        checkFunctionDeclaration(m.second);
+    }
 }
 
 void TypeChecker::checkUnionDeclaration(
     const std::shared_ptr<UnionDeclaration> &ud) {
-    // Already registered the union type in check(); nothing else to do for
-    // now.
-    (void)ud;
+    auto fields = std::vector<std::pair<std::string, std::shared_ptr<Type>>>();
+    for (const auto &f : ud->fields) {
+        fields.emplace_back(f.first, resolveType(f.second));
+    }
+    auto it = m_unions.find(ud->name);
+    if (it != m_unions.end()) {
+        it->second->fields = std::move(fields);
+        it->second->complete = true;
+    } else {
+        throw TypeCheckError(ud, "Internal error: union " + ud->name + " not found in map");
+    }
 }
 
 void TypeChecker::checkEnumDeclaration(
@@ -470,130 +492,205 @@ void TypeChecker::checkFunctionDeclaration(
 
 void TypeChecker::checkVariableDeclaration(
     const std::shared_ptr<VariableDeclaration> &var) {
-
     const std::string &name = var->name;
+    bool is_global = (m_scopes.size() == 1);
+
+    if (var->var_type)
+        var->var_type = resolveType(var->var_type);
+
+    if (!var->initializer) {
+        if (!insertSymbol(name, var->var_type)) {
+            throw TypeCheckError(var, "Duplicate variable declaration: " + name);
+        }
+        return;
+    }
+
     auto init = var->initializer;
 
-    bool is_global = m_scopes.size() == 1;
-
-    if (!init)
-        goto end;
-
     if (auto expr = std::dynamic_pointer_cast<Expression>(init)) {
-        if (is_global && var->is_const && init) {
-            // Global variable initializer must be a constant expression
-            std::optional<std::shared_ptr<VariableDeclaration>> const_val = m_const_eval.evaluateVariableDeclaration(var);
+
+        if (is_global) {
+            if (!var->is_const) {
+                throw TypeCheckError(
+                    var,
+                    "Global variable " + name +
+                        " must be declared const if it has an initializer");
+            }
+
+            auto const_val =
+                m_const_eval.evaluateVariableDeclaration(var);
+
             if (!m_const_eval.ok()) {
                 for (const auto &e : m_const_eval.errors()) {
                     throw TypeCheckError(e.first, e.second);
                 }
-                goto end;
             }
-            if (const_val && const_val->get()->initializer) {
-                var->initializer = const_val->get()->initializer;
-                expr = std::dynamic_pointer_cast<Expression>(var->initializer);
-            } else {
-                throw TypeCheckError(var, "Failed to evaluate constant initializer for variable " + name);
-                goto end;
+
+            if (!const_val || !const_val->get()->initializer) {
+                throw TypeCheckError(
+                    var,
+                    "Failed to evaluate constant initializer for variable " + name);
             }
-        } else if (is_global && init) {
-            throw TypeCheckError(var, "Global variable " + name + " must be declared const if it has an initializer");
-            goto end;
+
+            var->initializer = const_val->get()->initializer;
+            expr = std::dynamic_pointer_cast<Expression>(var->initializer);
         }
 
-        var->var_type = resolveType(var->var_type);
-
-        // Pass expected type to initializer inference
-        auto init_type = resolveType(inferExpression(expr, var->var_type));
-
-        if (!var->var_type) {
-            var->var_type = init_type; // Type inference
-        }
-        var->var_type->is_const = var->is_const;
-
-        // If is array literal and our var_type is array with unspecified size, infer size
-        if (auto arr_lit = std::dynamic_pointer_cast<ArrayLiteral>(expr)) {
-            if (auto arr_type = std::dynamic_pointer_cast<ArrayType>(var->var_type)) {
-                if (arr_type->unsized) {
-                    auto i64 = std::make_shared<I64>();
-                    arr_type->length_expr = std::make_shared<Literal>(static_cast<int64_t>(arr_lit->elements.size()), i64);
-                    // std::cout << "Inferred array length for variable " << name << ": "
-                    //           << arr_lit->elements.size() << "\n";
-                    // HACK: This is kinda dirty
-                    arr_type->length_expr->inferred_type = i64;
-
-                    arr_type->unsized = false;
-                    var->var_type = arr_type;
-                } else {
-                    auto constantExpression = m_const_eval.evaluateExpression(arr_type->length_expr);
-                    if (constantExpression != std::nullopt && constantExpression.value() != nullptr) {
-                        arr_type->length_expr = constantExpression.value();
-                    }
-                    if (!m_const_eval.ok()) {
-                        for (const auto &e : m_const_eval.errors()) {
-                            throw TypeCheckError(e.first, e.second);
-                        }
-                        goto end;
-                    }
-                    int64_t expected_length = -1;
-                    if (constantExpression) {
-                        if (auto lit = std::dynamic_pointer_cast<Literal>(arr_type->length_expr)) {
-                            if (auto val = std::get_if<int64_t>(&lit->value)) {
-                                expected_length = *val;
-                            }
-                        } else {
-                            throw TypeCheckError(arr_type->length_expr, "Array length expression did not evaluate to a literal");
-                            goto end;
-                        }
-                    }
-                    auto lit_len = static_cast<int64_t>(arr_lit->elements.size());
-                    if (expected_length != lit_len) {
-                        throw TypeCheckError(arr_lit, "Array literal length mismatch for variable " + name +
-                                                          ": expected " + std::to_string(expected_length) +
-                                                          ", got " + std::to_string(arr_lit->elements.size()));
-                        goto end;
-                    }
-                }
-            }
-        }
+        auto init_type =
+            resolveType(inferExpression(expr, var->var_type));
 
         if (!init_type) {
-            std::cerr << "DEBUG: init = " << init->toString() << "\n";
-            throw TypeCheckError(init, "Failed to infer type of initializer for variable " + name);
-            goto end;
+            throw TypeCheckError(
+                init,
+                "Failed to infer type of initializer for variable " + name);
+        }
+
+        // Type inference for variable
+        if (!var->var_type) {
+            var->var_type = init_type;
+        }
+
+        var->var_type->is_const = var->is_const;
+
+        if (auto arr_lit = std::dynamic_pointer_cast<ArrayLiteral>(expr)) {
+            if (auto arr_type =
+                    std::dynamic_pointer_cast<ArrayType>(var->var_type)) {
+
+                handleArrayLiteralAssignment(
+                    name, arr_lit, arr_type);
+            }
         }
 
         if (!init_type->equals(var->var_type)) {
             if (canImplicitCast(init_type, var->var_type)) {
-                var->initializer = std::make_shared<TypeCast>(expr, var->var_type,
-                                                              CastType::Normal);
+                var->initializer =
+                    std::make_shared<TypeCast>(
+                        expr, var->var_type, CastType::Normal);
             } else if (canExplicitCast(init_type, var->var_type)) {
-                throw TypeCheckError(init, "Explicit cast needed in initializer for variable " + name +
-                                               ": cannot implicitly convert " + typeName(init_type) +
-                                               " to " + typeName(var->var_type));
-                goto end;
+                throw TypeCheckError(
+                    init,
+                    "Explicit cast needed in initializer for variable " + name +
+                        ": cannot implicitly convert " +
+                        typeName(init_type) + " to " +
+                        typeName(var->var_type));
             } else {
-                throw TypeCheckError(var, "Type mismatch in initializer for variable " + name +
-                                              ": expected " + typeName(var->var_type) + " but got " +
-                                              typeName(init_type));
-                goto end;
+                throw TypeCheckError(
+                    var,
+                    "Type mismatch in initializer for variable " + name +
+                        ": expected " + typeName(var->var_type) +
+                        " but got " + typeName(init_type));
             }
         }
-    } else if (auto si = std::dynamic_pointer_cast<StructInitializer>(init)) {
+    } else if (auto si =
+                   std::dynamic_pointer_cast<StructInitializer>(init)) {
+
         auto t = inferStructInit(si);
         if (!t || !t->equals(var->var_type)) {
-            throw TypeCheckError(init, "Type mismatch in initializer for variable " + name);
-            goto end;
+            throw TypeCheckError(
+                init,
+                "Type mismatch in initializer for variable " + name);
         }
     } else {
-        throw TypeCheckError(init, "Unsupported initializer node for variable " + name);
-        goto end;
+        throw TypeCheckError(
+            init,
+            "Unsupported initializer node for variable " + name);
     }
 
-end:
     if (!insertSymbol(name, var->var_type)) {
-        throw TypeCheckError(var, "Duplicate variable declaration: " + name);
+        throw TypeCheckError(
+            var,
+            "Duplicate variable declaration: " + name);
     }
+}
+
+void TypeChecker::handleArrayLiteralAssignment(
+    const std::string &name,
+    const std::shared_ptr<ArrayLiteral> &arr_lit,
+    const std::shared_ptr<ArrayType> &arr_type) {
+    int64_t final_len = -1;
+
+    // --------------------------------------------------
+    // Determine final_len
+    // --------------------------------------------------
+
+    if (arr_type->unsized) {
+        final_len = static_cast<int64_t>(arr_lit->elements.size());
+    } else {
+        auto evaluated =
+            m_const_eval.evaluateExpression(arr_type->length_expr);
+
+        if (!m_const_eval.ok()) {
+            for (const auto &e : m_const_eval.errors()) {
+                throw TypeCheckError(e.first, e.second);
+            }
+        }
+
+        if (evaluated == std::nullopt) {
+            throw TypeCheckError(
+                arr_type->length_expr,
+                "Failed to evaluate array length expression");
+        }
+
+        auto lit =
+            std::dynamic_pointer_cast<Literal>(*std::move(evaluated));
+
+        if (!lit) {
+            throw TypeCheckError(
+                arr_type->length_expr,
+                "Array length was not a constant expression");
+        }
+
+        if (auto v = std::get_if<int64_t>(&lit->value))
+            final_len = *v;
+        else if (auto v = std::get_if<uint64_t>(&lit->value))
+            final_len = static_cast<int64_t>(*v);
+    }
+
+    if (final_len < 0) {
+        throw TypeCheckError(
+            arr_type->length_expr,
+            "Array length cannot be negative");
+    }
+
+    // --------------------------------------------------
+    // Normalize literal to final_len
+    // --------------------------------------------------
+
+    int64_t lit_len = static_cast<int64_t>(arr_lit->elements.size());
+
+    if (lit_len > final_len) {
+        throw TypeCheckError(
+            arr_lit,
+            "Array literal length mismatch for variable " + name +
+                ": expected " + std::to_string(final_len) +
+                ", got " + std::to_string(lit_len));
+    }
+
+    while (lit_len < final_len) {
+        auto null_lit =
+            std::make_shared<Literal>(
+                0, std::make_shared<NullType>());
+        null_lit->inferred_type =
+            std::make_shared<NullType>();
+
+        arr_lit->elements.push_back(null_lit);
+        ++lit_len;
+    }
+
+    // --------------------------------------------------
+    // Normalize type to final_len
+    // --------------------------------------------------
+
+    auto i64 = std::make_shared<I64>();
+    auto len_lit =
+        std::make_shared<Literal>(final_len, i64);
+    len_lit->inferred_type = i64;
+
+    arr_type->length_expr = len_lit;
+    arr_type->actualSize = final_len;
+    arr_type->unsized = false;
+
+    arr_lit->len = final_len;
 }
 
 void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
@@ -747,7 +844,7 @@ std::shared_ptr<Type>
 TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
                              const std::shared_ptr<Type> &expected) {
     if (!expr)
-        return nullptr;
+        throw TypeCheckError(expr, "Cannot infer type of null expression");
     if (auto va = std::dynamic_pointer_cast<VarAccess>(expr))
         return inferVarAccess(va);
     if (auto lit = std::dynamic_pointer_cast<Literal>(expr))
@@ -857,14 +954,14 @@ TypeChecker::inferTypeCast(const std::shared_ptr<TypeCast> &tc) {
     }
     auto ot = inferExpression(tc->expr);
     if (!ot)
-        return nullptr;
+        throw TypeCheckError(tc, "Failed to infer type of expression in type cast");
+
     if (canExplicitCast(ot, tc->target_type)) {
         tc->inferred_type = resolveType(tc->target_type);
         return tc->target_type;
     }
     throw TypeCheckError(tc, "Invalid type cast from " + typeName(ot) + " to " +
                                  tc->target_type->str());
-    return nullptr;
 }
 
 std::shared_ptr<Type>
@@ -885,19 +982,15 @@ TypeChecker::inferLiteral(const std::shared_ptr<Literal> &lit,
         throw TypeCheckError(lit, "Unknown literal type");
     }
 
-    // Use expected type for numeric literals when possible
     if (expected && expected->isNumeric() && lit->lit_type->isNumeric()) {
-        // Check if we can use the expected type directly
         if (canImplicitCast(preType, expected)) {
-
-            uint64_t lit_val = getLitValue(lit);
-
-            lit->lit_type = expected;
-            lit->inferred_type = expected;
-
-            // Update the literal value to match the expected type
-            setLitVal(lit, lit_val);
-            return expected;
+            auto casted = m_const_eval.castLiteral(lit, expected);
+            if (casted) {
+                lit->value = casted->value;
+                lit->lit_type = expected;
+                lit->inferred_type = expected;
+                return expected;
+            }
         }
     }
 
@@ -925,7 +1018,8 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
         // Pass expected element type to each element
         auto t = inferExpression(el, expected_elem ? expected_elem : elem_type);
         if (!t)
-            return nullptr;
+            throw TypeCheckError(al, "Failed to infer type of array literal element");
+
         if (!elem_type) {
             elem_type = t;
         } else {
@@ -942,7 +1036,6 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
                 } else {
                     throw TypeCheckError(al, "Array literal element type mismatch: " +
                                                  typeName(elem_type) + " vs " + typeName(t));
-                    return nullptr;
                 }
             }
         }
@@ -961,7 +1054,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
     auto lt = resolveType(inferExpression(bin->left));
     auto rt = resolveType(inferExpression(bin->right));
     if (!lt || !rt)
-        return nullptr;
+        throw TypeCheckError(bin, "Failed to infer types of binary operation operands");
 
     // simple numeric ops
     if (bin->op == "+" || bin->op == "-" || bin->op == "*" || bin->op == "/" || bin->op == "%" ||
@@ -971,7 +1064,6 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
         if (!lt->isGeneralNumeric() || !rt->isGeneralNumeric()) { // Allow pointers here
             throw TypeCheckError(bin, "Arithmetic operators require numeric operands: got " +
                                           typeName(lt) + " " + bin->op + " " + typeName(rt));
-            return nullptr;
         }
         if (!lt->equals(rt)) {
             // try implicit cast of right to left
@@ -983,7 +1075,6 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
             } else {
                 throw TypeCheckError(bin, "Arithmetic operator type mismatch: " + typeName(lt) + " " +
                                               bin->op + " " + typeName(rt));
-                return nullptr;
             }
         }
         bin->inferred_type = resolveType(lt);
@@ -996,7 +1087,6 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
             !dynamic_cast<Boolean *>(rt.get())) {
             throw TypeCheckError(bin, "Logical operators require boolean operands: got " +
                                           typeName(lt) + " " + bin->op + " " + typeName(rt));
-            return nullptr;
         }
         auto b = std::make_shared<Boolean>();
         bin->inferred_type = resolveType(b);
@@ -1010,7 +1100,6 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
             !canImplicitCast(lt, rt)) {
             throw TypeCheckError(bin, "Comparison operands must have same type: " + typeName(lt) +
                                           " vs " + typeName(rt));
-            return nullptr;
         } else if (!lt->equals(rt)) {
             // try implicit cast
             if (canImplicitCast(rt, lt)) {
@@ -1034,7 +1123,6 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
               std::dynamic_pointer_cast<ModuleAccess>(bin->left))) {
             throw TypeCheckError(bin->left,
                                  "Left operand of assignment is not an lvalue: " + bin->left->str());
-            return nullptr;
         }
         if (lt->is_const) {
             throw TypeCheckError(bin->left, "Cannot assign to const value");
@@ -1043,12 +1131,12 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
             // make sure we're not assigning to a const pointer
             auto pt = inferExpression(deref->pointer);
             if (!pt)
-                return nullptr;
+                throw TypeCheckError(deref->pointer,
+                                     "Failed to infer type of pointer in dereference");
             auto ptype = std::dynamic_pointer_cast<PointerType>(pt);
             if (!ptype) {
                 throw TypeCheckError(deref->pointer,
                                      "Dereference of non-pointer type: " + typeName(pt));
-                return nullptr;
             }
             if (ptype->pointer_const) {
                 throw TypeCheckError(deref->pointer, "Cannot modify value through const pointer");
@@ -1062,7 +1150,6 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
             }
             throw TypeCheckError(bin,
                                  "Assignment type mismatch: " + typeName(lt) + " = " + typeName(rt));
-            return nullptr;
         }
         bin->inferred_type = resolveType(lt);
         return lt;
@@ -1075,7 +1162,7 @@ std::shared_ptr<Type>
 TypeChecker::inferUnaryOp(const std::shared_ptr<UnaryOperation> &un) {
     auto ot = inferExpression(un->operand);
     if (!ot)
-        return nullptr;
+        throw TypeCheckError(un, "Failed to infer type of unary operation operand");
 
     if (un->op == "-" || un->op == "+" || un->op == "~") {
         // numeric
@@ -1102,7 +1189,8 @@ std::shared_ptr<Type>
 TypeChecker::inferDereference(const std::shared_ptr<Dereference> &d) {
     auto ot = inferExpression(d->pointer);
     if (!ot)
-        return nullptr;
+        throw TypeCheckError(d, "Failed to infer type of pointer in dereference");
+
     auto pt = std::dynamic_pointer_cast<PointerType>(ot);
     if (!pt) {
         throw TypeCheckError(d, "Dereference of non-pointer type: " + typeName(ot));
@@ -1115,7 +1203,7 @@ std::shared_ptr<Type>
 TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
     auto bt = inferExpression(mc->object);
     if (!bt)
-        return nullptr;
+        throw TypeCheckError(mc, "Failed to infer type of method call object");
     auto st = std::dynamic_pointer_cast<StructType>(bt);
     if (!st) {
         auto pt = std::dynamic_pointer_cast<PointerType>(bt);
@@ -1137,7 +1225,6 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
         throw TypeCheckError(mc, "Method call argument count mismatch: expected " +
                                      std::to_string(ftype->params.size() - 1) + " got " +
                                      std::to_string(mc->args.size()));
-        return nullptr;
     }
     size_t n = ftype->params.size();
     for (size_t i = 0; i < mc->args.size(); ++i) {
@@ -1166,7 +1253,7 @@ TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call,
 
     auto ft = inferExpression(call->func);
     if (!ft)
-        return nullptr;
+        throw TypeCheckError(call, "Failed to infer type of function in function call");
     ftype = std::dynamic_pointer_cast<FunctionType>(ft);
     if (!ftype) {
         if (auto pt = std::dynamic_pointer_cast<PointerType>(ft)) {
@@ -1350,7 +1437,8 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
         }
         auto typeActual = inferExpression(p.second);
         if (!typeActual)
-            return nullptr;
+            throw TypeCheckError(init, "Failed to infer type of struct " + st->name +
+                                           " field " + p.first + " initializer");
         if (!typeActual->equals(fieldType)) {
             if (canImplicitCast(typeActual, fieldType)) {
                 p.second = std::make_shared<TypeCast>(p.second, fieldType, CastType::Normal);

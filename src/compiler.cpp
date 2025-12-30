@@ -51,7 +51,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     auto moduleResolver = ModuleResolver(path.parent_path());
     auto mod = moduleResolver.loadModule(path.filename().string());
 
-    // std::cout << mod->ast->toString();
+    std::cout << mod->ast->toString();
 
     auto typeChecker = TypeChecker();
 
@@ -68,8 +68,8 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
         return nullptr;
     }
     //
-    // std::cout << "after type checking:\n";
-    // std::cout << mod->ast->toString();
+    std::cout << "after type checking:\n";
+    std::cout << mod->ast->toString();
     //
 
     if (moduleResolver.hasDependencyCycle()) {

@@ -37,6 +37,7 @@ enum class TypeKind {
     ErrorUnion,
     Unknown,
     Qualified, // For unknown types from imported modules
+    TemplateInstanceType,
 
     // Categorical types
     Numeric,
@@ -354,6 +355,7 @@ struct ArrayType : Type {
     TypeKind kind() const override { return TypeKind::Array; }
     std::shared_ptr<Type> element_type;
     std::shared_ptr<Expression> length_expr;
+    size_t actualSize = 0; // Filled in during type checking for sized arrays
     bool unsized;
 
     ArrayType(std::shared_ptr<Type> b, std::shared_ptr<Expression> len, bool us)
@@ -449,6 +451,51 @@ enum class GenericConstraintKind {
     Signed,
     Floating,
     Pointer,
+};
+
+
+struct TemplateInstanceType  : Type {
+    std::shared_ptr<Type> base;
+    std::vector<std::shared_ptr<Type>> type_args;
+
+    TemplateInstanceType(std::shared_ptr<Type> b,
+                         std::vector<std::shared_ptr<Type>> ta)
+        : base(std::move(b)), type_args(std::move(ta)) {}
+
+    std::string str() const {
+        std::string result = base->str() + "::<";
+        for (size_t i = 0; i < type_args.size(); ++i) {
+            if (i > 0)
+                result += ", ";
+            result += type_args[i]->str();
+        }
+        result += ">";
+        return result;
+    }
+
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        auto o = dynamic_cast<TemplateInstanceType *>(other.get());
+        if (!o)
+            return false;
+        if (!base->equals(o->base))
+            return false;
+        if (type_args.size() != o->type_args.size())
+            return false;
+        for (size_t i = 0; i < type_args.size(); ++i)
+            if (!type_args[i]->equals(o->type_args[i]))
+                return false;
+        return true;
+    }
+
+    std::shared_ptr<Type> copy() const override {
+        std::vector<std::shared_ptr<Type>> arg_copies;
+        for (const auto &arg : type_args) {
+            arg_copies.push_back(arg->copy());
+        }
+        return std::make_shared<TemplateInstanceType>(base->copy(), arg_copies);
+    }
+
+    TypeKind kind() const override { return TypeKind::TemplateInstanceType; }
 };
 
 struct GenericType : Type {
@@ -1193,6 +1240,7 @@ struct StructDeclaration : Declaration {
     std::string name;
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
     std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
+    std::vector<std::string> generic_params;
 
     std::pair<std::string, std::shared_ptr<Type>>
     getField(const std::string &fname) const {

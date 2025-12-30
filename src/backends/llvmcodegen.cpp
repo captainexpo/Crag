@@ -1,5 +1,6 @@
 #include "llvmcodegen.h"
 #include "../module_resolver.h"
+#include <array>
 #include <filesystem>
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
@@ -1157,24 +1158,12 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
     auto elemType = getLLVMType(arrayType->element_type);
     int numElements = arrayLit->len;
 
-    // Generate actual length value
-    llvm::Value* actualSize = generateExpression(arrayType->length_expr);
-    if (!actualSize) {
-        throw CodeGenError(arrayLit, "Failed to generate length for array literal");
-    }
-    if (!actualSize->getType()->isIntegerTy()) {
-        throw CodeGenError(arrayLit, "Array length expression did not evaluate to integer type");
-    }
-    if (actualSize->getType() != llvm::Type::getInt64Ty(context)) {
-        actualSize = m_builder.CreateZExt(actualSize, llvm::Type::getInt64Ty(context), "arraylenzext");
-    }
-
     // Allocate the raw array: [N x elemType]
     auto arrayLLVMType = getLLVMType(arrayType);          // struct { ptr, i64 }
     auto arrayLitType = llvm::ArrayType::get(elemType, numElements);
     auto rawArrAlloc = m_builder.CreateAlloca(arrayLitType, nullptr, "arraylit");
     rawArrAlloc->setAlignment(llvm::Align(alignof(void*)));
-    
+
     // Store elements in array using correct GEP (2 indices for array)
     for (int i = 0; i < numElements; i++) {
         llvm::Value* elemVal = generateExpression(arrayLit->elements[i]);
@@ -1196,7 +1185,7 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
         { llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
           llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1) }
     );
-    m_builder.CreateStore(actualSize, lengthPtr);
+    m_builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), numElements), lengthPtr);
 
     // Store pointer to raw array into struct (cast to i8* or element pointer type)
     llvm::Value* dataPtr = m_builder.CreateGEP(

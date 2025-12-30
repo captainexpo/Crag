@@ -1,0 +1,20 @@
+//NAME: Correct casting
+//DESC:
+//BEGIN CODE
+
+extern fn printf(str: *u8, ...) -> i32;
+
+fn main(argc: i32, argv: **u8) -> i32 {
+    let a: f32 = 5;
+    let b: i32 = 3.5;
+    printf("%f\n", a);
+    printf("%d\n", b);
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//5.000000
+//3
+//END EXPECT
+

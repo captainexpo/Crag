@@ -119,6 +119,10 @@ class TypeChecker {
     std::shared_ptr<Type> inferStructInit(const std::shared_ptr<StructInitializer> &init,
                                           const std::shared_ptr<Type> &expected = nullptr);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti);
+    void handleArrayLiteralAssignment(
+        const std::string &name,
+        const std::shared_ptr<ArrayLiteral> &arr_lit,
+        const std::shared_ptr<ArrayType> &arr_type);
 
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandSizeOf(const std::shared_ptr<FuncCall> &call);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandOffsetOf(const std::shared_ptr<FuncCall> &call);

@@ -17,6 +17,7 @@ public:
 
   std::optional<ExprPtr> evaluateExpression(const ExprPtr &expr);
   std::optional<std::shared_ptr<VariableDeclaration>> evaluateVariableDeclaration(const std::shared_ptr<VariableDeclaration> &var);
+  std::shared_ptr<Literal> castLiteral(const LiteralPtr &lit, const std::shared_ptr<Type> &targetType);
   const std::vector<std::pair<ASTNodePtr, std::string>> &errors() const { return m_errors; }
   bool ok() const { return m_errors.empty(); }
 

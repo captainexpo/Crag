@@ -551,3 +551,26 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
 
     return std::nullopt;
 }
+
+std::shared_ptr<Literal> ConstEvaluator::castLiteral(const LiteralPtr &lit, const std::shared_ptr<Type> &targetType) {
+    auto lit_type = lit->lit_type;
+    if (!canExplicitCast(lit_type, targetType)) {
+        error(lit, "Invalid constant cast from " + lit_type->str() + " to " +
+                        targetType->str());
+        return nullptr; 
+    }
+    // Create a TypeCast node to reuse existing logic
+    auto typeCastNode = std::make_shared<TypeCast>(lit, targetType, CastType::Normal);
+    auto castedLiteralOpt = evaluateExpression(typeCastNode);
+    if (!castedLiteralOpt) {
+        error(lit, "Failed to cast literal from " + lit_type->str() + " to " +
+                        targetType->str());
+        return nullptr; 
+    }
+    auto castedLiteral = std::dynamic_pointer_cast<Literal>(*castedLiteralOpt);
+    if (!castedLiteral) {
+        error(lit, "Casted expression is not a literal");
+        return nullptr;
+    }
+    return castedLiteral;
+}

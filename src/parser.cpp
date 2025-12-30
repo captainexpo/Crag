@@ -126,10 +126,10 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
                 t = std::make_shared<GenericType>(name);
                 break;
             }
-            if (peek(1).type == TokenType::DOUBLE_COLON) {
+            if (peek(1).type == TokenType::COLON) {
                 std::vector<std::string> path;
                 path.push_back(consume(TokenType::ID).value);
-                while (match({TokenType::DOUBLE_COLON})) {
+                while (match({TokenType::COLON})) {
                     path.push_back(consume(TokenType::ID).value);
                 }
                 auto b = path.back();
@@ -160,6 +160,22 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
         consume(TokenType::BANG);
         auto error_type = parse_type();
         return std::make_shared<ErrorUnionType>(t, error_type);
+    }
+    if (peek().type == TokenType::DOUBLE_COLON) {
+        // Template instance
+        consume(TokenType::DOUBLE_COLON);
+        consume(TokenType::LT);
+        std::vector<std::shared_ptr<Type>> type_args;
+        while (true) {
+            type_args.push_back(parse_type());
+            if (peek().type == TokenType::COMMA)
+                consume(TokenType::COMMA);
+            else
+                break;
+        }
+        consume(TokenType::GT);
+        t = std::make_shared<TemplateInstanceType>(t, type_args);
+
     }
     return t;
 }
@@ -459,6 +475,9 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
     struct_decl->col = start_token.column;
     struct_decl->generic_params = generic_params;
     this->current_generic_params.clear();
+    if (!generic_params.empty()) {
+        declared_structs[name] = std::make_shared<StructType>(name);
+    }
     return struct_decl;
 }
 
@@ -645,7 +664,6 @@ std::shared_ptr<Expression> Parser::parse_nud() {
             return expr;
         }
         case TokenType::ID: {
-
             std::string name = t.value;
             if (peek().type == TokenType::DOUBLE_COLON) {
                 if (peek(1).type == TokenType::LT) {
@@ -664,6 +682,22 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                     expr = std::make_shared<TemplateInstantiation>(name, type_args);
                     expr->line = t.line;
                     expr->col = t.column;
+                    // Check for struct initializer after template instantiation
+                    if (peek().type == TokenType::LBRACE) {
+                        consume(TokenType::LBRACE);
+                        std::map<std::string, std::shared_ptr<Expression>> field_values;
+                        while (peek().type != TokenType::RBRACE) {
+                            std::string fname = consume(TokenType::ID).value;
+                            consume(TokenType::COLON);
+                            field_values[fname] = parse_expression();
+                            if (peek().type == TokenType::COMMA)
+                                consume(TokenType::COMMA);
+                        }
+                        consume(TokenType::RBRACE);
+                        expr = std::make_shared<StructInitializer>(expr, field_values);
+                        expr->line = t.line;
+                        expr->col = t.column;
+                    }
                     return expr;
                 }
                 // Module access

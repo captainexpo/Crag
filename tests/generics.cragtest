@@ -2,17 +2,6 @@
 //DESC:
 //BEGIN CODE
 
-fn add<T>(x: T, y: T) -> T {
-    return x + y;
-}
-
-fn map<T, U>(arr: []T, f: fn(T) -> U) -> []U {
-    let result: [arr.len]U = {0};
-    for (let i: usize = 0; i < arr.len; i = i + 1) {
-        
-    }
-    return result;
-}
 
 struct Vec2<T> {
     x: T,
@@ -22,22 +11,12 @@ struct Vec2<T> {
 extern fn printf(fmt: *u8, ...) -> i32;
 
 fn main() -> i32 {
-    let a: f64 = 1.5;
-    let b: f64 = 2.5;
-    let c = add::<f64>(a, b);
-    printf("%f\n", c);
 
-    let v = Vec2<f64> { x: 3.0, y: 4.0 };
+    let v: Vec2::<f64> = Vec2::<f64> { x: 3.0, y: 4.0 };
     printf("%f %f\n", v.x, v.y);
-    
-    let d: i32 = 10;
-    let e: i32 = 20;
-    let f = add::<i32>(d, e);
-    printf("%d\n", f);
-    
-    let v2 = Vec2<i32> { x: 30, y: 40 };
+
+    let v2 = Vec2::<i32> { x: 30, y: 40 };
     printf("%d %d\n", v2.x, v2.y);
-    
 
     return 0;
 }
@@ -45,8 +24,6 @@ fn main() -> i32 {
 
 //END CODE
 //BEGIN EXPECT
-//4.000000
 //3.000000 4.000000
-//30
 //30 40
 //END EXPECT

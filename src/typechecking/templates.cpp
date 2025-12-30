@@ -5,18 +5,6 @@
 #include <cstring>
 #include <memory>
 
-std::string sanitizeName(const std::string &name) {
-    std::string sanitized;
-    for (char c : name) {
-        if (isalnum(c) || c == '_') {
-            sanitized += c;
-        } else {
-            sanitized += '_';
-        }
-    }
-    return sanitized;
-}
-
 std::string mangleTemplateName(const std::string &base, const std::vector<std::shared_ptr<Type>> &params) {
     std::string mangled = base + "<";
     for (size_t i = 0; i < params.size(); ++i) {
@@ -25,7 +13,7 @@ std::string mangleTemplateName(const std::string &base, const std::vector<std::s
             mangled += ",";
     }
     mangled += ">";
-    return sanitizeName(mangled);
+    return mangled;
 }
 
 // Returns type of expression, and replacement for the instantiation
@@ -78,6 +66,46 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         return std::make_pair(
             ti->inferred_type,
             std::make_shared<VarAccess>(new_name));
+    }
+    else if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(to_instantiate)) {
+        auto new_name = mangleTemplateName(sd->name, params);
+        // Check if already instantiated
+        auto it = m_structs.find(new_name);
+        if (it != m_structs.end()) {
+            ti->inferred_type = it->second;
+            return std::make_pair(
+                ti->inferred_type,
+                std::make_shared<TypeExpression>(ti->inferred_type));
+        }
+
+        std::shared_ptr<StructDeclaration> declCopy = std::dynamic_pointer_cast<StructDeclaration>(sd->copy());
+        if (sd->generic_params.size() != params.size()) {
+            throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + sd->name +
+                                         ": expected " + std::to_string(sd->generic_params.size()) +
+                                         ", got " + std::to_string(params.size()));
+        }
+        std::unordered_map<std::string, std::shared_ptr<Type>> generic_map;
+        for (size_t i = 0; i < sd->generic_params.size(); ++i) {
+            generic_map[sd->generic_params[i]] = params[i];
+        }
+        replaceGenericTypes(declCopy, generic_map);
+        declCopy->name = new_name;
+
+
+        auto st = std::make_shared<StructType>(new_name);
+        st->complete = false;
+        m_structs[new_name] = st;
+        insertSymbol(new_name, st);
+
+        checkStructDeclaration(declCopy);
+        current_module->ast->declarations.push_back(declCopy);
+        std::cout << "Instantiated struct template: " << sd->name << " as " << new_name << "\n";
+
+        ti->inferred_type = m_structs[new_name];
+
+        return std::make_pair(
+            ti->inferred_type,
+            std::make_shared<TypeExpression>(ti->inferred_type));
     }
     throw TypeCheckError(ti, "Unsupported template kind: " + to_instantiate->str());
 }
@@ -303,6 +331,16 @@ void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map
     if (auto ti = std::dynamic_pointer_cast<TemplateInstantiation>(node)) {
         for (auto &type_arg : ti->type_args) {
             replaceInType(type_arg, generic_map);
+        }
+        return;
+    }
+
+    if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(node)) {
+        for (auto &field : sd->fields) {
+            replaceInType(field.second, generic_map);
+        }
+        for (auto &method_pair : sd->methods) {
+            replaceGenericTypes(method_pair.second, generic_map);
         }
         return;
     }
