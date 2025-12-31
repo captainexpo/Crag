@@ -97,12 +97,14 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         m_structs[new_name] = st;
         insertSymbol(new_name, st);
 
+        auto old_expected_return_type = m_expected_return_type;
+        m_expected_return_type = nullptr;
         checkStructDeclaration(declCopy);
         current_module->ast->declarations.push_back(declCopy);
         std::cout << "Instantiated struct template: " << sd->name << " as " << new_name << "\n";
 
         ti->inferred_type = m_structs[new_name];
-
+        m_expected_return_type = old_expected_return_type;
         return std::make_pair(
             ti->inferred_type,
             std::make_shared<TypeExpression>(ti->inferred_type));
@@ -115,6 +117,22 @@ void replaceInType(std::shared_ptr<Type> &type, const std::unordered_map<std::st
         auto it = generic_map.find(gt->name);
         if (it != generic_map.end()) {
             type = it->second;
+        }
+    }else if (auto eu = std::dynamic_pointer_cast<ErrorUnionType>(type)) {
+        replaceInType(eu->errorType, generic_map);
+        replaceInType(eu->valueType, generic_map);
+    }
+    else if (auto ti = std::dynamic_pointer_cast<TemplateInstanceType>(type)) {
+        for (auto &arg : ti->type_args) {
+            replaceInType(arg, generic_map);
+        }
+
+        if (auto base_struct = std::dynamic_pointer_cast<StructType>(ti->base)) {
+            std::string mangled_name = mangleTemplateName(base_struct->name, ti->type_args);
+
+            type = std::make_shared<StructType>(mangled_name);
+        } else {
+            replaceInType(ti->base, generic_map);
         }
     } else if (auto ft = std::dynamic_pointer_cast<FunctionType>(type)) {
         for (auto &param : ft->params) {
@@ -129,19 +147,27 @@ void replaceInType(std::shared_ptr<Type> &type, const std::unordered_map<std::st
         for (auto &field : st->fields) {
             replaceInType(field.second, generic_map);
         }
+        for (auto &method : st->methods) {
+            std::cout << "Replacing in method: " << method.first << "\n";
+            replaceGenericTypes(method.second, generic_map);
+        }
     } else if (auto ut = std::dynamic_pointer_cast<UnionType>(type)) {
         for (auto &variant : ut->fields) {
             replaceInType(variant.second, generic_map);
         }
     } else if (auto et = std::dynamic_pointer_cast<EnumType>(type)) {
         return;
-    } else
+    }else
         return;
 }
 
 void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map<std::string, std::shared_ptr<Type>> &generic_map) {
     if (!node)
         return;
+
+    if (auto ea = std::dynamic_pointer_cast<EnumAccess>(node)) {
+        return;
+    }
 
     if (auto te = std ::dynamic_pointer_cast<TypeExpression>(node)) {
         replaceInType(te->type, generic_map);
@@ -322,6 +348,12 @@ void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map
     }
 
     if (auto si = std::dynamic_pointer_cast<StructInitializer>(node)) {
+        if (si->struct_type_expr) {
+            replaceGenericTypes(si->struct_type_expr, generic_map);
+        }
+        if (si->inferred_type) {
+            replaceInType(si->inferred_type, generic_map);
+        }
         for (auto &field : si->field_values) {
             replaceGenericTypes(field.second, generic_map);
         }

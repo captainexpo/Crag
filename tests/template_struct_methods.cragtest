@@ -1,0 +1,25 @@
+//NAME: Arrays
+//DESC: Test the array type
+//BEGIN CODE
+
+extern fn printf(str: *u8, ...) -> i32;
+
+struct Test<T> {
+    val: T,
+    fn print_hex(self: *Test::<T>) -> i32 {
+        return printf("%X", self.val);
+    }
+}
+
+fn main(argc: i32, argv: **u8) -> i32 {
+    let test = Test::<i32> { val: 3 };
+    test.print_hex();
+    let test2 = Test::<i64> { val: 10 };
+    test2.print_hex();
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//3A
+//END EXPECT

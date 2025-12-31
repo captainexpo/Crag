@@ -343,7 +343,11 @@ std::shared_ptr<ASTNode> EnumDeclaration::copy() const {
 }
 
 std::shared_ptr<ASTNode> StructDeclaration::copy() const {
-    auto c = std::make_shared<StructDeclaration>(name, fields);
+    std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields_copy;
+    for (const auto &field : fields) {
+        fields_copy.emplace_back(field.first, field.second->copy());
+    }
+    auto c = std::make_shared<StructDeclaration>(name, fields_copy);
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type;
@@ -357,7 +361,11 @@ std::shared_ptr<ASTNode> StructDeclaration::copy() const {
 }
 
 std::shared_ptr<ASTNode> UnionDeclaration::copy() const {
-    auto c = std::make_shared<UnionDeclaration>(name, fields);
+    std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields_copy;
+    for (const auto &field : fields) {
+        fields_copy.emplace_back(field.first, field.second->copy());
+    }
+    auto c = std::make_shared<UnionDeclaration>(name, fields_copy);
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type;

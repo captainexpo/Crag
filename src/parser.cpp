@@ -1,9 +1,9 @@
 #include "parser.h"
+#include <algorithm>
 #include "ast/ast.h"
 #include "lexer.h"
 #include <algorithm>
 #include <cstddef>
-#include <iostream>
 #include <llvm/IR/Intrinsics.h>
 #include <memory>
 #include <unordered_map>
@@ -202,7 +202,12 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
         return std::make_shared<Boolean>();
     if (val == "void")
         return std::make_shared<Void>();
-    throw ParseError("Unknown primitive type " + val, peek().line,
+    if (std::find(current_generic_params.begin(), current_generic_params.end(), val) != current_generic_params.end())
+        return std::make_shared<GenericType>(val);
+    for (std::string s : current_generic_params) {
+        std::cout << "Generic param: " << s << "\n";
+    }
+    throw ParseError("Unknown type " + val, peek().line,
                      peek().column);
 }
 
@@ -433,12 +438,12 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
     std::string name = consume(TokenType::ID).value;
     // Parse optional generic parameters for struct
     std::vector<std::string> generic_params = try_parse_generic_parameters();
-    this->current_generic_params = generic_params;
-
-    if (generic_params.empty()) {
-        declared_structs[name] = std::make_shared<StructType>(
-            name, std::vector<std::pair<std::string, std::shared_ptr<Type>>>{});
+    for (const auto &gp : generic_params) {
+        this->current_generic_params.push_back(gp);
     }
+
+    declared_structs[name] = std::make_shared<StructType>(
+        name, std::vector<std::pair<std::string, std::shared_ptr<Type>>>{});
     consume(TokenType::LBRACE);
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
     std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
@@ -464,19 +469,16 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fmap;
     for (size_t i = 0; i < fields.size(); ++i)
         fmap.push_back({fields[i].first, fields[i].second});
-    if (generic_params.empty()) {
-        auto st = std::make_shared<StructType>(name, fmap);
-        st->methods = methods;
-        declared_structs[name] = st;
-    }
+    auto st = std::make_shared<StructType>(name, fmap);
+    st->methods = methods;
+    declared_structs[name] = st;
     auto struct_decl = std::make_shared<StructDeclaration>(name, fields);
     struct_decl->methods = methods;
     struct_decl->line = start_token.line;
     struct_decl->col = start_token.column;
     struct_decl->generic_params = generic_params;
-    this->current_generic_params.clear();
-    if (!generic_params.empty()) {
-        declared_structs[name] = std::make_shared<StructType>(name);
+    for (const auto &gp : generic_params) {
+        this->current_generic_params.pop_back();
     }
     return struct_decl;
 }
@@ -1052,8 +1054,10 @@ std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
     consume(TokenType::FN);
     std::string name = consume(TokenType::ID).value;
     std::vector<std::string> generic_params = try_parse_generic_parameters();
-    this->current_generic_params = generic_params;
-
+    for (const auto &gp : generic_params) {
+        this->current_generic_params.push_back(gp);
+    }
+        
     consume(TokenType::LPAREN);
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> params;
     bool variadic = false;
@@ -1101,7 +1105,9 @@ std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
     func_decl->attributes = attributes;
     func_decl->generic_params = generic_params;
 
-    this->current_generic_params.clear();
+    for (const auto &gp : generic_params) {
+        this->current_generic_params.pop_back();
+    }
     return func_decl;
 }
 
