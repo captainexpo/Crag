@@ -30,7 +30,6 @@ struct Module {
         return canon_name + "." + s;
     }
 
-
     std::shared_ptr<Module> getImportedModule(std::vector<std::string> path) const {
         if (path.empty()) {
             return nullptr;
@@ -46,7 +45,6 @@ struct Module {
             }
         }
 
-
         // Recursive resolution of imports
         if (auto it = imports.find(cur_find); it != imports.end()) {
             auto next_module = it->second;
@@ -57,20 +55,20 @@ struct Module {
     }
 };
 
-inline std::string canonicalModuleName(const std::string &root_path, const std::string &path) {
-    auto abspath = std::filesystem::absolute(std::filesystem::path(root_path) / path);
+inline std::string canonicalModuleName(const std::filesystem::path &abs_path) {
+    // example: /a/b/c/foo.cr → a.b.c.foo
+    std::filesystem::path p = abs_path;
+    p.replace_extension();
 
-    // remove extension
-    auto base = abspath.stem().string();
-
-    // replace disallowed separators with "_"
-    for (auto &ch : base) {
-        if (ch == '/' || ch == '\\' || ch == '-') {
-            ch = '_';
-        }
+    std::string out;
+    for (auto it = p.begin(); it != p.end(); ++it) {
+        if (!out.empty())
+            out += ".";
+        out += it->string();
     }
-    return base;
+    return out;
 }
+
 class ModuleResolver {
   public:
     explicit ModuleResolver(std::string base_path)
@@ -79,21 +77,36 @@ class ModuleResolver {
     // adjacency list: module -> list of modules it depends on
     std::unordered_map<std::string, std::vector<std::string>> dependencyGraph;
 
-    std::shared_ptr<Module> loadModule(const std::string &import_path) {
-        auto abs_path = resolveModulePath(import_path);
-        auto module_canonical_name = canonicalModuleName(m_base_path, import_path);
+    std::shared_ptr<Module> loadRoot(const std::string &entry) {
+        return loadModule(entry, std::filesystem::path(m_base_path));
+    }
 
-        // Reuse cached module
-        if (auto it = m_module_cache.find(abs_path); it != m_module_cache.end()) {
+    std::shared_ptr<Module> loadModule(
+        const std::string &import_path,
+        const std::filesystem::path &from_dir) {
+        auto abs_path =
+            std::filesystem::absolute(from_dir / import_path);
+
+        abs_path = std::filesystem::canonical(abs_path);
+
+        // reuse cache
+        if (auto it = m_module_cache.find(abs_path.string());
+            it != m_module_cache.end()) {
             return it->second;
         }
 
-        // ---- Load & parse source ----
-        std::string source = readFile(abs_path);
+        std::string source = readFile(abs_path.string());
+        if (source.empty()) {
+            std::cerr << "Error: Could not read module file: "
+                      << abs_path << "\n";
+            exit(1);
+        }
+
         Lexer lexer(source);
         auto tokens = lexer.tokenize();
         Parser parser(tokens);
         auto ast = parser.parse();
+
         if (!parser.ok()) {
             for (const auto &err : parser.errors()) {
                 prettyError(err.line, err.col, err.message, source);
@@ -101,49 +114,55 @@ class ModuleResolver {
             exit(1);
         }
 
-        // ---- Create module ----
         auto module = std::make_shared<Module>();
-        module->canon_name = module_canonical_name;
-        module->path = abs_path;
+        module->path = abs_path.string();
+        module->canon_name = canonicalModuleName(abs_path);
         module->ast = ast;
         module->source_code = source;
 
         dependencyGraph[module->canon_name];
+        m_module_cache[module->path] = module;
 
-        m_module_cache[abs_path] = module;
+        auto module_dir = abs_path.parent_path();
 
         for (const auto &decl : ast->declarations) {
-            if (auto importDecl = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
-                auto importedMod = loadModule(importDecl->path);
-                module->imports[importDecl->alias] = importedMod;
+            if (auto importDecl =
+                    std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
 
-                dependencyGraph[module->canon_name].push_back(importedMod->canon_name);
+                auto imported =
+                    loadModule(importDecl->path, module_dir);
+
+                module->imports[importDecl->alias] = imported;
+                dependencyGraph[module->canon_name]
+                    .push_back(imported->canon_name);
                 continue;
             }
 
             // exports
-            if (auto funcDecl = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
-                if (funcDecl->is_pub)
-                    module->exports[funcDecl->name] = funcDecl;
-                if (funcDecl->is_extern || funcDecl->attributes.count("noprefix"))
-                    module->externLinkage.insert(funcDecl->name);
-            } else if (auto structDecl = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
-                if (structDecl->is_pub)
-                    module->exports[structDecl->name] = structDecl;
-            } else if (auto enumDecl = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
-                if (enumDecl->is_pub)
-                    module->exports[enumDecl->name] = enumDecl;
-            } else if (auto varDecl = std::dynamic_pointer_cast<VariableDeclaration>(decl)) {
-                if (varDecl->is_pub)
-                    module->exports[varDecl->name] = varDecl;
-                if (varDecl->is_extern)
-                    module->externLinkage.insert(varDecl->name);
+            if (auto f = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
+                if (f->is_pub)
+                    module->exports[f->name] = f;
+                if (f->is_extern || f->attributes.count("noprefix"))
+                    module->externLinkage.insert(f->name);
+            } else if (auto s =
+                           std::dynamic_pointer_cast<StructDeclaration>(decl)) {
+                if (s->is_pub)
+                    module->exports[s->name] = s;
+            } else if (auto e =
+                           std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
+                if (e->is_pub)
+                    module->exports[e->name] = e;
+            } else if (auto v =
+                           std::dynamic_pointer_cast<VariableDeclaration>(decl)) {
+                if (v->is_pub)
+                    module->exports[v->name] = v;
+                if (v->is_extern)
+                    module->externLinkage.insert(v->name);
             }
         }
 
         return module;
     }
-
     std::string resolveModulePath(const std::string &import_path) const {
         return m_base_path + "/" + import_path;
     }
@@ -214,6 +233,11 @@ class ModuleResolver {
         return nullptr;
     }
 
+    std::string getRootModulePath() const {
+        if (m_module_cache.empty())
+            return "";
+        return m_module_cache.begin()->second->canon_name;
+    }
   private:
     std::string m_base_path;
     std::unordered_map<std::string, std::shared_ptr<Module>> m_module_cache;

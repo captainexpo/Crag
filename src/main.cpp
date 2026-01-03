@@ -11,6 +11,29 @@
 namespace fs = std::filesystem;
 
 int main(int argc, char **argv) {
+
+    std::string additionalArgs;
+    std::vector<std::string> newArgv;
+
+    for (int i = 0; i < argc; ++i) {
+        auto cur = std::string(argv[i]);
+        if (cur == "--additional-args") {
+            if (i + 1 < argc) {
+                additionalArgs = std::string(argv[i + 1]);
+                i++; // skip next arg
+            }
+        } else {
+            newArgv.push_back(cur);
+        }
+    }
+    argc = static_cast<int>(newArgv.size());
+    std::vector<char *> argv2;
+    for (auto &s : newArgv) {
+        argv2.push_back(const_cast<char *>(s.c_str()));
+    }
+
+
+
     argparse::ArgumentParser program(PRGM_NAME);
 
     program.add_argument("input")
@@ -54,7 +77,7 @@ int main(int argc, char **argv) {
         .help("Do not link against the runtime library");
 
     try {
-        program.parse_args(argc, argv);
+        program.parse_args(argc, argv2.data());
     } catch (const std::runtime_error &err) {
         std::cerr << err.what() << "\n";
         std::cerr << program;
@@ -129,7 +152,7 @@ int main(int argc, char **argv) {
             codegen->compileObjectFileToExecutable(objectFilePath.string(),
                                                    outputPath,
                                                    fs::path(pathToRuntime),
-                                                   noRuntime);
+                                                   noRuntime, additionalArgs);
             std::cout << "Emitted executable to " << outputPath << "\n";
         } catch (const CodeGenError &err) {
             std::cerr << err.what() << "\n";

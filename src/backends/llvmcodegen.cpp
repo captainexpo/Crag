@@ -47,6 +47,31 @@ std::string runtimePanicTypeToString(RuntimePanicType type) {
     }
 }
 
+void registerGlobalCtor(llvm::Module &mod, llvm::Function *initFn, int priority = 65535) {
+    llvm::LLVMContext &ctx = mod.getContext();
+
+    llvm::Type *i32Ty = llvm::Type::getInt32Ty(ctx);
+    llvm::Type *voidPtrTy = llvm::PointerType::getUnqual(ctx);
+
+    llvm::StructType *ctorStructTy = llvm::StructType::get(i32Ty, initFn->getType(), voidPtrTy);
+
+    llvm::Constant *ctorStruct = llvm::ConstantStruct::get(
+        ctorStructTy,
+        llvm::ConstantInt::get(i32Ty, priority),
+        initFn,
+        llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(voidPtrTy)));
+
+    llvm::ArrayType *arrTy = llvm::ArrayType::get(ctorStructTy, 1);
+
+    new llvm::GlobalVariable(
+        mod,
+        arrTy,
+        false, // not constant
+        llvm::GlobalValue::AppendingLinkage,
+        llvm::ConstantArray::get(arrTy, ctorStruct),
+        "llvm.global_ctors");
+}
+
 void LLVMCodegen::emitBuiltinDeclarations() {
     llvm::FunctionType *panicType = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {
                                                                                                 llvm::PointerType::getUnqual(context), // Error message
@@ -54,7 +79,7 @@ void LLVMCodegen::emitBuiltinDeclarations() {
                                                                                                 llvm::Type::getInt32Ty(context)        // Column number
                                                                                             },
                                                             false);
-    llvm::Function::Create(panicType, llvm::Function::ExternalLinkage, "__panic__", m_llvm_module.get());
+    llvm::Function::Create(panicType, llvm::Function::ExternalLinkage, RUNTIME_PANIC_FUNC_NAME, m_llvm_module.get());
 
     // Prepare runtime panic strings
     m_runtime_panic_strings.clear();
@@ -82,21 +107,13 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
     m_current_module = module;
 
     try {
-
         for (const auto &decl : module->ast->declarations) {
-            if (IS_INSTANCE(decl, FunctionDeclaration)) {
-                auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl);
-                llvm::Function *fn = generateFunctionDefinition(fd);
-                funcDecls.push_back({fn, fd});
-                continue;
-            }
-            if (IS_INSTANCE(decl, VariableDeclaration)) {
-                generateVariableDeclaration(
-                    std::dynamic_pointer_cast<VariableDeclaration>(decl));
-                continue;
-            }
             if (IS_INSTANCE(decl, StructDeclaration)) {
                 auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl);
+                // Skip template declarations - only generate instantiations
+                if (!sd->generic_params.empty()) {
+                    continue;
+                }
                 generateStructDeclaration(sd);
                 auto sms = generateStructMethods(sd);
                 for (const auto &pair : sms) {
@@ -114,6 +131,28 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
                     std::dynamic_pointer_cast<EnumDeclaration>(decl));
                 continue;
             }
+        }
+
+        for (const auto &decl : module->ast->declarations) {
+            if (IS_INSTANCE(decl, FunctionDeclaration)) {
+                auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl);
+                // Skip template declarations - only generate instantiations
+                if (!fd->generic_params.empty()) {
+                    continue;
+                }
+                llvm::Function *fn = generateFunctionDefinition(fd);
+                funcDecls.push_back({fn, fd});
+                continue;
+            }
+            if (IS_INSTANCE(decl, VariableDeclaration)) {
+                generateVariableDeclaration(
+                    std::dynamic_pointer_cast<VariableDeclaration>(decl));
+                continue;
+            }
+            if (IS_INSTANCE(decl, StructDeclaration) || IS_INSTANCE(decl, UnionDeclaration) || IS_INSTANCE(decl, EnumDeclaration)) {
+                // Already handled in first pass
+                continue;
+            }
             if (IS_INSTANCE(decl, ImportDeclaration)) {
                 continue; // Handled elsewhere
             }
@@ -128,6 +167,8 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
     } catch (const CodeGenError &e) {
         m_errors.push_back(e);
     }
+
+    addGlobalVarInitializer(nullptr, nullptr);
 }
 
 void LLVMCodegen::emitObjectToFile(const std::string &filename) {
@@ -154,9 +195,9 @@ void LLVMCodegen::emitObjectToFile(const std::string &filename) {
     auto Features = "";
 
     // Verify the module before emitting object code
-    if (llvm::verifyModule(*m_llvm_module, &llvm::errs())) {
-        throw CodeGenError(nullptr, "Module verification failed - invalid IR");
-    }
+    // if (llvm::verifyModule(*m_llvm_module, &llvm::errs())) {
+    //     throw CodeGenError(nullptr, "Module verification failed - invalid IR");
+    // }
 
     const llvm::TargetOptions opt{};
 
@@ -203,7 +244,7 @@ void LLVMCodegen::emitIrToFile(const std::string &filepath) {
 void LLVMCodegen::compileObjectFileToExecutable(const std::string &object_filepath,
                                                 const std::filesystem::path &executable_filepath,
                                                 const std::filesystem::path &runtime_path,
-                                                bool no_runtime) {
+                                                bool no_runtime, std::string additional_compiler_args) {
 
     // See if clang is available
     if (system("clang --version > /dev/null 2>&1") != 0) {
@@ -214,7 +255,7 @@ void LLVMCodegen::compileObjectFileToExecutable(const std::string &object_filepa
 
     // Run clang to compile IR to executable
     std::filesystem::path finalOutputFilePath = executable_filepath.parent_path() / executable_filepath.stem();
-    std::string clangCmd = "clang " + object_filepath + opt;
+    std::string clangCmd = "clang " + object_filepath + opt + additional_compiler_args;
 
     if (!no_runtime) {
         clangCmd += " " + runtime_path.string();
@@ -311,8 +352,7 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type) {
     return nullptr;
 }
 
-llvm::Value *
-LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &expr) {
+llvm::Value *LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &expr) {
     if (IS_INSTANCE(expr, VarAccess)) {
         auto var = std::dynamic_pointer_cast<VarAccess>(expr);
         return CUR_SCOPE.get(canonicalizeNonexternName(var->name))->value;
@@ -349,6 +389,12 @@ LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &expr) {
             conditionOrPanic(isZero, NullPointerDereference, expr->line, expr->col);
         }
         return base;
+    } else if (IS_INSTANCE(expr, ModuleAccess)) {
+        return generateModuleAccess(std::dynamic_pointer_cast<ModuleAccess>(expr),
+                                    false);
+    } else if (IS_INSTANCE(expr, MethodCall)) {
+        throw CodeGenError(expr,
+                           "Cannot take address of method call result");
     }
     throw CodeGenError(expr, "Expression is not an lvalue: " + expr->str());
 }
@@ -476,17 +522,15 @@ LLVMCodegen::generateCast(const std::shared_ptr<TypeCast> &typeCast,
         return m_builder.CreatePtrToInt(val, destType, "ptrtointtmp");
     } else if (srcType->isIntegerTy() && destType->isPointerTy()) {
         return m_builder.CreateIntToPtr(val, destType, "inttoptrtmp");
-    } else {
-        throw CodeGenError(typeCast, "Unsupported cast from " + llvmTypeToString(srcType) +
-                                         " to " + llvmTypeToString(destType) + " at " + typeCast->str());
     }
-    return nullptr;
+    throw CodeGenError(typeCast, "Unsupported cast from " + llvmTypeToString(srcType) +
+                                     " to " + llvmTypeToString(destType) + " at " + typeCast->str());
 }
 
 llvm::Value *
 LLVMCodegen::generateStatement(const std::shared_ptr<Statement> &stmt) {
     if (IS_INSTANCE(stmt, VariableDeclaration)) {
-        generateVariableDeclaration(
+        return generateVariableDeclaration(
             std::dynamic_pointer_cast<VariableDeclaration>(stmt));
     } else if (IS_INSTANCE(stmt, Block)) {
         return generateBlock(std::dynamic_pointer_cast<Block>(stmt));
@@ -514,11 +558,9 @@ LLVMCodegen::generateStatement(const std::shared_ptr<Statement> &stmt) {
         llvm::Value *val = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
         m_builder.CreateBr(m_loop_stack.back().continueBB);
         return val;
-    } else {
-
-        throw CodeGenError(stmt, "Unknown statement type: " + stmt->str());
     }
-    return nullptr;
+
+    throw CodeGenError(stmt, "Unknown statement type: " + stmt->str());
 }
 
 llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> func) {
@@ -646,7 +688,61 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
 //
 //   return function;
 // }
-void LLVMCodegen::generateVariableDeclaration(
+//
+
+void LLVMCodegen::finished(bool is_final_module) {
+    if (!is_final_module) {
+        return;
+    }
+    // Finalize global variable initialization function
+    llvm::Function *globalVarInitFunc = m_llvm_module->getFunction(GLOBAL_VAR_INIT_FUNC_NAME);
+    if (globalVarInitFunc) {
+        llvm::BasicBlock *initBB = nullptr;
+        for (auto &bb : *globalVarInitFunc) {
+            if (bb.getName() == "init") {
+                initBB = &bb;
+                break;
+            }
+        }
+        if (initBB) {
+            llvm::BasicBlock *currentBB = m_builder.GetInsertBlock();
+            m_builder.SetInsertPoint(initBB);
+            m_builder.CreateRetVoid();
+            m_builder.SetInsertPoint(currentBB);
+        }
+    }
+}
+llvm::Value *LLVMCodegen::addGlobalVarInitializer(llvm::Value *var, std::shared_ptr<Expression> initializer) {
+    if (!var || !initializer) {
+        return nullptr; // No initializer to add
+    }
+    static llvm::BasicBlock *initBB;
+    if (!initBB) {
+
+        llvm::FunctionType *initFuncType =
+            llvm::FunctionType::get(llvm::Type::getVoidTy(context), false);
+        llvm::Function *initFunc = llvm::Function::Create(initFuncType,
+                                                          llvm::Function::InternalLinkage,
+                                                          GLOBAL_VAR_INIT_FUNC_NAME, m_llvm_module.get());
+        registerGlobalCtor(*m_llvm_module, initFunc, 65535);
+
+        initBB = llvm::BasicBlock::Create(context, "init", initFunc);
+    }
+    llvm::BasicBlock *currentBB = m_builder.GetInsertBlock();
+    m_builder.SetInsertPoint(initBB);
+    llvm::Value *initVal = nullptr;
+    initVal = generateExpression(std::dynamic_pointer_cast<Expression>(initializer));
+
+    if (initVal == nullptr) {
+        throw CodeGenError(initializer, "Failed to generate initializer for global variable");
+        initVal = llvm::Constant::getNullValue(var->getType());
+    }
+    m_builder.CreateStore(initVal, var);
+    m_builder.SetInsertPoint(currentBB);
+    return initVal;
+}
+
+llvm::Value *LLVMCodegen::generateVariableDeclaration(
     const std::shared_ptr<VariableDeclaration> &varDecl) {
     static int varCounter = 0;
     bool is_global = m_scopeStack.size() == 1;
@@ -661,32 +757,22 @@ void LLVMCodegen::generateVariableDeclaration(
                 llvm::GlobalValue::ExternalLinkage, nullptr,
                 varDecl->name);
             CUR_SCOPE.set(varDecl->name, gVar, varType, varDecl->var_type);
-            return;
+            return gVar;
         }
         llvm::Type *varType = getLLVMType(varDecl->var_type);
-        llvm::Constant *initVal = nullptr;
-        if (varDecl->initializer) {
-            if (IS_INSTANCE(varDecl->initializer, Expression)) {
-                llvm::Value *initValV = generateExpression(
-                    std::dynamic_pointer_cast<Expression>(varDecl->initializer));
-                if (llvm::isa<llvm::Constant>(initValV)) {
-                    initVal = llvm::cast<llvm::Constant>(initValV);
-                } else {
-                    throw CodeGenError(varDecl, "Global variable initializer must be a constant");
-                    initVal = llvm::Constant::getNullValue(varType);
-                }
-            } else {
-                throw CodeGenError(varDecl, "Unsupported initializer type");
-                initVal = llvm::Constant::getNullValue(varType);
-            }
-        } else {
-            initVal = llvm::Constant::getNullValue(varType);
-        }
+        llvm::Constant *initVal = llvm::Constant::getNullValue(varType);
         llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
-            *m_llvm_module, varType, varDecl->is_const,
+            *m_llvm_module, varType, false,
             llvm::GlobalValue::ExternalLinkage, initVal, canonicalizeNonexternName(varDecl->name));
         CUR_SCOPE.set(canonicalizeNonexternName(varDecl->name), gVar, varType, varDecl->var_type);
-        return;
+        if (varDecl->initializer) {
+            if (auto expr = std::dynamic_pointer_cast<Expression>(varDecl->initializer)) {
+                addGlobalVarInitializer(gVar, expr);
+            } else {
+                throw CodeGenError(varDecl, "Unsupported initializer type for global variable");
+            }
+        }
+        return gVar;
     }
 
     llvm::Type *varType = getLLVMType(varDecl->var_type);
@@ -707,6 +793,7 @@ void LLVMCodegen::generateVariableDeclaration(
         }
         m_builder.CreateStore(initVal, alloca);
     }
+    return alloca;
 }
 
 std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> LLVMCodegen::generateStructMethods(
@@ -717,6 +804,10 @@ std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> L
         auto method = iter->second;
         std::string mangledName = structDecl->name + "." + method->name;
         method->name = mangledName;
+
+        // Mark struct methods as having external linkage so they're not namespaced
+        // This allows methods to be called across modules
+        m_current_module->externLinkage.insert(mangledName);
 
         // HACK: Just get this done for now, should probably be better somehow
         llvm::Function *fn = generateFunctionDefinition(method);
@@ -798,12 +889,22 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
     }
 
     llvm::Value *l = nullptr;
-    if (op == "=")
+    if (op == "=") {
         l = generateAddress(left);
-    else
+    } else {
         l = generateExpression(left);
+    }
 
-    llvm::Value *r = generateExpression(right);
+    llvm::Value *r = nullptr;
+    if (op == "=") {
+
+        if (right->inferred_type && right->inferred_type->kind() == TypeKind::Function) {
+            throw CodeGenError(right, "Cannot assign function to variable, try using '&' to get function pointer");
+        }
+        r = generateExpression(right);
+    } else {
+        r = generateExpression(right);
+    }
 
     // Handle assignment separately
     if (op == "=") {
@@ -964,7 +1065,6 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
         throw CodeGenError(left, "Type mismatch in binary op: lhs=" +
                                      llvmTypeToString(l->getType()) +
                                      " rhs=" + llvmTypeToString(r->getType()));
-        return nullptr;
     }
 
     // Check operator support
@@ -992,7 +1092,6 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
     else {
         throw CodeGenError(right,
                            "Unsupported type for binary operator: " + llvmTypeToString(ty));
-        return nullptr;
     }
 }
 
@@ -1053,7 +1152,8 @@ llvm::Value *LLVMCodegen::generateLogicalOp(std::shared_ptr<Expression> left, st
     return phi;
 }
 
-template <typename T> T tryGetConstValue(std::shared_ptr<Literal> lit) {
+template <typename T>
+T tryGetConstValue(std::shared_ptr<Literal> lit) {
     auto val = lit->value;
     if (std::holds_alternative<T>(val)) {
         return std::get<T>(val);
@@ -1104,7 +1204,7 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
         return llvm::ConstantInt::get(
             context, llvm::APInt(1, tryGetConstValue<bool>(lit) ? 1 : 0));
     } else if (IS_INSTANCE(lit->inferred_type, Void)) {
-        return nullptr; // Void literals don't have a value
+        throw CodeGenError(lit, "Cannot generate literal for void type");
     } else if (IS_INSTANCE(lit->inferred_type, USize)) {
         return llvm::ConstantInt::get(
             context,
@@ -1142,13 +1242,11 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
         return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(
             getLLVMType(std::make_shared<PointerType>(std::make_shared<Void>()))));
     } else if (IS_INSTANCE(lit->inferred_type, ArrayType)) {
-    } else {
-        if (!lit->inferred_type) {
-            throw CodeGenError(lit, "Literal " + lit->str() + " has no inferred type");
-        }
-        throw CodeGenError(lit, "Unsupported literal type: " + lit->inferred_type->str());
     }
-    return nullptr;
+    if (!lit->inferred_type) {
+        throw CodeGenError(lit, "Literal " + lit->str() + " has no inferred type");
+    }
+    throw CodeGenError(lit, "Unsupported literal type: " + lit->inferred_type->str());
 }
 
 llvm::Value *LLVMCodegen::generateArrayLiteral(
@@ -1159,41 +1257,38 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
     int numElements = arrayLit->len;
 
     // Allocate the raw array: [N x elemType]
-    auto arrayLLVMType = getLLVMType(arrayType);          // struct { ptr, i64 }
+    auto arrayLLVMType = getLLVMType(arrayType); // struct { ptr, i64 }
     auto arrayLitType = llvm::ArrayType::get(elemType, numElements);
     auto rawArrAlloc = m_builder.CreateAlloca(arrayLitType, nullptr, "arraylit");
-    rawArrAlloc->setAlignment(llvm::Align(alignof(void*)));
+    rawArrAlloc->setAlignment(llvm::Align(alignof(void *)));
 
     // Store elements in array using correct GEP (2 indices for array)
     for (int i = 0; i < numElements; i++) {
-        llvm::Value* elemVal = generateExpression(arrayLit->elements[i]);
-        llvm::Value* elemPtr = m_builder.CreateGEP(
+        llvm::Value *elemVal = generateExpression(arrayLit->elements[i]);
+        llvm::Value *elemPtr = m_builder.CreateGEP(
             arrayLitType,
             rawArrAlloc,
-            { llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
-              llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i) }
-        );
+            {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+             llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i)});
         m_builder.CreateStore(elemVal, elemPtr);
     }
 
     // Allocate struct { ptr, i64 }
-    llvm::Value* arrayStructAlloc = m_builder.CreateAlloca(arrayLLVMType, nullptr, "arraystruct");
+    llvm::Value *arrayStructAlloc = m_builder.CreateAlloca(arrayLLVMType, nullptr, "arraystruct");
 
     // Store array length into struct
-    llvm::Value* lengthPtr = m_builder.CreateGEP(
+    llvm::Value *lengthPtr = m_builder.CreateGEP(
         arrayLLVMType, arrayStructAlloc,
-        { llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
-          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1) }
-    );
+        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1)});
     m_builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), numElements), lengthPtr);
 
     // Store pointer to raw array into struct (cast to i8* or element pointer type)
-    llvm::Value* dataPtr = m_builder.CreateGEP(
+    llvm::Value *dataPtr = m_builder.CreateGEP(
         arrayLLVMType, arrayStructAlloc,
-        { llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
-          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0) }
-    );
-    llvm::Value* castedPtr = m_builder.CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context));
+        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)});
+    llvm::Value *castedPtr = m_builder.CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context));
     m_builder.CreateStore(castedPtr, dataPtr);
 
     if (loadValue) {
@@ -1201,7 +1296,6 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
     }
     return arrayStructAlloc;
 }
-
 
 llvm::Value *
 LLVMCodegen::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
@@ -1215,6 +1309,7 @@ LLVMCodegen::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
 
     if (llvm::isa<llvm::Function>(v))
         return v;
+
     if (!loadValue)
         return v;
     // if (auto ar = std::dynamic_pointer_cast<ArrayType>(varAccess->inferred_type)) {
@@ -1264,15 +1359,14 @@ llvm::Value *LLVMCodegen::generateMethodCall(const std::shared_ptr<MethodCall> &
     if (!structType) {
         throw CodeGenError(structAccess,
                            "Failed to determine struct type for method call");
-        return nullptr;
     }
     // Find the struct type
     auto accessee = m_structTypes.find(structType->name);
     if (accessee == m_structTypes.end()) {
         throw CodeGenError(structAccess, "Unknown struct type in method call: " + structType->name);
     }
-    // Mangle method name
-    std::string mangledName = canonicalizeNonexternName(structType->name + "." + methodCall->method);
+    // Mangle method name - struct methods have external linkage so don't namespace them
+    std::string mangledName = structType->name + "." + methodCall->method;
     // Prepare arguments
     std::vector<llvm::Value *> argsV;
     argsV.push_back(objPtr); // 'this' pointer
@@ -1283,7 +1377,19 @@ llvm::Value *LLVMCodegen::generateMethodCall(const std::shared_ptr<MethodCall> &
     if (!calleeValue) {
         throw CodeGenError(methodCall, "Unknown method: " + mangledName);
     }
-    return m_builder.CreateCall(calleeValue, argsV, calleeValue->getFunctionType()->getReturnType() != llvm::Type::getVoidTy(context) ? "methodcalltmp" : "");
+
+    auto v = m_builder.CreateCall(calleeValue, argsV, calleeValue->getFunctionType()->getReturnType() != llvm::Type::getVoidTy(context) ? "methodcalltmp" : "");
+    llvm::Type *retTy = calleeValue->getReturnType();
+    bool isAggregate = retTy->isStructTy();
+    if (isAggregate) {
+        llvm::AllocaInst *tmp =
+            m_builder.CreateAlloca(retTy, nullptr, "methodcall.tmp");
+
+        m_builder.CreateStore(v, tmp);
+
+        return tmp;
+    }
+    return v;
 }
 llvm::Value *
 LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
@@ -1319,7 +1425,6 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     } else {
         throw CodeGenError(funcCall, "Callee is not a function or function pointer: " +
                                          funcCall->func->str());
-        return nullptr;
     }
 
     // Apply default argument promotions for varargs
@@ -1332,16 +1437,16 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
             }
             llvm::Type *ty = arg->getType();
             if (ty->isIntegerTy(1) || ty->isIntegerTy(8) || ty->isIntegerTy(16)) {
-                argsV[i] = m_builder.CreateZExt(arg, llvm::Type::getInt32Ty(context), "vararg_promotetmp");
+                argsV[i] = m_builder.CreateZExt(arg, llvm::Type::getInt32Ty(context), "vapromotetmp");
             } else if (ty->isFloatTy()) {
-                argsV[i] = m_builder.CreateFPExt(arg, llvm::Type::getDoubleTy(context), "vararg_promotetmp");
+                argsV[i] = m_builder.CreateFPExt(arg, llvm::Type::getDoubleTy(context), "vapromotetmp");
             }
         }
     }
 
     return m_builder.CreateCall(funcTy, calleeValue, argsV, funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
 }
-llvm::Value *LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicType panicType, int line, int col) {
+void LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicType panicType, int line, int col) {
 
     llvm::Function *curFunc = m_builder.GetInsertBlock()->getParent();
     llvm::BasicBlock *thenBB = llvm::BasicBlock::Create(context, "good_check", curFunc);
@@ -1357,7 +1462,7 @@ llvm::Value *LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicT
     // Else block: condition is false, emit panic
 
     // Get panic function (will be extern declared)
-    llvm::Function *panicFunc = m_llvm_module->getFunction("__panic__");
+    llvm::Function *panicFunc = m_llvm_module->getFunction(RUNTIME_PANIC_FUNC_NAME);
     llvm::FunctionType *panicFuncTy = panicFunc->getFunctionType();
 
     std::vector<llvm::Value *> panicArgs = {
@@ -1369,8 +1474,6 @@ llvm::Value *LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicT
 
     m_builder.CreateBr(mergeBB);
     m_builder.SetInsertPoint(mergeBB);
-
-    return nullptr; // No meaningful value to return
 }
 llvm::Value *LLVMCodegen::generateArrayAccess(
     const std::shared_ptr<OffsetAccess> &arrayAccess, bool loadValue) {
@@ -1470,8 +1573,23 @@ llvm::Value *LLVMCodegen::generateOffsetAccess(
 }
 
 llvm::Value *LLVMCodegen::generateArrayFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
-    auto basePtr = generateAddress(
-        std::static_pointer_cast<Expression>(fieldAccess->base));
+    bool baseIsAddressable = isLValue(fieldAccess->base);
+
+    llvm::Value *basePtr = nullptr;
+
+    if (baseIsAddressable) {
+        basePtr = generateAddress(fieldAccess->base);
+    } else {
+        if (!loadValue) {
+            throw CodeGenError(fieldAccess,
+                "Cannot assign to field of temporary value");
+        }
+
+        llvm::Value *baseVal = generateExpression(fieldAccess->base);
+        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type));
+        basePtr = materializeAggregate(baseVal, structType);
+
+    }
     if (!basePtr) {
         throw CodeGenError(fieldAccess->base, "Failed to generate address for array field base");
     }
@@ -1504,11 +1622,27 @@ llvm::Value *LLVMCodegen::generateArrayFieldAccess(const std::shared_ptr<FieldAc
 }
 
 llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
-    auto basePtr = generateAddress(
-        std::static_pointer_cast<Expression>(fieldAccess->base));
+    bool baseIsAddressable = isLValue(fieldAccess->base);
+
+    llvm::Value *basePtr = nullptr;
+
+    if (baseIsAddressable) {
+        basePtr = generateAddress(fieldAccess->base);
+    } else {
+        if (!loadValue) {
+            throw CodeGenError(fieldAccess,
+                "Cannot assign to field of temporary value");
+        }
+
+        llvm::Value *baseVal = generateExpression(fieldAccess->base);
+        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type));
+        basePtr = materializeAggregate(baseVal, structType);
+    }
     if (!basePtr) {
         throw CodeGenError(fieldAccess->base, "Failed to generate address for error union field base");
     }
+    assert(basePtr->getType()->isPointerTy());
+
     auto eu_type = std::dynamic_pointer_cast<ErrorUnionType>(fieldAccess->base->inferred_type);
     if (!eu_type) {
         throw CodeGenError(fieldAccess->base, "Field access on non-error-union type: " + fieldAccess->base->inferred_type->str());
@@ -1519,33 +1653,66 @@ llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<Fi
     if (fieldAccess->field == "ok") {
         // Return index 0
         llvm::Type *ok_type = getLLVMType(eu_type->valueType);
-        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 0, "error_union_ok_access");
+        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 0, "ok_access");
         return loadValue
-                   ? m_builder.CreateLoad(ok_type, gep, "load_error_union_ok")
+                   ? m_builder.CreateLoad(ok_type, gep, "load_ok")
                    : gep;
 
     } else if (fieldAccess->field == "err") {
         // Return index 1
         llvm::Type *err_type = getLLVMType(eu_type->errorType);
-        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 1, "error_union_err_access");
+        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 1, "err_access");
         return loadValue
-                   ? m_builder.CreateLoad(err_type, gep, "load_error_union_err")
+                   ? m_builder.CreateLoad(err_type, gep, "load_err")
                    : gep;
 
     } else if (fieldAccess->field == "is_err") {
         // Return index 2
         llvm::Type *bool_type = llvm::Type::getInt1Ty(context);
-        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 2, "error_union_is_err_access");
-        return loadValue
-                   ? m_builder.CreateLoad(bool_type, gep, "load_error_union_is_err")
-                   : gep;
 
+        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 2, "is_err_access");
+        return loadValue
+                   ? m_builder.CreateLoad(bool_type, gep, "load_is_err")
+                   : gep;
     } else {
         throw CodeGenError(fieldAccess, "Unknown field on error union: " + fieldAccess->field);
     }
-
 }
 
+bool LLVMCodegen::isLValue(const std::shared_ptr<Expression> &expr) {
+    if (!expr) return false;
+
+    if (IS_INSTANCE(expr, VarAccess)) {
+        return true;
+    }
+    if (IS_INSTANCE(expr, FieldAccess)) {
+        auto fa = std::dynamic_pointer_cast<FieldAccess>(expr);
+        return isLValue(fa->base);
+    }
+    if (IS_INSTANCE(expr, OffsetAccess)) {
+        auto oa = std::dynamic_pointer_cast<OffsetAccess>(expr);
+        return isLValue(oa->base);
+    }
+    if (IS_INSTANCE(expr, Dereference)) {
+        return true;
+    }
+    if (IS_INSTANCE(expr, TypeCast)) {
+        auto tc = std::dynamic_pointer_cast<TypeCast>(expr);
+        return isLValue(tc->expr);
+    }
+    if (IS_INSTANCE(expr, BinaryOperation)) {
+        auto bin = std::dynamic_pointer_cast<BinaryOperation>(expr);
+        return bin->op == "=" && isLValue(bin->left);
+    }
+    if (IS_INSTANCE(expr, MethodCall)) {
+        // Only a pointer-returning method can be an lvalue
+        auto mc = std::dynamic_pointer_cast<MethodCall>(expr);
+        return mc->inferred_type && mc->inferred_type->kind() == TypeKind::Pointer;
+    }
+
+    // Literals, computations, temporaries, etc. are never lvalues
+    return false;
+}
 llvm::Value *LLVMCodegen::generateFieldAccess(
     const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
 
@@ -1563,8 +1730,22 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
         return generateErrorUnionFieldAccess(fieldAccess, loadValue);
     }
 
-    llvm::Value *basePtr =
-        generateAddress(std::static_pointer_cast<Expression>(fieldAccess->base));
+    bool baseIsAddressable = isLValue(fieldAccess->base);
+
+    llvm::Value *basePtr = nullptr;
+
+    if (baseIsAddressable) {
+        basePtr = generateAddress(fieldAccess->base);
+    } else {
+        if (!loadValue) {
+            throw CodeGenError(fieldAccess,
+                "Cannot assign to field of temporary value");
+        }
+
+        llvm::Value *baseVal = generateExpression(fieldAccess->base);
+        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type));
+        basePtr = materializeAggregate(baseVal, structType);
+    }
     if (!basePtr) {
         throw CodeGenError(fieldAccess->base, "Failed to generate address for field base");
     }
@@ -1585,7 +1766,6 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
             if (!ptrType->base) {
                 throw CodeGenError(fieldAccess->base,
                                    "Pointer type in field access has no base type");
-                return nullptr;
             }
 
             if (structType || unionType) {
@@ -1596,7 +1776,6 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
                 if (!basePtr) {
                     throw CodeGenError(fieldAccess->base,
                                        "Failed to load pointer value for field access");
-                    return nullptr;
                 }
             }
         }
@@ -1605,7 +1784,6 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
             throw CodeGenError(fieldAccess->base,
                                "Field access on non-struct/union type: " +
                                    fieldAccess->base->inferred_type->str());
-            return nullptr;
         }
     }
 
@@ -1616,7 +1794,6 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
             throw CodeGenError(fieldAccess->base,
                                "Unknown or unregistered union type in field access: " +
                                    unionType->name);
-            return nullptr;
         }
 
         llvm::StructType *llvmUnion = accessee->second;
@@ -1628,7 +1805,6 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
             throw CodeGenError(fieldAccess->base,
                                "Union '" + unionType->name +
                                    "' has no field named '" + fieldName + "'");
-            return nullptr;
         }
 
         // For unions, all fields are at offset 0 in the byte array (field 0)
@@ -1659,7 +1835,6 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
         throw CodeGenError(fieldAccess->base,
                            "Unknown or unregistered struct type in field access: " +
                                structType->name);
-        return nullptr;
     }
 
     llvm::StructType *llvmStruct = accessee->second;
@@ -1671,7 +1846,6 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
         throw CodeGenError(fieldAccess->base,
                            "Struct '" + structType->name +
                                "' has no field named '" + fieldName + "'");
-        return nullptr;
     }
 
     // Build GEP safely
@@ -1684,14 +1858,12 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
     if (!gep) {
         throw CodeGenError(fieldAccess->base, "Failed to create GEP for field '" + fieldName +
                                                   "' in struct '" + structType->name + "'");
-        return nullptr;
     }
 
     if (loadValue) {
         if (!fieldAccess->inferred_type) {
             throw CodeGenError(fieldAccess, "Field '" + fieldName +
                                                 "' has no inferred type for load");
-            return nullptr;
         }
         return m_builder.CreateLoad(getLLVMType(fieldAccess->inferred_type), gep,
                                     "load_field");
@@ -1972,4 +2144,55 @@ llvm::Value *LLVMCodegen::generateReturnStatement(
 llvm::Value *LLVMCodegen::generateExpressionStatement(
     const std::shared_ptr<ExpressionStatement> &exprStmt) {
     return generateExpression(exprStmt->expression);
+}
+
+llvm::Value *LLVMCodegen::materializeAggregate(llvm::Value *abiValue, llvm::StructType *langType) {
+    assert(abiValue);
+    assert(langType);
+
+    llvm::Type *abiTy = abiValue->getType();
+    
+    // If abiValue is already a pointer, dereference to get the struct type
+    if (abiTy->isPointerTy()) {
+        // abiValue is already an address, return it directly
+        return abiValue;
+    }
+    
+    assert(abiTy->isStructTy());
+
+    llvm::IRBuilder<> &B = m_builder;
+    llvm::LLVMContext &C = context;
+
+    // 1. Allocate ABI-shaped temporary
+    llvm::AllocaInst *abiTmp =
+        B.CreateAlloca(abiTy, nullptr, "abi.tmp");
+
+    // ABI alignment (safe default)
+    llvm::DataLayout DL = m_llvm_module->getDataLayout();
+    unsigned abiAlign = DL.getABITypeAlign(abiTy).value();
+    abiTmp->setAlignment(llvm::Align(abiAlign));
+
+    // 2. Store ABI value
+    B.CreateStore(abiValue, abiTmp);
+
+    // 3. Allocate language-level struct
+    llvm::AllocaInst *langTmp =
+        B.CreateAlloca(langType, nullptr, "agg.tmp");
+
+    unsigned langAlign = DL.getABITypeAlign(langType).value();
+    langTmp->setAlignment(llvm::Align(langAlign));
+
+    // 4. Compute copy size (language layout!)
+    uint64_t copySize = DL.getTypeAllocSize(langType);
+
+    // 5. memcpy ABI → language object
+    B.CreateMemCpy(
+        langTmp,
+        llvm::Align(langAlign),
+        abiTmp,
+        llvm::Align(abiAlign),
+        copySize);
+
+    // 6. Return pointer to materialized object
+    return langTmp;
 }

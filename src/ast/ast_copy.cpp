@@ -357,6 +357,7 @@ std::shared_ptr<ASTNode> StructDeclaration::copy() const {
     for (const auto &[mname, method] : methods) {
         c->methods[mname] = std::dynamic_pointer_cast<FunctionDeclaration>(method->copy());
     }
+    std::cout << "Copied struct declaration: " << c->str() << "\n";
     return c;
 }
 

@@ -95,7 +95,6 @@ bool str_in_vector(const std::string &s, const std::vector<std::string> &vec, si
     return false;
 }
 
-// ---- Type parsing ----
 std::shared_ptr<Type> Parser::parse_type(bool top_level) {
     Token current = peek();
     std::shared_ptr<Type> t = nullptr;
@@ -126,10 +125,15 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
                 t = std::make_shared<GenericType>(name);
                 break;
             }
-            if (peek(1).type == TokenType::COLON) {
+            if (peek(1).type == TokenType::DOUBLE_COLON) {
                 std::vector<std::string> path;
                 path.push_back(consume(TokenType::ID).value);
-                while (match({TokenType::COLON})) {
+                while (peek().type == TokenType::DOUBLE_COLON) {
+                    // Check if this is a template instantiation
+                    if (peek(1).type == TokenType::LT) {
+                        break;
+                    }
+                    consume(TokenType::DOUBLE_COLON);
                     path.push_back(consume(TokenType::ID).value);
                 }
                 auto b = path.back();
@@ -137,6 +141,7 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
                 t = std::make_shared<QualifiedType>(path, b);
                 break;
             }
+
             t = parse_primitive_type();
             break;
         case TokenType::STAR:
@@ -204,9 +209,6 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
         return std::make_shared<Void>();
     if (std::find(current_generic_params.begin(), current_generic_params.end(), val) != current_generic_params.end())
         return std::make_shared<GenericType>(val);
-    for (std::string s : current_generic_params) {
-        std::cout << "Generic param: " << s << "\n";
-    }
     throw ParseError("Unknown type " + val, peek().line,
                      peek().column);
 }
@@ -681,7 +683,8 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                             break;
                     }
                     consume(TokenType::GT);
-                    expr = std::make_shared<TemplateInstantiation>(name, type_args);
+                    expr = std::make_shared<TemplateInstantiation>(
+                        name, type_args);
                     expr->line = t.line;
                     expr->col = t.column;
                     // Check for struct initializer after template instantiation
@@ -706,17 +709,58 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                 std::vector<std::string> module_path;
                 module_path.push_back(name);
                 consume(TokenType::DOUBLE_COLON);
+                std::shared_ptr<TemplateInstantiation> temp_inst = nullptr;
                 while (true) {
                     std::string part = consume(TokenType::ID).value;
                     module_path.push_back(part);
-                    if (!match({TokenType::DOUBLE_COLON}))
+                    // Check if the next token is :: followed by <
+                    // If so, this is a template instantiation, not further module access
+                    if (peek().type == TokenType::DOUBLE_COLON) {
+                        if (peek(1).type == TokenType::LT) {
+                            // This is a template instantiation
+                            break;
+                        }
+                        // Otherwise, continue with module path
+                        if (!match({TokenType::DOUBLE_COLON}))
+                            break;
+                    } else {
                         break;
+                    }
                 }
                 std::string member_name = module_path.back();
                 module_path.pop_back();
-                expr = std::make_shared<ModuleAccess>(module_path, member_name);
-                expr->line = t.line;
-                expr->col = t.column;
+
+                // Check for template instantiation after module access
+                if (peek().type == TokenType::DOUBLE_COLON && peek(1).type == TokenType::LT) {
+                    // Module-qualified template instantiation: module::template::<Type>
+                    consume(TokenType::DOUBLE_COLON);
+                    consume(TokenType::LT);
+                    std::vector<std::shared_ptr<Type>> type_args;
+                    while (true) {
+                        type_args.push_back(parse_type());
+                        if (peek().type == TokenType::COMMA)
+                            consume(TokenType::COMMA);
+                        else
+                            break;
+                    }
+                    consume(TokenType::GT);
+
+                    // Create a qualified name for the template
+                    std::string qualified_name;
+                    for (const auto& part : module_path) {
+                        qualified_name += part + "::";
+                    }
+                    qualified_name += member_name;
+
+                    expr = std::make_shared<TemplateInstantiation>(qualified_name, type_args);
+                    expr->line = t.line;
+                    expr->col = t.column;
+                } else {
+                    expr = std::make_shared<ModuleAccess>(module_path, member_name);
+                    expr->line = t.line;
+                    expr->col = t.column;
+                }
+
             } else {
                 expr = std::make_shared<VarAccess>(name);
                 expr->line = t.line;
@@ -1057,7 +1101,7 @@ std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
     for (const auto &gp : generic_params) {
         this->current_generic_params.push_back(gp);
     }
-        
+
     consume(TokenType::LPAREN);
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> params;
     bool variadic = false;

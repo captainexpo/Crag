@@ -1,8 +1,10 @@
 #pragma once
-#include "src/utils.h"
-#include <cassert>
+
 #ifndef AST_H
 #define AST_H
+
+#include "../utils.h"
+#include <cassert>
 
 #include <cstdint>
 #include <map>
@@ -462,7 +464,7 @@ struct TemplateInstanceType  : Type {
                          std::vector<std::shared_ptr<Type>> ta)
         : base(std::move(b)), type_args(std::move(ta)) {}
 
-    std::string str() const {
+    std::string str() const override {
         std::string result = base->str() + "::<";
         for (size_t i = 0; i < type_args.size(); ++i) {
             if (i > 0)
@@ -560,6 +562,8 @@ struct StructType : Type {
         std::string result = "Struct " + name + " { ";
         for (const auto &field : fields)
             result += field.first + ", ";
+        for (const auto &method : methods)
+            result += method.first + "(), ";
         result += "}";
         return result;
     }

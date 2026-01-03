@@ -1,8 +1,4 @@
-
-extern fn printf(fmt: *u8, ...) -> i32;
-extern fn malloc(size: usize) -> *void;
-extern fn realloc(ptr: *void, size: usize) -> *void;
-extern fn free(ptr: *void) -> i32;
+import "libc/libc.crag" as libc
 
 pub enum VecError(i32){
     ALLOC_ERROR = 1,
@@ -16,7 +12,7 @@ pub struct Vec<T> {
 
     fn init(self: *Vec::<T>) -> i32!VecError {
         self.size = 10;
-        self.elements = malloc(self.size*sizeof(T)) as *T;
+        self.elements = libc::stdlib::malloc(self.size*sizeof(T)) as *T;
         if (self.elements == null){
             return! VecError:ALLOC_ERROR;
         }
@@ -26,7 +22,7 @@ pub struct Vec<T> {
     fn append(self: *Vec::<T>, elem: T) -> i32!VecError {
         if (self.cur_elem >= self.size) {
             self.size *= 2;
-            self.elements = realloc(self.elements as *void, self.size) as *T;
+            self.elements = libc::stdlib::realloc(self.elements as *void, self.size * sizeof(T)) as *T;
             if (self.elements == null){
                 return! VecError:ALLOC_ERROR;
             }
@@ -44,36 +40,21 @@ pub struct Vec<T> {
         return 0;
     }
 
-    fn get(self: *Vec::<T>, idx: usize, elem: T) -> T!VecError {
+    fn get(self: *Vec::<T>, idx: usize) -> T!VecError {
         if (idx >= self.cur_elem || idx < 0) {
             return! VecError:OUT_OF_BOUNDS;
         }
         return self.elements[idx];
     }
 
-    fn get(self: *Vec::<T>) -> T {
-        self.cur_elem -= 1;
-        return elements[self.cur_elem];
+    fn len(self: *Vec::<T>) -> usize {
+        return self.cur_elem;
     }
 }
 
-fn new_vec<T>() -> Vec::<T> {
+fn new<T>() -> Vec::<T> {
     let v = Vec::<T> { cur_elem: 0, size: 0, elements: null };
     v.init();
     return v;
 }
 
-
-//fn main() -> i32 {
-//    let v = new_vec::<u8>();
-//    v.append('h');
-//    v.append('e');
-//    v.append('l');
-//    v.append('l');
-//    v.append('o');
-//    v.append(0);
-//    printf("%s\n", v.elements);
-//    printf("%d\n", v.cur_elem);
-//    let v1 = new_vec::<i32>();
-//    return 0;
-//}

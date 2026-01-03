@@ -49,7 +49,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     auto path = std::filesystem::path(raw_filepath);
     path = std::filesystem::absolute(path);
     auto moduleResolver = ModuleResolver(path.parent_path());
-    auto mod = moduleResolver.loadModule(path.filename().string());
+    auto mod = moduleResolver.loadRoot(path.filename().string());
 
     std::cout << mod->ast->toString();
 
@@ -80,7 +80,8 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     // Call llvm codegen directly here, should probably make it more modular later
     auto codegen = std::make_shared<LLVMCodegen>("mainmod", context, moduleResolver, options);
     bool has_errors = false;
-    for (std::string path : moduleResolver.getBestOrder()) {
+    std::vector<std::string> order = moduleResolver.getBestOrder();
+    for (std::string path : order) {
         auto module = moduleResolver.getModule(path);
         std::cout << "Generating code for module: " << path << "\n";
         codegen->generate(module);
@@ -96,6 +97,8 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
             has_errors = true;
         }
         // Set insert point back to main module after each compiled module
+        bool is_final_module = (path == order.back());
+        codegen->finished(is_final_module);
         codegen->prepareForNewModule();
         codegen->clearErrors();
     }

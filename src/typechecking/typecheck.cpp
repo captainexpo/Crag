@@ -8,7 +8,7 @@
 #include <memory>
 #include <optional>
 
-TypeChecker::TypeChecker() { pushScope(); }
+TypeChecker::TypeChecker() : m_const_eval(*new ConstEvaluator(this)) { pushScope(); }
 
 void TypeChecker::pushScope() { m_scopes.emplace_back(); }
 
@@ -18,13 +18,13 @@ void TypeChecker::popScope() {
 }
 
 bool TypeChecker::insertSymbol(const std::string &name,
-                               std::shared_ptr<Type> t) {
+                               std::shared_ptr<Type> t, ASTNodePtr decl) {
     if (m_scopes.empty())
         pushScope();
     auto &top = m_scopes.back();
-    if (top.find(name) != top.end())
+    if (top.find(name) != nullptr)
         return false;
-    top[name] = std::move(t);
+    top.symbols[name] = t;
     return true;
 }
 
@@ -32,8 +32,8 @@ std::optional<std::shared_ptr<Type>>
 TypeChecker::lookupSymbol(const std::string &name) const {
     for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
         auto found = it->find(name);
-        if (found != it->end())
-            return found->second;
+         if (found != nullptr)
+            return found;
     }
     return std::nullopt;
 }
@@ -238,8 +238,8 @@ TypeChecker::resolveType(const std::shared_ptr<Type> &t) {
         } else {
             // look in imported modules
             auto mod_name = qt->module_path[0];
-            auto it = m_imported_module_checkers.find(mod_name);
-            if (it != m_imported_module_checkers.end()) {
+            auto it = imported_module_checkers.find(mod_name);
+            if (it != imported_module_checkers.end()) {
                 auto imported_checker = it->second;
                 // Recursively resolve the rest of the module path
                 return imported_checker->resolveType(
@@ -252,13 +252,36 @@ TypeChecker::resolveType(const std::shared_ptr<Type> &t) {
         }
     }
     if (auto tut = std::dynamic_pointer_cast<TemplateInstanceType>(t)) {
-        // Create dummy template instance expression with resolved base and type args
-        auto base_type = resolveType(tut->base);
+        // Resolve type arguments
         std::vector<std::shared_ptr<Type>> resolved_args;
         for (const auto &arg : tut->type_args) {
             auto rat = resolveType(arg);
             resolved_args.push_back(rat);
         }
+
+        // Check if base is a qualified type (module-qualified template)
+        if (auto qt = std::dynamic_pointer_cast<QualifiedType>(tut->base)) {
+            // Build the qualified template name
+            std::string qualified_name;
+            for (const auto &part : qt->module_path) {
+                qualified_name += part + "::";
+            }
+            qualified_name += qt->type_name;
+
+            // Create template instantiation with qualified name
+            auto ti = std::make_shared<TemplateInstantiation>(qualified_name, resolved_args);
+            auto pair = inferTemplateInstantiation(ti);
+            auto instantiated_type = pair.first;
+            if (!instantiated_type) {
+                throw TypeCheckError(
+                    nullptr,
+                    "Failed to resolve template instantiation type for: " + tut->str());
+            }
+            return instantiated_type;
+        }
+
+        // Otherwise, resolve the base type normally
+        auto base_type = resolveType(tut->base);
         if (auto struct_type = std::dynamic_pointer_cast<StructType>(base_type)) {
             auto ti = std::make_shared<TemplateInstantiation>(struct_type->name, resolved_args);
             auto pair = inferTemplateInstantiation(ti); // Will instantiate the template
@@ -302,7 +325,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 auto st = std::make_shared<StructType>(sd->name);
                 st->complete = false;
                 m_structs[sd->name] = st;
-                insertSymbol(sd->name, st);
+                insertSymbol(sd->name, st, sd);
                 struct_decls.push_back(sd);
             }
         } else if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(decl)) {
@@ -310,7 +333,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
             auto ut = std::make_shared<UnionType>(ud->name);
             ut->complete = false;
             m_unions[ud->name] = ut;
-            insertSymbol(ud->name, ut);
+            insertSymbol(ud->name, ut, ud);
             union_decls.push_back(ud);
         } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
             if (fd->generic_params.size() > 0) {
@@ -318,7 +341,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 m_templates[fd->name] = fd;
             } else {
                 m_functions[fd->name] = fd->type;
-                insertSymbol(fd->name, fd->type);
+                insertSymbol(fd->name, fd->type, fd);
             }
         } else if (auto en = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
             if (!en->base_type) {
@@ -342,7 +365,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
             m_enums[en->name] = et;
             en->inferred_type = et;
-            insertSymbol(en->name, et);
+            insertSymbol(en->name, et, en);
         } else if (auto im = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
             auto import_checker = std::make_shared<TypeChecker>();
             import_checker->check(module->imports[im->alias]);
@@ -351,7 +374,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     throw TypeCheckError(e.first, "In imported module '" + im->alias + "': " + e.second);
                 }
             }
-            m_imported_module_checkers[im->alias] = import_checker;
+            imported_module_checkers[im->alias] = import_checker;
         } else if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
             auto alias_type = resolveType(ta->aliased_type);
             if (!alias_type) {
@@ -359,7 +382,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 return;
             }
             m_type_aliases[ta->name] = alias_type;
-            insertSymbol(ta->name, alias_type);
+            insertSymbol(ta->name, alias_type, ta);
         }
     }
 
@@ -386,7 +409,11 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
         checkUnionDeclaration(ud);
     }
     for (const auto &decl : module->ast->declarations) {
-        checkNode(decl);
+        try {
+            checkNode(decl);
+        } catch (const TypeCheckError &e) {
+            m_errors.emplace_back(e.node, e.what());
+        }
     }
 }
 
@@ -434,13 +461,16 @@ void TypeChecker::checkStructDeclaration(
     if (it != m_structs.end()) {
         it->second->fields = std::move(fields);
         it->second->methods = sd->methods;
+        std::cout << "Struct " << sd->name << " methods:\n";
+        for (const auto &m : sd->methods) {
+            std::cout << "  " << m.first << "\n";
+        }
         it->second->complete = true;
     } else {
         throw TypeCheckError(sd, "Internal error: struct " + sd->name + " not found in map");
     }
 
     for (const auto &m : sd->methods) {
-
         // Type check method bodies
         checkFunctionDeclaration(m.second);
     }
@@ -476,13 +506,15 @@ void TypeChecker::checkFunctionDeclaration(
         std::string pname =
             (i < fn->param_names.size() ? fn->param_names[i]
                                         : ("arg" + std::to_string(i)));
-        if (!insertSymbol(pname, fn->type->params[i])) {
+        if (!insertSymbol(pname, fn->type->params[i], fn)) {
             throw TypeCheckError(fn,
                                  "Duplicate parameter name " + pname + " in function " + fn->name);
         }
     }
 
-    m_expected_return_type = fn->type->ret;
+    m_expected_return_type = resolveType(fn->type->ret);
+    // Also update the function's return type in the AST for code generation
+    fn->type->ret = m_expected_return_type;
     if (fn->body) {
         checkStatement(fn->body);
     }
@@ -499,7 +531,7 @@ void TypeChecker::checkVariableDeclaration(
         var->var_type = resolveType(var->var_type);
 
     if (!var->initializer) {
-        if (!insertSymbol(name, var->var_type)) {
+        if (!insertSymbol(name, var->var_type, var)) {
             throw TypeCheckError(var, "Duplicate variable declaration: " + name);
         }
         return;
@@ -509,35 +541,33 @@ void TypeChecker::checkVariableDeclaration(
 
     if (auto expr = std::dynamic_pointer_cast<Expression>(init)) {
 
-        if (is_global) {
-            if (!var->is_const) {
-                throw TypeCheckError(
-                    var,
-                    "Global variable " + name +
-                        " must be declared const if it has an initializer");
-            }
-
-            auto const_val =
-                m_const_eval.evaluateVariableDeclaration(var);
-
-            if (!m_const_eval.ok()) {
-                for (const auto &e : m_const_eval.errors()) {
-                    throw TypeCheckError(e.first, e.second);
-                }
-            }
-
-            if (!const_val || !const_val->get()->initializer) {
-                throw TypeCheckError(
-                    var,
-                    "Failed to evaluate constant initializer for variable " + name);
-            }
-
-            var->initializer = const_val->get()->initializer;
-            expr = std::dynamic_pointer_cast<Expression>(var->initializer);
-        }
-
-        auto init_type =
-            resolveType(inferExpression(expr, var->var_type));
+        // if (is_global) {
+        //     if (!var->is_const) {
+        //         throw TypeCheckError(
+        //             var,
+        //             "Global variable " + name +
+        //                 " must be declared const if it has an initializer");
+        //     }
+        //
+        //     auto const_val =
+        //         m_const_eval.evaluateVariableDeclaration(var);
+        //
+        //     if (!m_const_eval.ok()) {
+        //         for (const auto &e : m_const_eval.errors()) {
+        //             throw TypeCheckError(e.first, e.second);
+        //         }
+        //     }
+        //
+        //     if (!const_val || !const_val->get()->initializer) {
+        //         throw TypeCheckError(
+        //             var,
+        //             "Failed to evaluate constant initializer for variable " + name);
+        //     }
+        //
+        //     var->initializer = const_val->get()->initializer;
+        //     expr = std::dynamic_pointer_cast<Expression>(var->initializer);
+        // }
+        auto init_type = resolveType(inferExpression(expr, var->var_type));
 
         if (!init_type) {
             throw TypeCheckError(
@@ -596,7 +626,7 @@ void TypeChecker::checkVariableDeclaration(
             "Unsupported initializer node for variable " + name);
     }
 
-    if (!insertSymbol(name, var->var_type)) {
+    if (!insertSymbol(name, var->var_type, var)) {
         throw TypeCheckError(
             var,
             "Duplicate variable declaration: " + name);
@@ -924,14 +954,24 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
     throw TypeCheckError(expr, "Type inference: unhandled expression type: " + expr->str());
 }
 
+
 std::shared_ptr<Type> TypeChecker::inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma) {
     if (ma->module_path.size() == 0) {
+        if (ma->member_name.empty()) {
+            throw TypeCheckError(ma, "Invalid module access with empty module path and member name");
+        }
+        if (ma->member_name == "") {
+            throw TypeCheckError(ma, "Invalid module access with empty member name");
+        }
+        if (lookupSymbol(ma->member_name) == std::nullopt) {
+            throw TypeCheckError(ma, "Unknown symbol in imported module: " + ma->member_name);
+        }
         return inferVarAccess(std::make_shared<VarAccess>(ma->member_name));
     }
     auto next_module_name = ma->module_path[0];
     // std::cout << "Inferring module access: " << ma->str() << "\n";
-    auto maybe_mod = m_imported_module_checkers.find(next_module_name);
-    if (maybe_mod == m_imported_module_checkers.end()) {
+    auto maybe_mod = imported_module_checkers.find(next_module_name);
+    if (maybe_mod == imported_module_checkers.end()) {
         throw TypeCheckError(ma, "Unknown module: " + next_module_name);
     }
 
@@ -941,7 +981,8 @@ std::shared_ptr<Type> TypeChecker::inferModuleAccess(const std::shared_ptr<Modul
     auto sub_ma = std::make_shared<ModuleAccess>(
         std::vector<std::string>(ma->module_path.begin() + 1, ma->module_path.end()),
         ma->member_name);
-    return mod_checker->inferModuleAccess(sub_ma);
+    auto result = mod_checker->inferModuleAccess(sub_ma);
+    return result;
 }
 
 std::shared_ptr<Type>
@@ -985,7 +1026,7 @@ TypeChecker::inferLiteral(const std::shared_ptr<Literal> &lit,
     if (expected && expected->isNumeric() && lit->lit_type->isNumeric()) {
         if (canImplicitCast(preType, expected)) {
             auto casted = m_const_eval.castLiteral(lit, expected);
-            if (casted) {
+            if (m_const_eval.ok() && casted) {
                 lit->value = casted->value;
                 lit->lit_type = expected;
                 lit->inferred_type = expected;
@@ -1213,6 +1254,7 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
             throw TypeCheckError(mc, "Method call on non-struct type: " + typeName(bt));
         }
     }
+    std::cout << "Inferring method call: " << mc->str() << "\n";
     auto it = st->methods.find(mc->method);
     if (it == st->methods.end()) {
         throw TypeCheckError(mc, "Struct " + st->name + " has no method " + mc->method);
@@ -1452,3 +1494,30 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
     init->inferred_type = resolveType(st);
     return st;
 }
+
+
+ASTNodePtr TypeChecker::lookupConstVariableInModulePath(const std::vector<std::string> &module_path, const std::string &var_name) {
+    if (module_path.size() == 0) {
+        // lookup in current module's global scope
+        auto maybe = lookupSymbol(var_name);
+        if (current_module->exports.find(var_name) == current_module->exports.end()) {
+            throw TypeCheckError(nullptr, "Variable " + var_name + " is not exported from module " + current_module->path);
+        }
+        if (!maybe) {
+            throw TypeCheckError(nullptr, "Unknown variable in current module: " + var_name);
+        }
+        return m_scopes.front().symbol_declarations[var_name];
+    }
+    auto next_module_name = module_path[0];
+    auto maybe_mod = imported_module_checkers.find(next_module_name);
+    if (maybe_mod == imported_module_checkers.end()) {
+        throw TypeCheckError(nullptr, "Unknown module: " + next_module_name);
+    }
+
+    std::shared_ptr<TypeChecker> mod_checker = maybe_mod->second;
+    // Recurse into sub-module access
+
+    auto sub_module_path = std::vector<std::string>(module_path.begin() + 1, module_path.end());
+    return mod_checker->lookupConstVariableInModulePath(sub_module_path, var_name);
+}
+

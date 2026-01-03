@@ -2,6 +2,7 @@
 #include "ast/ast.h"
 #include "typechecking/typecheck.h"
 #include <cstdint>
+#include <memory>
 #include <variant>
 
 void ConstEvaluator::error(const ASTNodePtr &node, const std::string &msg) {
@@ -120,7 +121,7 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
         auto srcFloatBits = getFloatBitWidth(from_type);
         auto dstFloatBits = getFloatBitWidth(to_type);
 
-        // --- integer -> integer (trunc/extend) ---
+        // integer -> integer (trunc/extend)
         if (srcIntBits && dstIntBits) {
             // get source value as unsigned 64 for masking, and signed for sign handling
             uint64_t src_u = 0;
@@ -289,6 +290,7 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
         // fallback: unsupported constant cast
         return std::nullopt;
     }
+
     if (auto va = std::dynamic_pointer_cast<VarAccess>(expr)) {
         auto it = m_const_vars.find(va->name);
         if (it != m_const_vars.end()) {
@@ -297,6 +299,33 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
             error(va, "Variable is not compile-time known: " + va->name);
             return std::nullopt;
         }
+    }
+
+    if (auto funcCall = std::dynamic_pointer_cast<FuncCall>(expr)) {
+        error(funcCall, "Function calls are not allowed in constant expressions");
+        return std::nullopt;
+    }
+
+    if (auto arrayLit = std::dynamic_pointer_cast<ArrayLiteral>(expr)) {
+        std::vector<ExprPtr> constElements;
+        for (const auto &elem : arrayLit->elements) {
+            auto valOpt = evaluateExpression(elem);
+            if (!valOpt)
+                return std::nullopt;
+            auto lit = std::dynamic_pointer_cast<Literal>(*valOpt);
+            if (!lit) {
+                error(elem, "Array element is not a constant literal");
+                return std::nullopt;
+            }
+            constElements.push_back(lit);
+        }
+        return std::make_shared<ArrayLiteral>(constElements);
+    }
+
+    if (auto moduleAccess = std::dynamic_pointer_cast<ModuleAccess>(expr)) {
+        // Search through const vars with module prefix
+        auto path = moduleAccess->module_path;
+        return std::dynamic_pointer_cast<Expression>(m_type_checker->lookupConstVariableInModulePath(path, moduleAccess->member_name));
     }
 
     return std::nullopt;
@@ -316,14 +345,8 @@ std::optional<std::shared_ptr<VariableDeclaration>> ConstEvaluator::evaluateVari
     if (!val)
         return std::nullopt;
 
-    auto lit = std::dynamic_pointer_cast<Literal>(*val);
-    if (!lit) {
-        error(var, "Const variable initializer is not a literal");
-        return std::nullopt;
-    }
-
-    m_const_vars[var->name] = lit;
-    var->initializer = lit;
+    m_const_vars[var->name] = val.value();
+    var->initializer = val.value();
     return var;
 }
 
@@ -556,16 +579,16 @@ std::shared_ptr<Literal> ConstEvaluator::castLiteral(const LiteralPtr &lit, cons
     auto lit_type = lit->lit_type;
     if (!canExplicitCast(lit_type, targetType)) {
         error(lit, "Invalid constant cast from " + lit_type->str() + " to " +
-                        targetType->str());
-        return nullptr; 
+                       targetType->str());
+        return nullptr;
     }
     // Create a TypeCast node to reuse existing logic
     auto typeCastNode = std::make_shared<TypeCast>(lit, targetType, CastType::Normal);
     auto castedLiteralOpt = evaluateExpression(typeCastNode);
     if (!castedLiteralOpt) {
         error(lit, "Failed to cast literal from " + lit_type->str() + " to " +
-                        targetType->str());
-        return nullptr; 
+                       targetType->str());
+        return nullptr;
     }
     auto castedLiteral = std::dynamic_pointer_cast<Literal>(*castedLiteralOpt);
     if (!castedLiteral) {

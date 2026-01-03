@@ -29,12 +29,28 @@ bool canExplicitCast(const std::shared_ptr<Type> &from,
                      const std::shared_ptr<Type> &to);
 std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
                                   const std::shared_ptr<Type> &to);
+
+typedef struct TypeScope {
+    std::unordered_map<std::string, std::shared_ptr<Type>> symbols;
+    std::unordered_map<std::string, ASTNodePtr> symbol_declarations;
+
+    std::shared_ptr<Type> find(const std::string &name) const {
+        auto it = symbols.find(name);
+        if (it != symbols.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+} TypeScope;
+
 class TypeChecker {
   public:
     TypeChecker();
 
     // Entry point
     void check(std::shared_ptr<Module> module);
+    ASTNodePtr lookupConstVariableInModulePath(const std::vector<std::string> &module_path,
+                                               const std::string &var_name);
 
     // Errors collected during checking
     const std::vector<std::pair<ASTNodePtr, std::string>> &errors() const {
@@ -42,15 +58,16 @@ class TypeChecker {
     }
     bool ok() const { return m_errors.empty(); }
 
+    std::unordered_map<std::string, std::shared_ptr<TypeChecker>> imported_module_checkers;
   private:
     std::shared_ptr<Module> current_module;
 
     std::vector<std::pair<ASTNodePtr, std::string>> m_errors; // Collected errors
 
-    ConstEvaluator m_const_eval; // For constant expression evaluation
+    ConstEvaluator m_const_eval;
 
     // Scope / symbol table: stack of name -> Type
-    std::vector<std::unordered_map<std::string, std::shared_ptr<Type>>> m_scopes;
+    std::vector<TypeScope> m_scopes;
 
     // Struct/type registry for named structs and functions TODO: replace them all with aliases
     std::unordered_map<std::string, std::shared_ptr<StructType>> m_structs;
@@ -71,12 +88,11 @@ class TypeChecker {
 
     std::shared_ptr<Type> m_expected_return_type; // Current function return type
 
-    std::unordered_map<std::string, std::shared_ptr<TypeChecker>> m_imported_module_checkers;
 
     // Scope helpers
     void pushScope();
     void popScope();
-    bool insertSymbol(const std::string &name, std::shared_ptr<Type> t);
+    bool insertSymbol(const std::string &name, std::shared_ptr<Type> t, ASTNodePtr decl);
     std::optional<std::shared_ptr<Type>> lookupSymbol(const std::string &name) const;
 
     // Type helpers

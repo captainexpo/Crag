@@ -101,7 +101,9 @@ class LLVMCodegen : public Backend {
     void compileObjectFileToExecutable(const std::string &object_filepath,
                                        const std::filesystem::path &executable_filepath,
                                        const std::filesystem::path &runtime_path,
-                                       bool no_runtime);
+                                       bool no_runtime, std::string additional_compiler_args = "") override;
+
+    void finished(bool is_final_module); // Call after all code generation is done
 
     const std::vector<CodeGenError> &errors() const {
         return m_errors;
@@ -156,6 +158,12 @@ class LLVMCodegen : public Backend {
 
     std::vector<llvm::Value *> m_runtime_panic_strings;
 
+
+    const std::string RUNTIME_PANIC_FUNC_NAME = "__panic__";
+    const std::string GLOBAL_VAR_INIT_FUNC_NAME = "__global_var_init__";
+
+    llvm::Value* addGlobalVarInitializer(llvm::Value* var, std::shared_ptr<Expression> initializer);
+
     void emitBuiltinDeclarations();
 
     inline std::string canonicalizeNonexternName(const std::string &name) const {
@@ -181,7 +189,7 @@ class LLVMCodegen : public Backend {
     llvm::Function *generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> funcDecl);
     llvm::Function *generateFunctionBody(std::shared_ptr<FunctionDeclaration> funcDecl, llvm::Function *function);
 
-    void generateVariableDeclaration(
+    llvm::Value* generateVariableDeclaration(
         const std::shared_ptr<VariableDeclaration> &varDecl);
     void generateStructDeclaration(
         const std::shared_ptr<StructDeclaration> &structDecl);
@@ -225,12 +233,16 @@ class LLVMCodegen : public Backend {
         const std::shared_ptr<StructInitializer> &structInit,
         bool loadValue = true);
     llvm::Value *generateBlock(const std::shared_ptr<Block> &blockNode);
-    llvm::Value *generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt);
-    llvm::Value *generateWhileStatement(const std::shared_ptr<WhileStatement> &whileStmt);
-    llvm::Value *generateForStatement(const std::shared_ptr<ForStatement> &forStmt);
-    llvm::Value *generateReturnStatement(const std::shared_ptr<ReturnStatement> &retStmt);
-    llvm::Value *generateExpressionStatement(const std::shared_ptr<ExpressionStatement> &exprStmt);
+    llvm::Value* generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt);
+    llvm::Value* generateWhileStatement(const std::shared_ptr<WhileStatement> &whileStmt);
+    llvm::Value* generateForStatement(const std::shared_ptr<ForStatement> &forStmt);
+    llvm::Value* generateReturnStatement(const std::shared_ptr<ReturnStatement> &retStmt);
+    llvm::Value* generateExpressionStatement(const std::shared_ptr<ExpressionStatement> &exprStmt);
 
-    llvm::Value *conditionOrPanic(llvm::Value *condition, RuntimePanicType errorType, int line, int col);
+    llvm::Value* materializeAggregate(llvm::Value* abiValue, llvm::StructType* structType);
+
+    bool isLValue(const std::shared_ptr<Expression> &expr);
+
+    void conditionOrPanic(llvm::Value *condition, RuntimePanicType errorType, int line, int col);
 };
 #endif
