@@ -575,8 +575,28 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
         throw CodeGenError(func, "Duplicate defition of function: " + func->name);
     }
 
+    // For extern functions, we need to apply ABI coercion to struct parameters and return types
+    llvm::FunctionType *abiType = fType;
+    if (func->is_extern) {
+        std::vector<llvm::Type *> abiParamTypes;
+        for (llvm::Type *paramType : fType->params()) {
+            if (shouldCoerceForABI(paramType)) {
+                abiParamTypes.push_back(getABICoercionType(paramType));
+            } else {
+                abiParamTypes.push_back(paramType);
+            }
+        }
+
+        llvm::Type *abiRetType = fType->getReturnType();
+        if (shouldCoerceForABI(abiRetType)) {
+            abiRetType = getABICoercionType(abiRetType);
+        }
+
+        abiType = llvm::FunctionType::get(abiRetType, abiParamTypes, fType->isVarArg());
+    }
+
     llvm::Function *function = llvm::Function::Create(
-        fType, llvm::Function::ExternalLinkage, fname, m_llvm_module.get());
+        abiType, llvm::Function::ExternalLinkage, fname, m_llvm_module.get());
     CUR_SCOPE.set(fname, function, fType, func->type);
     // Set names for all arguments
     unsigned int idx = 0;
@@ -927,105 +947,105 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
     static const std::map<std::string, OpInfo> ops = {
         {"+",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateAdd(a, b, "addtmp");
+              return m_builder.CreateAdd(a, b, "add");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFAdd(a, b, "faddtmp");
+              return m_builder.CreateFAdd(a, b, "add");
           }}},
         {"-",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateSub(a, b, "subtmp");
+              return m_builder.CreateSub(a, b, "sub");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFSub(a, b, "fsubtmp");
+              return m_builder.CreateFSub(a, b, "sub");
           }}},
         {"*",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateMul(a, b, "multmp");
+              return m_builder.CreateMul(a, b, "mul");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFMul(a, b, "fmultmp");
+              return m_builder.CreateFMul(a, b, "mul");
           }}},
         {"/",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateSDiv(a, b, "divtmp");
+              return m_builder.CreateSDiv(a, b, "div");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFDiv(a, b, "fdivtmp");
+              return m_builder.CreateFDiv(a, b, "div");
           }}},
         {"%",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateSRem(a, b, "modtmp");
+              return m_builder.CreateSRem(a, b, "mod");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFRem(a, b, "fmodtmp");
+              return m_builder.CreateFRem(a, b, "mod");
           }}},
 
         {"==",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpEQ(a, b, "eqtmp");
+              return m_builder.CreateICmpEQ(a, b, "eq");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpUEQ(a, b, "feqtmp");
+              return m_builder.CreateFCmpUEQ(a, b, "eq");
           }}},
         {"!=",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpNE(a, b, "netmp");
+              return m_builder.CreateICmpNE(a, b, "ne");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpUNE(a, b, "fnetmp");
+              return m_builder.CreateFCmpUNE(a, b, "ne");
           }}},
         {"<",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpSLT(a, b, "lttmp");
+              return m_builder.CreateICmpSLT(a, b, "lt");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpULT(a, b, "flttmp");
+              return m_builder.CreateFCmpULT(a, b, "lt");
           }}},
         {"<=",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpSLE(a, b, "letmp");
+              return m_builder.CreateICmpSLE(a, b, "le");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpULE(a, b, "fletmp");
+              return m_builder.CreateFCmpULE(a, b, "le");
           }}},
         {">",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpSGT(a, b, "gttmp");
+              return m_builder.CreateICmpSGT(a, b, "gt");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpUGT(a, b, "fgttmp");
+              return m_builder.CreateFCmpUGT(a, b, "gt");
           }}},
         {">=",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpSGE(a, b, "getmp");
+              return m_builder.CreateICmpSGE(a, b, "ge");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpUGE(a, b, "fgetmp");
+              return m_builder.CreateFCmpUGE(a, b, "ge");
           }}},
         {"<<",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateShl(a, b, "shltmp");
+              return m_builder.CreateShl(a, b, "shl");
           },
           nullptr}},
         {">>",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateAShr(a, b, "shrtmp");
+              return m_builder.CreateAShr(a, b, "shr");
           },
           nullptr}},
         {"&",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateAnd(a, b, "andtmp");
+              return m_builder.CreateAnd(a, b, "and");
           },
           nullptr}},
         {"|",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateOr(a, b, "ortmp");
+              return m_builder.CreateOr(a, b, "or");
           },
           nullptr}},
         {"^",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateXor(a, b, "xortmp");
+              return m_builder.CreateXor(a, b, "xor");
           },
           nullptr}},
     };
@@ -1333,83 +1353,92 @@ llvm::Value *LLVMCodegen::generateEnumAccess(const std::shared_ptr<EnumAccess> &
     return generateLiteral(literal, loadValue);
 }
 
-llvm::Value *LLVMCodegen::generateMethodCall(const std::shared_ptr<MethodCall> &methodCall, bool loadValue) {
-
+llvm::Value *LLVMCodegen::generateMethodCall(
+    const std::shared_ptr<MethodCall> &methodCall,
+    bool /*loadValue*/
+) {
     auto structAccess = methodCall->object;
-    llvm::Value *objPtr = generateAddress(std::static_pointer_cast<Expression>(structAccess));
-    if (!objPtr) {
-        throw CodeGenError(structAccess, "Failed to generate address for method call object");
+    llvm::Value *obj = generateAddress(
+        std::static_pointer_cast<Expression>(structAccess));
+
+    if (!obj) {
+        throw CodeGenError(structAccess,
+            "Failed to generate address for method call object");
     }
-    auto structType = std::dynamic_pointer_cast<StructType>(structAccess->inferred_type);
+
+    auto structType =
+        std::dynamic_pointer_cast<StructType>(structAccess->inferred_type);
+
     if (!structType) {
-        auto ptrType = std::dynamic_pointer_cast<PointerType>(structAccess->inferred_type);
+        auto ptrType =
+            std::dynamic_pointer_cast<PointerType>(structAccess->inferred_type);
         if (ptrType) {
-            structType = std::dynamic_pointer_cast<StructType>(ptrType->base);
-            // Update objPtr to load the pointer value
-            if (objPtr) {
-                objPtr = m_builder.CreateLoad(
-                    llvm::PointerType::getUnqual(context), objPtr,
-                    "load_ptr_for_method");
-            }
-        }
-        if (!structType) {
-            throw CodeGenError(structAccess, "Method call on non-pointer, non-struct type: " + structAccess->inferred_type->str());
+            structType =
+                std::dynamic_pointer_cast<StructType>(ptrType->base);
+            obj = m_builder.CreateLoad(
+                llvm::PointerType::getUnqual(context),
+                obj,
+                "load_ptr_for_method");
         }
     }
+
     if (!structType) {
         throw CodeGenError(structAccess,
-                           "Failed to determine struct type for method call");
+            "Method call on non-struct type");
     }
-    // Find the struct type
-    auto accessee = m_structTypes.find(structType->name);
-    if (accessee == m_structTypes.end()) {
-        throw CodeGenError(structAccess, "Unknown struct type in method call: " + structType->name);
+
+    std::string mangledName =
+        structType->name + "." + methodCall->method;
+
+    llvm::Function *callee =
+        m_llvm_module->getFunction(mangledName);
+
+    if (!callee) {
+        throw CodeGenError(methodCall,
+            "Unknown method: " + mangledName);
     }
-    // Mangle method name - struct methods have external linkage so don't namespace them
-    std::string mangledName = structType->name + "." + methodCall->method;
-    // Prepare arguments
-    std::vector<llvm::Value *> argsV;
-    argsV.push_back(objPtr); // 'this' pointer
+
+    std::vector<llvm::Value *> args;
+
+    // If method expects struct by value, load it
+    if (callee->getArg(0)->getType()->isStructTy()) {
+        obj = m_builder.CreateLoad(
+            callee->getArg(0)->getType(),
+            obj,
+            "load_this");
+    }
+
+    args.push_back(obj);
+
     for (const auto &arg : methodCall->args) {
-        argsV.push_back(generateExpression(arg));
-    }
-    llvm::Function *calleeValue = m_llvm_module->getFunction(mangledName);
-    if (!calleeValue) {
-        throw CodeGenError(methodCall, "Unknown method: " + mangledName);
+        args.push_back(generateExpression(arg));
     }
 
-    auto v = m_builder.CreateCall(calleeValue, argsV, calleeValue->getFunctionType()->getReturnType() != llvm::Type::getVoidTy(context) ? "methodcalltmp" : "");
-    llvm::Type *retTy = calleeValue->getReturnType();
-    bool isAggregate = retTy->isStructTy();
-    if (isAggregate) {
-        llvm::AllocaInst *tmp =
-            m_builder.CreateAlloca(retTy, nullptr, "methodcall.tmp");
+    llvm::CallInst *call =
+        m_builder.CreateCall(callee, args, callee->getFunctionType()->getReturnType()->isVoidTy() ? "" : "methodcalltmp");
 
-        m_builder.CreateStore(v, tmp);
-
-        return tmp;
-    }
-    return v;
+    return call;
 }
 llvm::Value *
 LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
                               bool loadValue) {
     std::vector<llvm::Value *> argsV;
-    for (const auto &arg : funcCall->args) {
-        argsV.push_back(generateExpression(arg));
-    }
 
-    llvm::Value *calleeValue =
-        generateExpression(std::static_pointer_cast<Expression>(funcCall->func));
+    llvm::Value *calleeValue = generateExpression(std::static_pointer_cast<Expression>(funcCall->func));
     if (!calleeValue) {
         throw CodeGenError(funcCall, "Failed to generate callee for function call");
     }
 
     llvm::FunctionType *funcTy = nullptr;
+    bool isExtern = false;
 
     if (auto *func = llvm::dyn_cast<llvm::Function>(calleeValue)) {
-        // Direct function
+        // Hacky way to determine if function is extern:
+        // If the function name starts with '/', it's internal
+        // TODO: Better way to mark internal vs extern functions b/c for some reason the cleaner ways don't work
         funcTy = func->getFunctionType();
+        std::string funcName = func->getName().str();
+        isExtern = !funcName.empty() && funcName[0] != '/';
     } else if (calleeValue->getType()->isPointerTy()) {
         // Indirect call via function pointer
         auto it = funcCall->func->inferred_type;
@@ -1425,6 +1454,27 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     } else {
         throw CodeGenError(funcCall, "Callee is not a function or function pointer: " +
                                          funcCall->func->str());
+    }
+
+    // Generate argument values and apply ABI coercion if needed
+    unsigned int argIdx = 0;
+    for (const auto &arg : funcCall->args) {
+        llvm::Value *argVal = generateExpression(arg);
+
+        // Apply ABI coercion for extern functions
+        if (isExtern && argIdx < funcTy->getNumParams()) {
+            llvm::Type *paramType = funcTy->getParamType(argIdx);
+            llvm::Type *argType = argVal->getType();
+
+            // If the actual param type in the function is different (due to ABI coercion),
+            // we need to coerce the argument
+            if (argType->isStructTy() && shouldCoerceForABI(argType)) {
+                argVal = coerceToABI(argVal, argType);
+            }
+        }
+
+        argsV.push_back(argVal);
+        argIdx++;
     }
 
     // Apply default argument promotions for varargs
@@ -1444,7 +1494,20 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
         }
     }
 
-    return m_builder.CreateCall(funcTy, calleeValue, argsV, funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
+    llvm::Value *result = m_builder.CreateCall(funcTy, calleeValue, argsV,
+                                                funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
+
+    // If calling an extern function that returns a coerced struct, convert it back
+    if (isExtern && result && shouldCoerceForABI(funcTy->getReturnType())) {
+        if (funcCall->inferred_type && IS_INSTANCE(funcCall->inferred_type, StructType)) {
+            llvm::Type *structType = getLLVMType(funcCall->inferred_type);
+            if (structType->isStructTy()) {
+                result = coerceFromABI(result, structType);
+            }
+        }
+    }
+
+    return result;
 }
 void LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicType panicType, int line, int col) {
 
@@ -1456,12 +1519,9 @@ void LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicType pani
     m_builder.CreateCondBr(condition, thenBB, elseBB);
 
     m_builder.SetInsertPoint(thenBB);
-    // Then block: condition is true, continue execution
     m_builder.CreateBr(mergeBB);
     m_builder.SetInsertPoint(elseBB);
-    // Else block: condition is false, emit panic
 
-    // Get panic function (will be extern declared)
     llvm::Function *panicFunc = m_llvm_module->getFunction(RUNTIME_PANIC_FUNC_NAME);
     llvm::FunctionType *panicFuncTy = panicFunc->getFunctionType();
 
@@ -1477,34 +1537,33 @@ void LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicType pani
 }
 llvm::Value *LLVMCodegen::generateArrayAccess(
     const std::shared_ptr<OffsetAccess> &arrayAccess, bool loadValue) {
-    // if (!arrayAccess || !arrayAccess->base || !arrayAccess->index) {
-    //     throw CodeGenError(nullptr, "Invalid array access: missing base or index expression");
-    // }
-    llvm::Value *basePtr = generateAddress(
-        std::static_pointer_cast<Expression>(arrayAccess->base));
+    if (!arrayAccess || !arrayAccess->base || !arrayAccess->index) {
+        throw CodeGenError(nullptr, "Invalid array access: missing base or index expression");
+    }
+    llvm::Value *basePtr = generateAddress(std::static_pointer_cast<Expression>(arrayAccess->base));
     std::cout << "Base ptr for array access: " << basePtr << "\n";
-    // if (!basePtr) {
-    //     throw CodeGenError(arrayAccess, "Failed to generate base address for array access");
-    // }
+    if (!basePtr) {
+        throw CodeGenError(arrayAccess, "Failed to generate base address for array access");
+    }
     llvm::Value *index = generateExpression(arrayAccess->index);
-    // if (!index) {
-    //     throw CodeGenError(arrayAccess->index, "Failed to generate index for array access");
-    // }
-    // if (!arrayAccess->base->inferred_type ||
-    //     arrayAccess->base->inferred_type->kind() != TypeKind::Array) {
-    //     throw CodeGenError(arrayAccess->base, "Base expression is not of array type: " +
-    //                                               (arrayAccess->base->inferred_type ? arrayAccess->base->inferred_type->str() : "null"));
-    // }
+    if (!index) {
+        throw CodeGenError(arrayAccess->index, "Failed to generate index for array access");
+    }
+    if (!arrayAccess->base->inferred_type ||
+        arrayAccess->base->inferred_type->kind() != TypeKind::Array) {
+        throw CodeGenError(arrayAccess->base, "Base expression is not of array type: " +
+                                                  (arrayAccess->base->inferred_type ? arrayAccess->base->inferred_type->str() : "null"));
+    }
     llvm::Type *elementType = getLLVMType(
         std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)->element_type);
-    // if (!elementType) {
-    //     throw CodeGenError(arrayAccess, "Unknown element type for array access: " +
-    //                                         arrayAccess->base->inferred_type->str());
-    // }
+    if (!elementType) {
+        throw CodeGenError(arrayAccess, "Unknown element type for array access: " +
+                                            arrayAccess->base->inferred_type->str());
+    }
     // Condition check for index within bounds
-    // if (index->getType() != llvm::Type::getInt64Ty(context)) {
-    //     index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
-    // }
+    if (index->getType() != llvm::Type::getInt64Ty(context)) {
+        index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
+    }
     llvm::Value *arrLoad = m_builder.CreateLoad(
         getLLVMType(arrayAccess->base->inferred_type), basePtr);
     if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
@@ -1521,15 +1580,13 @@ llvm::Value *LLVMCodegen::generateArrayAccess(
         conditionOrPanic(indexInBounds, OutOfBounds, arrayAccess->line, arrayAccess->col);
     }
 
-    // data ptr
     llvm::Value *dataPtr = m_builder.CreateExtractValue(
         arrLoad,
         {0}, "array_data_ptr");
-    // Gep instruction
+
     llvm::Value *gep = m_builder.CreateGEP(
         elementType, dataPtr, index, "array_elem_ptr");
 
-    // Load the value at the computed address
     if (loadValue)
         return m_builder.CreateLoad(elementType, gep, "load_array_elem");
     else
@@ -1543,8 +1600,6 @@ llvm::Value *LLVMCodegen::generateOffsetAccess(
         throw CodeGenError(nullptr, "Invalid offset access: missing base or index expression");
     }
     if (offsetAccess->base->inferred_type->kind() == TypeKind::Array) {
-        std::cout << "Generating array access for offset access\n";
-        std::cout << "load val: " << (loadValue ? "true" : "false") << "\n";
         return generateArrayAccess(offsetAccess, loadValue);
     }
 
@@ -1562,10 +1617,9 @@ llvm::Value *LLVMCodegen::generateOffsetAccess(
         throw CodeGenError(offsetAccess, "Unknown type for offset access: " +
                                              offsetAccess->inferred_type->str());
     }
-    // Gep instruction
     llvm::Value *gep =
         m_builder.CreateGEP(resultType, basePtr, index, "offset_access");
-    // Load the value at the computed address
+
     if (loadValue)
         return m_builder.CreateLoad(resultType, gep, "load_offset");
     else
@@ -1708,6 +1762,11 @@ bool LLVMCodegen::isLValue(const std::shared_ptr<Expression> &expr) {
         // Only a pointer-returning method can be an lvalue
         auto mc = std::dynamic_pointer_cast<MethodCall>(expr);
         return mc->inferred_type && mc->inferred_type->kind() == TypeKind::Pointer;
+    }
+    if (IS_INSTANCE(expr, FuncCall)) {
+        // Only a pointer-returning function can be an lvalue
+        auto fc = std::dynamic_pointer_cast<FuncCall>(expr);
+        return fc->inferred_type && fc->inferred_type->kind() == TypeKind::Pointer;
     }
 
     // Literals, computations, temporaries, etc. are never lvalues
@@ -1853,7 +1912,7 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
         llvmStruct, basePtr,
         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), fieldIndex)},
-        "field_access");
+        fieldName);
 
     if (!gep) {
         throw CodeGenError(fieldAccess->base, "Failed to create GEP for field '" + fieldName +
@@ -1865,8 +1924,7 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
             throw CodeGenError(fieldAccess, "Field '" + fieldName +
                                                 "' has no inferred type for load");
         }
-        return m_builder.CreateLoad(getLLVMType(fieldAccess->inferred_type), gep,
-                                    "load_field");
+        return m_builder.CreateLoad(getLLVMType(fieldAccess->inferred_type), gep);
     }
 
     return gep;
@@ -1966,7 +2024,7 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
             llvmStruct, alloca,
             {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
              llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), fieldIndex)},
-            "fieldptr");
+            field.first + "_ptr");
         llvm::Value *fieldVal = generateExpression(field.second);
         m_builder.CreateStore(fieldVal, fieldPtr);
     }
@@ -2151,13 +2209,13 @@ llvm::Value *LLVMCodegen::materializeAggregate(llvm::Value *abiValue, llvm::Stru
     assert(langType);
 
     llvm::Type *abiTy = abiValue->getType();
-    
+
     // If abiValue is already a pointer, dereference to get the struct type
     if (abiTy->isPointerTy()) {
         // abiValue is already an address, return it directly
         return abiValue;
     }
-    
+
     assert(abiTy->isStructTy());
 
     llvm::IRBuilder<> &B = m_builder;
@@ -2195,4 +2253,86 @@ llvm::Value *LLVMCodegen::materializeAggregate(llvm::Value *abiValue, llvm::Stru
 
     // 6. Return pointer to materialized object
     return langTmp;
+}
+
+// ABI coercion helper functions
+bool LLVMCodegen::shouldCoerceForABI(llvm::Type *type) {
+    // Only coerce structs for extern functions
+    if (!type->isStructTy()) {
+        return false;
+    }
+
+    llvm::StructType *structType = llvm::cast<llvm::StructType>(type);
+    llvm::DataLayout DL = m_llvm_module->getDataLayout();
+    uint64_t size = DL.getTypeAllocSize(structType);
+
+    // Coerce structs that are 1, 2, 4, 8, or 16 bytes
+    // (following System V AMD64 ABI rules)
+    return size == 1 || size == 2 || size == 4 || size == 8 || size == 16;
+}
+
+llvm::Type *LLVMCodegen::getABICoercionType(llvm::Type *structType) {
+    if (!structType->isStructTy()) {
+        return structType;
+    }
+
+    llvm::DataLayout DL = m_llvm_module->getDataLayout();
+    uint64_t size = DL.getTypeAllocSize(structType);
+
+    // Map struct size to appropriate integer type
+    switch (size) {
+        case 1:
+            return llvm::Type::getInt8Ty(context);
+        case 2:
+            return llvm::Type::getInt16Ty(context);
+        case 4:
+            return llvm::Type::getInt32Ty(context);
+        case 8:
+            return llvm::Type::getInt64Ty(context);
+        case 16:
+            // Use <2 x i64> for 16-byte structs
+            return llvm::VectorType::get(llvm::Type::getInt64Ty(context), 2, false);
+        default:
+            return structType;
+    }
+}
+
+llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *structType) {
+    if (!shouldCoerceForABI(structType)) {
+        return structValue;
+    }
+
+    llvm::Type *abiType = getABICoercionType(structType);
+
+    // Allocate temporary for struct
+    llvm::AllocaInst *structAlloca = m_builder.CreateAlloca(structType, nullptr, "struct.tmp");
+    m_builder.CreateStore(structValue, structAlloca);
+
+    // Bitcast to ABI type pointer and load
+    llvm::Value *abiPtr = m_builder.CreateBitCast(structAlloca,
+                                                   llvm::PointerType::getUnqual(context),
+                                                   "abi.ptr");
+    llvm::Value *abiValue = m_builder.CreateLoad(abiType, abiPtr, "abi.val");
+
+    return abiValue;
+}
+
+llvm::Value *LLVMCodegen::coerceFromABI(llvm::Value *abiValue, llvm::Type *structType) {
+    if (!shouldCoerceForABI(structType)) {
+        return abiValue;
+    }
+
+    llvm::Type *abiType = getABICoercionType(structType);
+
+    // Allocate temporary for ABI value
+    llvm::AllocaInst *abiAlloca = m_builder.CreateAlloca(abiType, nullptr, "abi.tmp");
+    m_builder.CreateStore(abiValue, abiAlloca);
+
+    // Bitcast to struct type pointer and load
+    llvm::Value *structPtr = m_builder.CreateBitCast(abiAlloca,
+                                                      llvm::PointerType::getUnqual(context),
+                                                      "struct.ptr");
+    llvm::Value *structValue = m_builder.CreateLoad(structType, structPtr, "struct.val");
+
+    return structValue;
 }

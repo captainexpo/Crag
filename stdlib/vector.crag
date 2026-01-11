@@ -1,4 +1,4 @@
-import "libc/libc.crag" as libc
+import "libc/libc.crag" as libc;
 
 pub enum VecError(i32){
     ALLOC_ERROR = 1,

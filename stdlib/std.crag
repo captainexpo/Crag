@@ -1,5 +1,6 @@
-pub import "vector.crag" as vector
-pub import "libc/stdio.crag"  as cstdio
-pub import "libc/stdlib.crag" as cstdlib
-pub import "libc/string.crag" as cstring
-pub import "libc/math.crag"   as cmath
+pub import "vector.crag"      as vector;
+pub import "random.crag"      as random;
+pub import "libc/stdio.crag"  as cstdio;
+pub import "libc/stdlib.crag" as cstdlib;
+pub import "libc/string.crag" as cstring;
+pub import "libc/math.crag"   as cmath;

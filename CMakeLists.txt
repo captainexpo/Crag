@@ -4,15 +4,14 @@ project(Comp LANGUAGES CXX C)
 
 include(FetchContent)
 
-set(CMAKE_BUILD_TYPE Debug)
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O1 -g -std=c++20")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -std=c++20")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -std=c++20")
 
 file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
@@ -45,14 +44,14 @@ separate_arguments(LLVM_LDFLAGS_LIST NATIVE_COMMAND "${LLVM_LDFLAGS_STRIPPED}")
 target_link_libraries(comp PRIVATE ${LLVM_LDFLAGS_LIST})
 
 
-# find_package(argparse QUIET) 
+# find_package(argparse QUIET)
 #
 # if (NOT argparse_FOUND)
 # find argparse
   FetchContent_Declare(
     argparse
     GIT_REPOSITORY https://github.com/p-ranav/argparse.git
-    GIT_TAG v3.2  
+    GIT_TAG v3.2
   )
 
   FetchContent_MakeAvailable(argparse)
@@ -77,3 +76,7 @@ add_library(runtime STATIC lib/runtime.o)
 set_property(TARGET runtime PROPERTY LINKER_LANGUAGE C)
 set_target_properties(runtime PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 
+message(STATUS "CMAKE_CXX_FLAGS = ${CMAKE_CXX_FLAGS}")
+message(STATUS "CMAKE_CXX_FLAGS_DEBUG = ${CMAKE_CXX_FLAGS_DEBUG}")
+message(STATUS "CMAKE_CXX_FLAGS_RELEASE = ${CMAKE_CXX_FLAGS_RELEASE}")
+message(STATUS "CMAKE_BUILD_TYPE = ${CMAKE_BUILD_TYPE}")

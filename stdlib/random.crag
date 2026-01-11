@@ -1,0 +1,9 @@
+import "./libc/libc.crag" as libc;
+
+pub fn random() -> f32 {
+    return libc::stdlib::rand() as f32 / 2147483647.0;
+}
+
+pub fn randint(min: i32, max: i32) -> i32 {
+    return min + (libc::stdlib::rand() % (max - min + 1));
+}

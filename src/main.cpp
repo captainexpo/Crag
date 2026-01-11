@@ -10,6 +10,13 @@
 
 namespace fs = std::filesystem;
 
+std::string defaultRuntimePath() {
+    // find lib/libruntime.a relative to executable
+    fs::path execPath = fs::canonical(fs::path("/proc/self/exe"));
+    fs::path runtimePath = execPath.parent_path() / "lib" / "libruntime.a";
+    return runtimePath.string();
+}
+
 int main(int argc, char **argv) {
 
     std::string additionalArgs;
@@ -32,8 +39,6 @@ int main(int argc, char **argv) {
         argv2.push_back(const_cast<char *>(s.c_str()));
     }
 
-
-
     argparse::ArgumentParser program(PRGM_NAME);
 
     program.add_argument("input")
@@ -49,7 +54,7 @@ int main(int argc, char **argv) {
         .help("Emit LLVM IR instead of object code");
 
     program.add_argument("--runtime-path")
-        .default_value(std::string("lib/libruntime.a"))
+        .default_value(defaultRuntimePath())
         .help("Path to runtime library");
 
     program.add_argument("--backend")

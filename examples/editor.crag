@@ -38,8 +38,8 @@ struct Editor {
   }
 
   fn ensure_capacity(self: *Editor) -> void {
-    if (self.count < self.cap) return; 
-    
+    if (self.count < self.cap) return;
+
     let new_cap: usize = self.cap * 2;
     let new_lines: *Line = malloc(new_cap * 16) as *Line;
     memcpy(new_lines as *u8, self.lines as *u8, self.count * 16);
@@ -188,11 +188,11 @@ fn parse_number(s: *u8) -> i32 {
   return result;
 }
 
-fn is_digit(c: u8) -> i32 {
+fn is_digit(c: u8) -> bool {
   if (c >= 48 && c <= 57) {
-    return 1;
+    return true;
   }
-  return 0;
+  return false;
 }
 
 fn main() -> i32 {
@@ -207,6 +207,7 @@ fn main() -> i32 {
   let running: i32 = 1;
 
   while (running == 1) {
+    printf("> ");
     let cmd: *u8 = read_line();
 
     if (cmd[0] == 'a') {  // 'a' - append
@@ -229,7 +230,7 @@ fn main() -> i32 {
       editor.list_all();
     } else if (cmd[0] == 'q') {  // quit
       running = 0;
-    } else if (is_digit(cmd[0]) == 1) {  // number - go to line
+    } else if (is_digit(cmd[0])) {  // number - go to line
       let num: i32 = parse_number(cmd);
       editor.go_to_line(num as usize);
     } else if (cmd[0] != 0) {

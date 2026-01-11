@@ -461,10 +461,10 @@ void TypeChecker::checkStructDeclaration(
     if (it != m_structs.end()) {
         it->second->fields = std::move(fields);
         it->second->methods = sd->methods;
-        std::cout << "Struct " << sd->name << " methods:\n";
-        for (const auto &m : sd->methods) {
-            std::cout << "  " << m.first << "\n";
-        }
+        // std::cout << "Struct " << sd->name << " methods:\n";
+        // for (const auto &m : sd->methods) {
+        //     std::cout << "  " << m.first << "\n";
+        // }
         it->second->complete = true;
     } else {
         throw TypeCheckError(sd, "Internal error: struct " + sd->name + " not found in map");
@@ -1254,7 +1254,7 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
             throw TypeCheckError(mc, "Method call on non-struct type: " + typeName(bt));
         }
     }
-    std::cout << "Inferring method call: " << mc->str() << "\n";
+    // std::cout << "Inferring method call: " << mc->str() << "\n";
     auto it = st->methods.find(mc->method);
     if (it == st->methods.end()) {
         throw TypeCheckError(mc, "Struct " + st->name + " has no method " + mc->method);
@@ -1385,13 +1385,13 @@ std::shared_ptr<Type> TypeChecker::inferArrayFieldAccess(const std::shared_ptr<F
         fa->inferred_type = std::make_shared<I64>();
         return fa->inferred_type;
     }
-    throw TypeCheckError(fa, "Error union has no field " + fa->field);
+    throw TypeCheckError(fa, "Array has no field " + fa->field);
 }
 
 std::shared_ptr<Type>
 TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
     if (auto baseExpr = std::dynamic_pointer_cast<Expression>(fa->base)) {
-        auto bt = inferExpression(baseExpr);
+        auto bt = resolveType(inferExpression(baseExpr));
         if (!bt)
             throw TypeCheckError(fa, "Failed to infer type of field access base");
         auto st = std::dynamic_pointer_cast<StructType>(bt);

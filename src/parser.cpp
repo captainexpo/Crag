@@ -350,7 +350,7 @@ std::shared_ptr<ImportDeclaration> Parser::parse_import_declaration() {
     std::string path = consume(TokenType::STRING).value;
     consume(TokenType::AS);
     std::string alias = consume(TokenType::ID).value;
-
+    consume(TokenType::SEMICOLON);
     imported_modules.insert(alias);
 
     return std::make_shared<ImportDeclaration>(path, alias);

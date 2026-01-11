@@ -51,7 +51,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     auto moduleResolver = ModuleResolver(path.parent_path());
     auto mod = moduleResolver.loadRoot(path.filename().string());
 
-    std::cout << mod->ast->toString();
+    // std::cout << mod->ast->toString();
 
     auto typeChecker = TypeChecker();
 
@@ -68,8 +68,8 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
         return nullptr;
     }
     //
-    std::cout << "after type checking:\n";
-    std::cout << mod->ast->toString();
+    // std::cout << "after type checking:\n";
+    // std::cout << mod->ast->toString();
     //
 
     if (moduleResolver.hasDependencyCycle()) {
@@ -83,7 +83,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     std::vector<std::string> order = moduleResolver.getBestOrder();
     for (std::string path : order) {
         auto module = moduleResolver.getModule(path);
-        std::cout << "Generating code for module: " << path << "\n";
+        // std::cout << "Generating code for module: " << path << "\n";
         codegen->generate(module);
         // Check for errors after each module
         if (!codegen->ok()) {

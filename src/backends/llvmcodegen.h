@@ -244,5 +244,11 @@ class LLVMCodegen : public Backend {
     bool isLValue(const std::shared_ptr<Expression> &expr);
 
     void conditionOrPanic(llvm::Value *condition, RuntimePanicType errorType, int line, int col);
+
+    // ABI coercion helpers
+    bool shouldCoerceForABI(llvm::Type *type);
+    llvm::Type *getABICoercionType(llvm::Type *structType);
+    llvm::Value *coerceToABI(llvm::Value *structValue, llvm::Type *structType);
+    llvm::Value *coerceFromABI(llvm::Value *abiValue, llvm::Type *structType);
 };
 #endif

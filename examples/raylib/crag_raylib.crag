@@ -1,0 +1,131 @@
+pub struct Vector2 {
+    x: f32,
+    y: f32,
+}
+
+pub struct Vector3 {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
+pub struct Vector4 {
+    x: f32,
+    y: f32,
+    z: f32,
+    w: f32,
+}
+
+pub struct Rectangle {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+pub struct Color {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+}
+
+pub struct Camera2D {
+    offset: Vector2,
+    target: Vector2,
+    rotation: f32,
+    zoom: f32,
+}
+
+pub struct Camera3D {
+    position: Vector3,
+    target: Vector3,
+    up: Vector3,
+    fovy: f32,
+    projection: i32,
+}
+
+
+pub extern fn InitWindow(width: i32, height: i32, title: *const u8) -> void;
+pub extern fn CloseWindow() -> void;
+pub extern fn WindowShouldClose() -> bool;
+
+pub extern fn IsWindowReady() -> bool;
+pub extern fn IsWindowFullscreen() -> bool;
+pub extern fn ToggleFullscreen() -> void;
+
+pub extern fn SetTargetFPS(fps: i32) -> void;
+pub extern fn GetFPS() -> i32;
+pub extern fn GetFrameTime() -> f32;
+pub extern fn GetTime() -> f64;
+
+pub extern fn GetScreenWidth() -> i32;
+pub extern fn GetScreenHeight() -> i32;
+
+pub extern fn BeginDrawing() -> void;
+pub extern fn EndDrawing() -> void;
+
+pub extern fn ClearBackground(color: Color) -> void;
+
+pub extern fn DrawPixel(x: i32, y: i32, color: Color) -> void;
+pub extern fn DrawLine( startX: i32, startY: i32, endX: i32, endY: i32, color: Color) -> void;
+pub extern fn DrawCircle( centerX: i32, centerY: i32, radius: f32, color: Color) -> void;
+pub extern fn DrawRectangle( posX: i32, posY: i32, width: i32, height: i32, color: Color) -> void;
+pub extern fn DrawRectangleRec(rec: Rectangle, color: Color) -> void;
+pub extern fn DrawText( text: *const u8, posX: i32, posY: i32, fontSize: i32, color: Color) -> void;
+
+pub extern fn MeasureText(text: *const u8, fontSize: i32) -> i32;
+
+pub extern fn IsKeyPressed(key: i32) -> bool;
+pub extern fn IsKeyDown(key: i32) -> bool;
+pub extern fn IsKeyReleased(key: i32) -> bool;
+
+pub extern fn IsMouseButtonPressed(button: i32) -> bool;
+pub extern fn IsMouseButtonDown(button: i32) -> bool;
+pub extern fn IsMouseButtonReleased(button: i32) -> bool;
+
+pub extern fn GetMouseX() -> i32;
+pub extern fn GetMouseY() -> i32;
+pub extern fn GetMousePosition() -> Vector2;
+
+
+pub extern fn BeginMode2D(camera: Camera2D) -> void;
+pub extern fn EndMode2D() -> void;
+
+pub extern fn BeginMode3D(camera: Camera3D) -> void;
+pub extern fn EndMode3D() -> void;
+
+pub const LIGHTGRAY  = Color{ r: 200, g: 200, b: 200, a: 255 };
+pub const GRAY       = Color{ r: 130, g: 130, b: 130, a: 255 };
+pub const DARKGRAY   = Color{ r: 80,  g: 80,  b: 80,  a: 255 };
+
+pub const YELLOW     = Color{ r: 253, g: 249, b: 0,   a: 255 };
+pub const GOLD       = Color{ r: 255, g: 203, b: 0,   a: 255 };
+pub const ORANGE     = Color{ r: 255, g: 161, b: 0,   a: 255 };
+pub const PINK       = Color{ r: 255, g: 109, b: 194, a: 255 };
+
+pub const RED        = Color{ r: 230, g: 41,  b: 55,  a: 255 };
+pub const MAROON     = Color{ r: 190, g: 33,  b: 55,  a: 255 };
+
+pub const GREEN      = Color{ r: 0,   g: 228, b: 48,  a: 255 };
+pub const LIME       = Color{ r: 0,   g: 158, b: 47,  a: 255 };
+pub const DARKGREEN  = Color{ r: 0,   g: 117, b: 44,  a: 255 };
+
+pub const SKYBLUE    = Color{ r: 102, g: 191, b: 255, a: 255 };
+pub const BLUE       = Color{ r: 0,   g: 121, b: 241, a: 255 };
+pub const DARKBLUE   = Color{ r: 0,   g: 82,  b: 172, a: 255 };
+
+pub const PURPLE     = Color{ r: 200, g: 122, b: 255, a: 255 };
+pub const VIOLET     = Color{ r: 135, g: 60,  b: 190, a: 255 };
+pub const DARKPURPLE = Color{ r: 112, g: 31,  b: 126, a: 255 };
+
+pub const BEIGE      = Color{ r: 211, g: 176, b: 131, a: 255 };
+pub const BROWN      = Color{ r: 127, g: 106, b: 79,  a: 255 };
+pub const DARKBROWN  = Color{ r: 76,  g: 63,  b: 47,  a: 255 };
+
+pub const WHITE      = Color{ r: 255, g: 255, b: 255, a: 255 };
+pub const BLACK      = Color{ r: 0,   g: 0,   b: 0,   a: 255 };
+pub const BLANK      = Color{ r: 0,   g: 0,   b: 0,   a: 0   };
+
+pub const MAGENTA    = Color{ r: 255, g: 0,   b: 255, a: 255 };
+pub const RAYWHITE   = Color{ r: 245, g: 245, b: 245, a: 255 };

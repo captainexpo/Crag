@@ -1,4 +1,4 @@
-pub import "math.crag" as math
-pub import "stdio.crag" as stdio
-pub import "stdlib.crag" as stdlib
-pub import "string.crag" as string
+pub import "math.crag" as math;
+pub import "stdio.crag" as stdio;
+pub import "stdlib.crag" as stdlib;
+pub import "string.crag" as string;

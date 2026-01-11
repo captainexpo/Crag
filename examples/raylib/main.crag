@@ -1,0 +1,43 @@
+import "crag_raylib.crag" as rl;
+import "../../stdlib/std.crag" as std;
+
+pub fn main() -> i32 {
+
+    let x: i32 = 0;
+    let y: i32 = 0;
+
+    let dx: i32 = 5;
+    let dy: i32 = 5;
+
+    const w: i32 = 50;
+    const h: i32 = 50;
+
+    rl::InitWindow(800, 600, "Raylib Window");
+
+    rl::SetTargetFPS(60);
+
+    std::cstdio::printf("Random number: %f\n", std::random::random());
+
+    while (!rl::WindowShouldClose()) {
+        rl::BeginDrawing();
+        rl::DrawRectangle(0, 0, rl::GetScreenWidth(), rl::GetScreenHeight(), rl::Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 100,
+        });
+
+        rl::DrawRectangle(x, y, w, h, rl::MAROON);
+        x += dx;
+        y += dy;
+        if (x + w > rl::GetScreenWidth() || x < 0) {
+            dx = -dx;
+        }
+        if (y + h > rl::GetScreenHeight() || y < 0) {
+            dy = -dy;
+        }
+        rl::EndDrawing();
+    }
+    rl::CloseWindow();
+    return 0;
+}

@@ -539,9 +539,10 @@ struct StructType : Type {
     StructType(std::string n) : name(std::move(n)), fields(), complete(false) {}
 
     std::shared_ptr<Type> getFieldType(const std::string &fname) const {
-        for (const auto &field : fields)
+        for (const auto &field : fields){
             if (field.first == fname)
                 return field.second;
+        }
         return nullptr;
     }
 
