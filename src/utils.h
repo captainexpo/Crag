@@ -35,4 +35,22 @@ T_out bitcast(const T_in &in) {
     return out;
 }
 
+static std::string runAndCapture(const std::string& cmd) {
+    std::string result;
+    const int bufferSize = 512;
+    char buffer[bufferSize];
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return "";
+    }
+    while (fgets(buffer, bufferSize, pipe) != nullptr) {
+        result += buffer;
+    }
+    pclose(pipe);
+    while (!result.empty() && isspace((unsigned char)result.back()))
+        result.pop_back();
+
+    return result;
+}
+
 #endif

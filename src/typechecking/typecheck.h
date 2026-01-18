@@ -98,7 +98,7 @@ class TypeChecker {
     // Type helpers
 
     std::string typeName(const std::shared_ptr<Type> &t) const;
-    std::shared_ptr<Type> resolveType(const std::shared_ptr<Type> &t);
+    std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t);
 
     bool canImplicitCast(const std::shared_ptr<Type> &from, const std::shared_ptr<Type> &to);
 

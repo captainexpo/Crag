@@ -16,10 +16,10 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -std=c++20")
 file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 # Add the executable
-add_executable(comp ${SRC_FILES})
+add_executable(crag ${SRC_FILES})
 
 # Include the headers
-target_include_directories(comp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(crag PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # LLVM compiler flags
 execute_process(
@@ -30,7 +30,7 @@ execute_process(
 string(STRIP "${LLVM_CXXFLAGS}" LLVM_CXXFLAGS_STRIPPED)
 string(REPLACE "-fno-exceptions" "" LLVM_CXXFLAGS_STRIPPED "${LLVM_CXXFLAGS_STRIPPED}")
 separate_arguments(LLVM_CXXFLAGS_LIST NATIVE_COMMAND "${LLVM_CXXFLAGS_STRIPPED}")
-target_compile_options(comp PRIVATE ${LLVM_CXXFLAGS_LIST})
+target_compile_options(crag PRIVATE ${LLVM_CXXFLAGS_LIST})
 
 # LLVM linker flags for components
 execute_process(
@@ -41,7 +41,7 @@ execute_process(
 
 string(STRIP "${LLVM_LDFLAGS}" LLVM_LDFLAGS_STRIPPED)
 separate_arguments(LLVM_LDFLAGS_LIST NATIVE_COMMAND "${LLVM_LDFLAGS_STRIPPED}")
-target_link_libraries(comp PRIVATE ${LLVM_LDFLAGS_LIST})
+target_link_libraries(crag PRIVATE ${LLVM_LDFLAGS_LIST})
 
 
 # find_package(argparse QUIET)
@@ -56,7 +56,7 @@ target_link_libraries(comp PRIVATE ${LLVM_LDFLAGS_LIST})
 
   FetchContent_MakeAvailable(argparse)
 # endif()
-target_link_libraries(comp PRIVATE argparse)
+target_link_libraries(crag PRIVATE argparse)
 
 # --- Runtime Library ---
 file(GLOB_RECURSE RUNTIME_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/builtin/*.crag")
@@ -65,8 +65,8 @@ make_directory(lib)
 
 add_custom_command(
     OUTPUT lib/runtime.o
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/comp ARGS ${RUNTIME_SRC_FILES} -o lib/runtime.o --unsafe -ORelease --no-runtime
-    DEPENDS ${RUNTIME_SRC_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/build/comp
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/crag ARGS ${RUNTIME_SRC_FILES} -o lib/runtime.o --unsafe -ORelease --no-runtime
+    DEPENDS ${RUNTIME_SRC_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/build/crag
     COMMENT "Compiling runtime.o"
 )
 

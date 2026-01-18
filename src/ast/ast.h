@@ -416,6 +416,29 @@ struct ErrorUnionType : Type {
     }
 };
 
+struct AliasedType : Type {
+    TypeKind kind() const override { return TypeKind::Unknown; }
+
+    std::string name;
+    std::shared_ptr<Type> actual_type;
+
+    AliasedType(std::string n)
+        : name(std::move(n)) {};
+    std::string str() const override {
+        return "Alias<" + name + ">";
+    }
+
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        auto o = dynamic_cast<AliasedType *>(other.get());
+        if (!o)
+            return false;
+        return name == o->name;
+    }
+    std::shared_ptr<Type> copy() const override {
+        return std::make_shared<AliasedType>(name);
+    }
+};
+
 struct QualifiedType : Type {
     TypeKind kind() const override { return TypeKind::Qualified; }
 
@@ -1165,11 +1188,15 @@ struct TypeAliasDeclaration : Declaration {
     std::string name;
     std::shared_ptr<Type> aliased_type;
 
-    TypeAliasDeclaration(std::string n, std::shared_ptr<Type> t)
-        : name(std::move(n)), aliased_type(std::move(t)) {}
+    ExprPtr condition; // Optional condition for conditional type aliases
+
+    TypeAliasDeclaration(std::string n, std::shared_ptr<Type> t, ExprPtr c = nullptr)
+        : name(std::move(n)), aliased_type(std::move(t)), condition(std::move(c)) {}
     std::string str() const override {
         return "TypeAliasDeclaration(" + name + " = " +
-               (aliased_type ? aliased_type->str() : "null") + ")";
+               (aliased_type != nullptr ? aliased_type->str() : "unknown") +
+               (condition ? ", if " + condition->toString() : "") + ")";
+
     }
     NodeKind kind() const override { return NodeKind::TypeAliasDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }

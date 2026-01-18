@@ -29,6 +29,9 @@ uint64_t getLitValue(const std::shared_ptr<Literal> &lit) {
     if (auto str = std::dynamic_pointer_cast<PointerType>(lit->lit_type)) {
         return std::get<uint64_t>(lit->value);
     }
+    if (auto boolean = std::dynamic_pointer_cast<Boolean>(lit->lit_type)) {
+        return std::get<bool>(lit->value) ? 1 : 0;
+    }
     throw std::runtime_error("Unsupported literal type for getLitValue: " + lit->lit_type->str());
 }
 
@@ -67,6 +70,10 @@ void setLitVal(std::shared_ptr<Literal> lit, uint64_t raw_val) {
     }
     if (auto str = std::dynamic_pointer_cast<PointerType>(lit->lit_type)) {
         lit->value = raw_val;
+        return;
+    }
+    if (auto boolean = std::dynamic_pointer_cast<Boolean>(lit->lit_type)) {
+        lit->value = (raw_val != 0);
         return;
     }
     throw std::runtime_error("Unsupported literal type for setLitVal: " + lit->lit_type->str());

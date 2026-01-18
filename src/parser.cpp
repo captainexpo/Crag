@@ -117,7 +117,7 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
             }
             if (declared_type_aliases.count(current.value)) {
                 std::string name = consume(TokenType::ID).value;
-                t = declared_type_aliases[name];
+                t = std::make_shared<AliasedType>(name);
                 break;
             }
             if (str_in_vector(current.value, current_generic_params, nullptr)) {
@@ -285,8 +285,12 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
             std::string alias_name = consume(TokenType::ID).value;
             consume(TokenType::ASSIGN);
             auto alias_type = parse_type();
+            std::shared_ptr<Expression> condition = nullptr;
+            if (match({TokenType::WHEN})) {
+                condition = parse_expression();
+            }
             consume(TokenType::SEMICOLON);
-            auto type_alias = std::make_shared<TypeAliasDeclaration>(alias_name, alias_type);
+            auto type_alias = std::make_shared<TypeAliasDeclaration>(alias_name, alias_type, condition);
             type_alias->is_pub = is_pub;
             declared_type_aliases[alias_name] = alias_type;
             return type_alias;
@@ -800,6 +804,10 @@ std::shared_ptr<Expression> Parser::parse_nud() {
             expr->line = t.line;
             expr->col = t.column;
             return expr;
+        }
+        case TokenType::ATTRIBUTE: {
+            // Compiler intrinsic access
+            return std::make_shared<VarAccess>("@"+t.value); // TODO: Add separate Intrinsic node?
         }
         default:
             if (PREFIX_OPS.count(t.type)) {

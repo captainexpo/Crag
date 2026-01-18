@@ -1,5 +1,6 @@
 pub import "vector.crag"      as vector;
 pub import "random.crag"      as random;
+pub import "string.crag"      as string;
 pub import "libc/stdio.crag"  as cstdio;
 pub import "libc/stdlib.crag" as cstdlib;
 pub import "libc/string.crag" as cstring;

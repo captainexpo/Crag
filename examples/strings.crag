@@ -1,0 +1,18 @@
+import "../stdlib/string.crag" as string;
+import "../stdlib/std.crag" as std;
+
+
+fn main() -> i32 {
+    let s = string::str("Hello, Crag!");
+    const result0 = s.concat(string::str(" Welcome to Crag programming."));
+    if (result0.is_err){
+        return 1;
+    }
+    const result1 = s.substr(0, 5);
+    if (result1.is_err){
+        return 1;
+    }
+    const str = result1.ok;
+    std::cstdio::printf("%s\n", str.c_str());
+    return 0;
+}

@@ -241,37 +241,68 @@ void LLVMCodegen::emitIrToFile(const std::string &filepath) {
         m_llvm_module->print(out, nullptr);
     }
 }
-void LLVMCodegen::compileObjectFileToExecutable(const std::string &object_filepath,
-                                                const std::filesystem::path &executable_filepath,
-                                                const std::filesystem::path &runtime_path,
-                                                bool no_runtime, std::string additional_compiler_args) {
 
-    // See if clang is available
-    if (system("clang --version > /dev/null 2>&1") != 0) {
-        throw CodeGenError(nullptr, "Clang is not installed or not found in PATH.");
+void LLVMCodegen::compileObjectFileToExecutable(
+    const std::string &object_filepath,
+    const std::filesystem::path &executable_filepath,
+    const std::filesystem::path &runtime_path,
+    bool no_runtime,
+    std::string additional_linker_args)
+{
+    if (system("ld --version > /dev/null 2>&1") != 0) {
+        throw CodeGenError(nullptr, "ld not found.");
     }
-    std::cout << "Compiling: " << object_filepath << " to executable...\n";
-    std::string opt = (m_options.opt_level == Release) ? " -O3 " : " -O0 ";
 
-    // Run clang to compile IR to executable
-    std::filesystem::path finalOutputFilePath = executable_filepath.parent_path() / executable_filepath.stem();
-    std::string clangCmd = "clang " + object_filepath + opt + additional_compiler_args;
+    // Ask GCC where everything is
+    std::string crt1 = runAndCapture("gcc -print-file-name=crt1.o");
+    std::string crti = runAndCapture("gcc -print-file-name=crti.o");
+    std::string crtn = runAndCapture("gcc -print-file-name=crtn.o");
+    std::string libc = runAndCapture("gcc -print-file-name=libc.so");
+
+    if (crt1.empty() || crti.empty() || crtn.empty() || libc.empty()) {
+        throw CodeGenError(nullptr, "Failed to locate libc/CRT files via gcc.");
+    }
+
+    // Extract libc directory for -L
+    std::filesystem::path libcPath(libc);
+    std::string libcDir = libcPath.parent_path().string();
+
+    // Find dynamic linker
+    std::string ldso = runAndCapture(
+        "gcc -print-file-name=ld-linux-x86-64.so.2"
+    );
+
+    if (ldso.empty()) {
+        throw CodeGenError(nullptr, "Failed to locate dynamic linker.");
+    }
+
+    std::filesystem::path output =
+        executable_filepath.parent_path() / executable_filepath;
+
+    std::string cmd =
+        "ld "
+        + crti + " "
+        + crt1 + " "
+        + object_filepath + " ";
 
     if (!no_runtime) {
-        clangCmd += " " + runtime_path.string();
+        cmd += runtime_path.string() + " ";
     }
 
-    clangCmd += " -o " + finalOutputFilePath.string();
+    cmd +=
+        "-L" + libcDir + " "
+        "-lc "
+        + crtn + " "
+        "-dynamic-linker " + ldso + " "
+        + additional_linker_args + " "
+        "-o " + output.string();
 
-    int ret = system(clangCmd.c_str());
-
-    if (ret != 0) {
-        throw CodeGenError(nullptr, "Failed to invoke clang to create executable.");
+    if (system(cmd.c_str()) != 0) {
+        throw CodeGenError(nullptr, "ld failed.");
     }
 }
 
-llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type) {
-
+llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const ASTNodePtr &node) {
     if (IS_INSTANCE(type, I32))
         return llvm::Type::getInt32Ty(context);
     if (IS_INSTANCE(type, I64))
@@ -327,27 +358,27 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type) {
         auto funcType = std::dynamic_pointer_cast<FunctionType>(type);
         std::vector<llvm::Type *> paramTypes;
         for (const auto &paramType : funcType->params) {
-            paramTypes.push_back(getLLVMType(paramType));
+            paramTypes.push_back(getLLVMType(paramType, node));
         }
-        return llvm::FunctionType::get(getLLVMType(funcType->ret), paramTypes,
+        return llvm::FunctionType::get(getLLVMType(funcType->ret, node), paramTypes,
                                        funcType->variadic);
     }
     if (IS_INSTANCE(type, ErrorUnionType)) {
         auto eut = std::dynamic_pointer_cast<ErrorUnionType>(type);
         // Represent as a struct { valueType, errorType, isError (i1) }
         std::vector<llvm::Type *> elements = {
-            getLLVMType(eut->valueType), getLLVMType(eut->errorType),
+            getLLVMType(eut->valueType, node), getLLVMType(eut->errorType, node),
             llvm::Type::getInt1Ty(context)};
         auto st = llvm::StructType::get(context, elements);
         return st;
     }
     if (IS_INSTANCE(type, EnumType)) {
-        return getLLVMType(std::dynamic_pointer_cast<EnumType>(type)->base_type);
+        return getLLVMType(std::dynamic_pointer_cast<EnumType>(type)->base_type, node);
     }
     if (!type) {
-        throw CodeGenError(nullptr, "Type is null");
+        throw CodeGenError(node, "Type is null");
     } else {
-        throw CodeGenError(nullptr, "Unsupported type: " + type->str());
+        throw CodeGenError(node, "Unsupported type: " + type->str());
     }
     return nullptr;
 }
@@ -450,7 +481,7 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
             conditionOrPanic(isZero, NullPointerDereference, expr->line, expr->col);
         }
         if (loadValue)
-            return m_builder.CreateLoad(getLLVMType(deref->inferred_type), ptr,
+            return m_builder.CreateLoad(getLLVMType(deref->inferred_type, expr), ptr,
                                         "derefloadtmp");
         return ptr;
     }
@@ -479,7 +510,7 @@ llvm::Value *
 LLVMCodegen::generateCast(const std::shared_ptr<TypeCast> &typeCast,
                           bool loadValue) {
     llvm::Value *val = generateExpression(typeCast->expr);
-    llvm::Type *destType = getLLVMType(typeCast->target_type);
+    llvm::Type *destType = getLLVMType(typeCast->target_type, typeCast);
     if (!val || !destType) {
         throw CodeGenError(typeCast, "Invalid cast operation");
     }
@@ -565,7 +596,7 @@ LLVMCodegen::generateStatement(const std::shared_ptr<Statement> &stmt) {
 
 llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> func) {
     llvm::FunctionType *fType =
-        llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type));
+        llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type, func));
 
     std::string fname = func->is_extern ? func->name : canonicalizeNonexternName(func->name);
     if (m_llvm_module->getFunction(fname)) {
@@ -771,7 +802,7 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
         if (varDecl->is_extern) {
             // Extern global variable declaration
             // Don't canonicalize name due to extern linkage
-            llvm::Type *varType = getLLVMType(varDecl->var_type);
+            llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
             llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
                 *m_llvm_module, varType, varDecl->is_const,
                 llvm::GlobalValue::ExternalLinkage, nullptr,
@@ -779,7 +810,7 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
             CUR_SCOPE.set(varDecl->name, gVar, varType, varDecl->var_type);
             return gVar;
         }
-        llvm::Type *varType = getLLVMType(varDecl->var_type);
+        llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
         llvm::Constant *initVal = llvm::Constant::getNullValue(varType);
         llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
             *m_llvm_module, varType, false,
@@ -795,7 +826,7 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
         return gVar;
     }
 
-    llvm::Type *varType = getLLVMType(varDecl->var_type);
+    llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
     llvm::Value *alloca = m_builder.CreateAlloca(varType, nullptr, varDecl->name);
     CUR_SCOPE.set(canonicalizeNonexternName(varDecl->name), alloca, varType, varDecl->var_type);
     if (varDecl->initializer) {
@@ -846,7 +877,7 @@ void LLVMCodegen::generateStructDeclaration(
 
     std::vector<llvm::Type *> fieldTypes;
     for (const auto &field : structDecl->fields) {
-        llvm::Type *ty = getLLVMType(field.second);
+        llvm::Type *ty = getLLVMType(field.second, structDecl);
         fieldTypes.push_back(ty);
     }
 
@@ -869,7 +900,7 @@ void LLVMCodegen::generateUnionDeclaration(
     size_t maxAlign = 1;
 
     for (const auto &field : unionDecl->fields) {
-        llvm::Type *ty = getLLVMType(field.second);
+        llvm::Type *ty = getLLVMType(field.second, unionDecl);
         size_t fieldSize = m_llvm_module->getDataLayout().getTypeAllocSize(ty);
         size_t fieldAlign = m_llvm_module->getDataLayout().getABITypeAlign(ty).value();
 
@@ -1235,7 +1266,7 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
             if (intVal == 0) {
                 // Null pointer literal
                 return llvm::ConstantPointerNull::get(
-                    llvm::cast<llvm::PointerType>(getLLVMType(lit->inferred_type)));
+                    llvm::cast<llvm::PointerType>(getLLVMType(lit->inferred_type, lit)));
             } else {
                 throw CodeGenError(lit, "Only null (0) is allowed as integer pointer literal");
             }
@@ -1260,7 +1291,7 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
         }
     } else if (IS_INSTANCE(lit->inferred_type, NullType)) {
         return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(
-            getLLVMType(std::make_shared<PointerType>(std::make_shared<Void>()))));
+            getLLVMType(std::make_shared<PointerType>(std::make_shared<Void>()), lit)));
     } else if (IS_INSTANCE(lit->inferred_type, ArrayType)) {
     }
     if (!lit->inferred_type) {
@@ -1273,11 +1304,11 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
     const std::shared_ptr<ArrayLiteral> &arrayLit, bool loadValue) {
 
     auto arrayType = std::dynamic_pointer_cast<ArrayType>(arrayLit->inferred_type);
-    auto elemType = getLLVMType(arrayType->element_type);
+    auto elemType = getLLVMType(arrayType->element_type, arrayLit);
     int numElements = arrayLit->len;
 
     // Allocate the raw array: [N x elemType]
-    auto arrayLLVMType = getLLVMType(arrayType); // struct { ptr, i64 }
+    auto arrayLLVMType = getLLVMType(arrayType, arrayLit); // struct { ptr, i64 }
     auto arrayLitType = llvm::ArrayType::get(elemType, numElements);
     auto rawArrAlloc = m_builder.CreateAlloca(arrayLitType, nullptr, "arraylit");
     rawArrAlloc->setAlignment(llvm::Align(alignof(void *)));
@@ -1450,7 +1481,7 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
             throw CodeGenError(funcCall, "Callee is a pointer, but not to a function type");
         }
         auto funcType = std::dynamic_pointer_cast<FunctionType>(ptrType->base);
-        funcTy = llvm::cast<llvm::FunctionType>(getLLVMType(funcType));
+        funcTy = llvm::cast<llvm::FunctionType>(getLLVMType(funcType, funcCall));
     } else {
         throw CodeGenError(funcCall, "Callee is not a function or function pointer: " +
                                          funcCall->func->str());
@@ -1500,7 +1531,7 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     // If calling an extern function that returns a coerced struct, convert it back
     if (isExtern && result && shouldCoerceForABI(funcTy->getReturnType())) {
         if (funcCall->inferred_type && IS_INSTANCE(funcCall->inferred_type, StructType)) {
-            llvm::Type *structType = getLLVMType(funcCall->inferred_type);
+            llvm::Type *structType = getLLVMType(funcCall->inferred_type, funcCall);
             if (structType->isStructTy()) {
                 result = coerceFromABI(result, structType);
             }
@@ -1541,7 +1572,7 @@ llvm::Value *LLVMCodegen::generateArrayAccess(
         throw CodeGenError(nullptr, "Invalid array access: missing base or index expression");
     }
     llvm::Value *basePtr = generateAddress(std::static_pointer_cast<Expression>(arrayAccess->base));
-    std::cout << "Base ptr for array access: " << basePtr << "\n";
+    // std::cout << "Base ptr for array access: " << basePtr << "\n";
     if (!basePtr) {
         throw CodeGenError(arrayAccess, "Failed to generate base address for array access");
     }
@@ -1555,7 +1586,7 @@ llvm::Value *LLVMCodegen::generateArrayAccess(
                                                   (arrayAccess->base->inferred_type ? arrayAccess->base->inferred_type->str() : "null"));
     }
     llvm::Type *elementType = getLLVMType(
-        std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)->element_type);
+        std::dynamic_pointer_cast<ArrayType>(arrayAccess->base->inferred_type)->element_type, arrayAccess);
     if (!elementType) {
         throw CodeGenError(arrayAccess, "Unknown element type for array access: " +
                                             arrayAccess->base->inferred_type->str());
@@ -1565,7 +1596,7 @@ llvm::Value *LLVMCodegen::generateArrayAccess(
         index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
     }
     llvm::Value *arrLoad = m_builder.CreateLoad(
-        getLLVMType(arrayAccess->base->inferred_type), basePtr);
+        getLLVMType(arrayAccess->base->inferred_type, arrayAccess->base), basePtr);
     if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
         llvm::Value *arraySizeVal = m_builder.CreateExtractValue(
             arrLoad,
@@ -1612,7 +1643,7 @@ llvm::Value *LLVMCodegen::generateOffsetAccess(
     if (!index) {
         throw CodeGenError(offsetAccess->index, "Failed to generate index for offset access");
     }
-    llvm::Type *resultType = getLLVMType(offsetAccess->inferred_type);
+    llvm::Type *resultType = getLLVMType(offsetAccess->inferred_type, offsetAccess);
     if (!resultType) {
         throw CodeGenError(offsetAccess, "Unknown type for offset access: " +
                                              offsetAccess->inferred_type->str());
@@ -1640,7 +1671,7 @@ llvm::Value *LLVMCodegen::generateArrayFieldAccess(const std::shared_ptr<FieldAc
         }
 
         llvm::Value *baseVal = generateExpression(fieldAccess->base);
-        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type));
+        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
         basePtr = materializeAggregate(baseVal, structType);
 
     }
@@ -1652,7 +1683,7 @@ llvm::Value *LLVMCodegen::generateArrayFieldAccess(const std::shared_ptr<FieldAc
         throw CodeGenError(fieldAccess->base, "Field access on non-array type: " + fieldAccess->base->inferred_type->str());
     }
     llvm::StructType *arrStructType =
-        llvm::cast<llvm::StructType>(getLLVMType(arr_type));
+        llvm::cast<llvm::StructType>(getLLVMType(arr_type, fieldAccess->base));
 
     if (fieldAccess->field == "len") {
         // Return index 1
@@ -1689,7 +1720,7 @@ llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<Fi
         }
 
         llvm::Value *baseVal = generateExpression(fieldAccess->base);
-        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type));
+        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
         basePtr = materializeAggregate(baseVal, structType);
     }
     if (!basePtr) {
@@ -1702,11 +1733,11 @@ llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<Fi
         throw CodeGenError(fieldAccess->base, "Field access on non-error-union type: " + fieldAccess->base->inferred_type->str());
     }
     llvm::StructType *euStructType =
-        llvm::cast<llvm::StructType>(getLLVMType(eu_type));
+        llvm::cast<llvm::StructType>(getLLVMType(eu_type, fieldAccess->base));
 
     if (fieldAccess->field == "ok") {
         // Return index 0
-        llvm::Type *ok_type = getLLVMType(eu_type->valueType);
+        llvm::Type *ok_type = getLLVMType(eu_type->valueType, fieldAccess);
         auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 0, "ok_access");
         return loadValue
                    ? m_builder.CreateLoad(ok_type, gep, "load_ok")
@@ -1714,7 +1745,7 @@ llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<Fi
 
     } else if (fieldAccess->field == "err") {
         // Return index 1
-        llvm::Type *err_type = getLLVMType(eu_type->errorType);
+        llvm::Type *err_type = getLLVMType(eu_type->errorType, fieldAccess);
         auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 1, "err_access");
         return loadValue
                    ? m_builder.CreateLoad(err_type, gep, "load_err")
@@ -1802,7 +1833,7 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
         }
 
         llvm::Value *baseVal = generateExpression(fieldAccess->base);
-        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type));
+        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
         basePtr = materializeAggregate(baseVal, structType);
     }
     if (!basePtr) {
@@ -1875,7 +1906,7 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
             "union_storage_ptr");
 
         // Cast the byte array pointer to the desired field type
-        llvm::Type *targetType = getLLVMType(fieldType);
+        llvm::Type *targetType = getLLVMType(fieldType, fieldAccess);
         llvm::Value *fieldPtr = m_builder.CreateBitCast(
             storagePtr,
             llvm::PointerType::getUnqual(context),
@@ -1924,7 +1955,7 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
             throw CodeGenError(fieldAccess, "Field '" + fieldName +
                                                 "' has no inferred type for load");
         }
-        return m_builder.CreateLoad(getLLVMType(fieldAccess->inferred_type), gep);
+        return m_builder.CreateLoad(getLLVMType(fieldAccess->inferred_type, fieldAccess), gep);
     }
 
     return gep;
@@ -1990,7 +2021,7 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
             "union_storage_ptr");
 
         // Cast to the field type pointer
-        llvm::Type *targetType = getLLVMType(fieldType);
+        llvm::Type *targetType = getLLVMType(fieldType, structInit);
         llvm::Value *fieldPtr = m_builder.CreateBitCast(
             storagePtr,
             llvm::PointerType::getUnqual(context),
@@ -2164,12 +2195,12 @@ llvm::Value *LLVMCodegen::generateReturnStatement(
         llvm::Value *withTag = nullptr;
 
         llvm::StructType *errUnionStruct = llvm ::
-            cast<llvm::StructType>(getLLVMType(m_error_union_return_type));
+            cast<llvm::StructType>(getLLVMType(m_error_union_return_type, retStmt));
         llvm::Value *undefVal = llvm::UndefValue::get(errUnionStruct);
 
         if (retStmt->is_error) {
             errVal = retVal;
-            okVal = llvm::Constant::getNullValue(getLLVMType(m_error_union_return_type->valueType));
+            okVal = llvm::Constant::getNullValue(getLLVMType(m_error_union_return_type->valueType, retStmt));
             // Create the struct for error return
             // {okType, errType, i1 (is_error, should be true)}
             auto withOk = m_builder.CreateInsertValue(undefVal, okVal, 0, "insert_ok");
@@ -2181,7 +2212,7 @@ llvm::Value *LLVMCodegen::generateReturnStatement(
 
         } else {
             okVal = retVal;
-            errVal = llvm::Constant::getNullValue(getLLVMType(m_error_union_return_type->errorType));
+            errVal = llvm::Constant::getNullValue(getLLVMType(m_error_union_return_type->errorType, retStmt));
 
             // Create the struct for ok return
             // {okType, errType, i1 (is_error, should be false)}

@@ -178,7 +178,7 @@ class LLVMCodegen : public Backend {
         return m_current_module->canonicalizeName(name);
     }
 
-    llvm::Type *getLLVMType(const std::shared_ptr<Type> &type);
+    llvm::Type *getLLVMType(const std::shared_ptr<Type> &type, const ASTNodePtr &node);
     llvm::Value *generateExpression(const std::shared_ptr<Expression> &expr,
                                     bool loadValue = true);
     llvm::Value *generateCast(const std::shared_ptr<TypeCast> &typeCast,

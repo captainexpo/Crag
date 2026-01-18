@@ -24,7 +24,7 @@ int main(int argc, char **argv) {
 
     for (int i = 0; i < argc; ++i) {
         auto cur = std::string(argv[i]);
-        if (cur == "--additional-args") {
+        if (cur == "--") {
             if (i + 1 < argc) {
                 additionalArgs = std::string(argv[i + 1]);
                 i++; // skip next arg

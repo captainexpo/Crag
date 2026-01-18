@@ -300,7 +300,7 @@ std::shared_ptr<ASTNode> VariableDeclaration::copy() const {
 }
 
 std::shared_ptr<ASTNode> TypeAliasDeclaration::copy() const {
-    auto c = std::make_shared<TypeAliasDeclaration>(name, aliased_type);
+    auto c = std::make_shared<TypeAliasDeclaration>(name, aliased_type, condition);
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type;

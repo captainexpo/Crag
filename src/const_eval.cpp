@@ -309,7 +309,7 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
     if (auto arrayLit = std::dynamic_pointer_cast<ArrayLiteral>(expr)) {
         std::vector<ExprPtr> constElements;
         for (const auto &elem : arrayLit->elements) {
-            auto valOpt = evaluateExpression(elem);
+            std::optional<ExprPtr> valOpt = evaluateExpression(elem);
             if (!valOpt)
                 return std::nullopt;
             auto lit = std::dynamic_pointer_cast<Literal>(*valOpt);
@@ -437,9 +437,17 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
 
         if (resultType->isFloating()) {
             // float arithmetic: convert both to double, compute, store as double
-            double l = toDouble(lhs->value);
-            double r = toDouble(rhs->value);
+            double l;
+            double r;
+            try {
+                double l = toDouble(lhs->value);
+                double r = toDouble(rhs->value);
+            } catch (const std::runtime_error &e) {
+                error(nullptr, "Floating point operation on non-numeric value");
+                return std::nullopt;
+            }
             double res{};
+
             if (op == "+")
                 res = l + r;
             else if (op == "-")
@@ -473,8 +481,15 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
             // integer arithmetic: decide signedness from resultType
             bool resultUnsigned = resultType->isUnsigned();
             if (resultUnsigned) {
-                uint64_t l = toUInt64(lhs->value);
-                uint64_t r = toUInt64(rhs->value);
+                uint64_t l;
+                uint64_t r;
+                try {
+                    uint64_t l = toUInt64(lhs->value);
+                    uint64_t r = toUInt64(rhs->value);
+                } catch (const std::runtime_error &e) {
+                    error(nullptr, "Integer operation on non-integer value");
+                    return std::nullopt;
+                }
                 uint64_t res_u{};
                 if (op == "+")
                     res_u = l + r;
@@ -511,8 +526,15 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
 
                 return std::make_shared<Literal>(res_u, resultType);
             } else {
-                int64_t l = toInt64(lhs->value);
-                int64_t r = toInt64(rhs->value);
+                int64_t l;
+                int64_t r;
+                try {
+                    l = toInt64(lhs->value);
+                    r = toInt64(rhs->value);
+                } catch (const std::runtime_error &e) {
+                    error(nullptr, "Integer operation on non-integer value");
+                    return std::nullopt;
+                }
                 int64_t res_s{};
                 if (op == "+")
                     res_s = l + r;

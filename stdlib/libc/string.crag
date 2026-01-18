@@ -1,6 +1,6 @@
-pub extern fn memcpy(dest: *u8, src: *const u8, n: usize) -> *u8;
-pub extern fn memmove(dest: *u8, src: *const u8, n: usize) -> *u8;
-pub extern fn memset(dest: *u8, c: i32, n: usize) -> *u8;
+pub extern fn memcpy(dest: *void, src: *void, n: usize) -> *void;
+pub extern fn memmove(dest: *void, src: *void, n: usize) -> *void;
+pub extern fn memset(dest: *void, c: i32, n: usize) -> *void;
 pub extern fn strlen(s: *const u8) -> usize;
 pub extern fn strcmp(s1: *const u8, s2: *const u8) -> i32;
 pub extern fn strncmp(s1: *const u8, s2: *const u8, n: usize) -> i32;

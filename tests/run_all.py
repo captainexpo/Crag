@@ -86,7 +86,7 @@ def parse_test_file(text: str):
 
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
-COMP_CANDIDATES = [os.path.join(ROOT, "build", "comp"), os.path.join(ROOT, "comp")]
+COMP_CANDIDATES = [os.path.join(ROOT, "build", "crag"), os.path.join(ROOT, "crag"), os.path.join(ROOT, "build", "comp"), os.path.join(ROOT, "comp")]
 
 
 def find_compiler() -> Optional[str]:

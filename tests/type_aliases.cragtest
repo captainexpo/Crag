@@ -3,6 +3,7 @@
 //BEGIN CODE
 
 using number = f64;
+
 struct Point {
     x: number,
     y: number,

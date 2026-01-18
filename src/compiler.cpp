@@ -8,6 +8,8 @@
 #include <llvm/Support/TargetSelect.h>
 #include <memory>
 
+#define DBG_PRINT_AST
+
 void initializeLLVM() {
     static bool initialized = false;
     if (!initialized) {
@@ -51,7 +53,9 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     auto moduleResolver = ModuleResolver(path.parent_path());
     auto mod = moduleResolver.loadRoot(path.filename().string());
 
-    // std::cout << mod->ast->toString();
+#ifdef DBG_PRINT_AST
+    std::cout << mod->ast->toString();
+#endif
 
     auto typeChecker = TypeChecker();
 
@@ -67,10 +71,12 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
         }
         return nullptr;
     }
-    //
-    // std::cout << "after type checking:\n";
-    // std::cout << mod->ast->toString();
-    //
+
+#ifdef DBG_PRINT_AST
+    std::cout << "after type checking:\n";
+    std::cout << mod->ast->toString();
+#endif
+
 
     if (moduleResolver.hasDependencyCycle()) {
         std::cerr << "Error: Cyclic dependencies detected among modules.\n";

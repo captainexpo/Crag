@@ -17,6 +17,13 @@ class ConstEvaluator {
         : m_type_checker(tc) {}
 
 
+
+    void addIntrinsic(const std::string &name, const ExprPtr &expr) {
+        m_const_vars[name] = expr;
+    }
+    void addGlobalVariable(const std::string &name, const ExprPtr &expr) {
+        m_const_vars[name] = expr;
+    }
     std::optional<ExprPtr> evaluateExpression(const ExprPtr &expr);
     std::optional<std::shared_ptr<VariableDeclaration>> evaluateVariableDeclaration(const std::shared_ptr<VariableDeclaration> &var);
     std::shared_ptr<Literal> castLiteral(const LiteralPtr &lit, const std::shared_ptr<Type> &targetType);
