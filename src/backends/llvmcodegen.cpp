@@ -1332,7 +1332,7 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
         arrayLLVMType, arrayStructAlloc,
         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1)});
-    m_builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), numElements), lengthPtr);
+    m_builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), numElements), lengthPtr);
 
     // Store pointer to raw array into struct (cast to i8* or element pointer type)
     llvm::Value *dataPtr = m_builder.CreateGEP(

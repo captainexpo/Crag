@@ -2,6 +2,7 @@
 //DESC:
 //BEGIN CODE
 
+extern fn free(ptr: *void) -> void;
 extern fn printf(fmt: *u8, ...) -> i32;
 extern fn malloc(size: usize) -> *u8;
 
@@ -23,12 +24,13 @@ fn main() -> i32 {
   for (let i = 0; i < arr.len; i = i + 1) {
       printf("%d\n", k[i]);
   }
-
+  free(k);
   let arr2: []f32 = {5,4,3,2,1};
   let k1 = map::<f32>(arr2, &successor::<f32>);
   for (let j = 0; j < arr2.len; j = j + 1) {
       printf("%f\n", k1[j]);
   }
+  free(k1);
   return 0;
 }
 

@@ -1,74 +1,74 @@
 [
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/ast/ast.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/ast/ast.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/ast/ast.cpp",
-  "output": "CMakeFiles/comp.dir/src/ast/ast.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/ast/ast.cpp.o -c /home/throope/Github/Crag/src/ast/ast.cpp",
+  "file": "/home/throope/Github/Crag/src/ast/ast.cpp",
+  "output": "CMakeFiles/crag.dir/src/ast/ast.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/ast/ast_copy.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/ast/ast_copy.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/ast/ast_copy.cpp",
-  "output": "CMakeFiles/comp.dir/src/ast/ast_copy.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/ast/ast_copy.cpp.o -c /home/throope/Github/Crag/src/ast/ast_copy.cpp",
+  "file": "/home/throope/Github/Crag/src/ast/ast_copy.cpp",
+  "output": "CMakeFiles/crag.dir/src/ast/ast_copy.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/backends/llvmcodegen.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/backends/llvmcodegen.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/backends/llvmcodegen.cpp",
-  "output": "CMakeFiles/comp.dir/src/backends/llvmcodegen.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/backends/llvmcodegen.cpp.o -c /home/throope/Github/Crag/src/backends/llvmcodegen.cpp",
+  "file": "/home/throope/Github/Crag/src/backends/llvmcodegen.cpp",
+  "output": "CMakeFiles/crag.dir/src/backends/llvmcodegen.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/compiler.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/compiler.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/compiler.cpp",
-  "output": "CMakeFiles/comp.dir/src/compiler.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/compiler.cpp.o -c /home/throope/Github/Crag/src/compiler.cpp",
+  "file": "/home/throope/Github/Crag/src/compiler.cpp",
+  "output": "CMakeFiles/crag.dir/src/compiler.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/const_eval.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/const_eval.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/const_eval.cpp",
-  "output": "CMakeFiles/comp.dir/src/const_eval.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/const_eval.cpp.o -c /home/throope/Github/Crag/src/const_eval.cpp",
+  "file": "/home/throope/Github/Crag/src/const_eval.cpp",
+  "output": "CMakeFiles/crag.dir/src/const_eval.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/lexer.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/lexer.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/lexer.cpp",
-  "output": "CMakeFiles/comp.dir/src/lexer.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/lexer.cpp.o -c /home/throope/Github/Crag/src/lexer.cpp",
+  "file": "/home/throope/Github/Crag/src/lexer.cpp",
+  "output": "CMakeFiles/crag.dir/src/lexer.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/main.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/main.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/main.cpp",
-  "output": "CMakeFiles/comp.dir/src/main.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/main.cpp.o -c /home/throope/Github/Crag/src/main.cpp",
+  "file": "/home/throope/Github/Crag/src/main.cpp",
+  "output": "CMakeFiles/crag.dir/src/main.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/parser.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/parser.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/parser.cpp",
-  "output": "CMakeFiles/comp.dir/src/parser.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/parser.cpp.o -c /home/throope/Github/Crag/src/parser.cpp",
+  "file": "/home/throope/Github/Crag/src/parser.cpp",
+  "output": "CMakeFiles/crag.dir/src/parser.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/typechecking/builtins.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/typechecking/builtins.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/typechecking/builtins.cpp",
-  "output": "CMakeFiles/comp.dir/src/typechecking/builtins.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/typechecking/builtins.cpp.o -c /home/throope/Github/Crag/src/typechecking/builtins.cpp",
+  "file": "/home/throope/Github/Crag/src/typechecking/builtins.cpp",
+  "output": "CMakeFiles/crag.dir/src/typechecking/builtins.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/typechecking/templates.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/typechecking/templates.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/typechecking/templates.cpp",
-  "output": "CMakeFiles/comp.dir/src/typechecking/templates.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/typechecking/templates.cpp.o -c /home/throope/Github/Crag/src/typechecking/templates.cpp",
+  "file": "/home/throope/Github/Crag/src/typechecking/templates.cpp",
+  "output": "CMakeFiles/crag.dir/src/typechecking/templates.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/typechecking/typecheck.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/typechecking/typecheck.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/typechecking/typecheck.cpp",
-  "output": "CMakeFiles/comp.dir/src/typechecking/typecheck.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/typechecking/typecheck.cpp.o -c /home/throope/Github/Crag/src/typechecking/typecheck.cpp",
+  "file": "/home/throope/Github/Crag/src/typechecking/typecheck.cpp",
+  "output": "CMakeFiles/crag.dir/src/typechecking/typecheck.cpp.o"
 },
 {
-  "directory": "/home/ethroop/Documents/Github/ToyComp/build",
-  "command": "/usr/lib64/ccache/c++  -I/home/ethroop/Documents/Github/ToyComp -I/home/ethroop/Documents/Github/ToyComp/build/_deps/argparse-src/include -g -O1 -g -std=c++20 -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/comp.dir/src/utils.cpp.o -c /home/ethroop/Documents/Github/ToyComp/src/utils.cpp",
-  "file": "/home/ethroop/Documents/Github/ToyComp/src/utils.cpp",
-  "output": "CMakeFiles/comp.dir/src/utils.cpp.o"
+  "directory": "/home/throope/Github/Crag/build",
+  "command": "/usr/sbin/c++  -I/home/throope/Github/Crag -I/home/throope/Github/Crag/build/_deps/argparse-src/include -std=c++20 -I/usr/lib64/llvm21/include -std=c++17 -D_GNU_SOURCE -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -o CMakeFiles/crag.dir/src/utils.cpp.o -c /home/throope/Github/Crag/src/utils.cpp",
+  "file": "/home/throope/Github/Crag/src/utils.cpp",
+  "output": "CMakeFiles/crag.dir/src/utils.cpp.o"
 }
 ]
