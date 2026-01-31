@@ -66,7 +66,7 @@ void registerGlobalCtor(llvm::Module &mod, llvm::Function *initFn, int priority 
     new llvm::GlobalVariable(
         mod,
         arrTy,
-        false, // not constant
+        false,
         llvm::GlobalValue::AppendingLinkage,
         llvm::ConstantArray::get(arrTy, ctorStruct),
         "llvm.global_ctors");

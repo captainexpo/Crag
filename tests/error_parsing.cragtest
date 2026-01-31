@@ -1,0 +1,38 @@
+//NAME: Error Union Parsing
+//DESC:
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+enum Error(i32) {
+    NotFound = 404,
+    Unauthorized = 401,
+    InternalServerError = 500
+}
+
+struct SomeType<T> {
+    a: T,
+    fn foo(self: *SomeType::<T>) -> i32 {
+        return 1337;
+    }
+}
+
+
+fn bogus() -> SomeType::<i32>!Error {
+    return! Error:NotFound;
+}
+
+fn main() -> i32 {
+    let result = bogus();
+    if (result.is_err){
+        printf("Error occurred: %d\n", result.err);
+        return 0;
+    }
+    printf("Success!\n", result.ok.foo());
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//Error occurred: 404
+//END EXPECT

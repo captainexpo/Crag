@@ -24,7 +24,6 @@ void Parser::error(const std::string &msg, const Token &token, bool throw_now_an
         throw ParseError(msg, token.line, token.column);
 }
 
-// ---- Token helpers ----
 Token Parser::peek(int lookahead) const {
     if (position + lookahead < tokens.size() + lookahead)
         return tokens[position + lookahead];
@@ -161,11 +160,6 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
         throw ParseError("Nullable types not supported yet", current.line, current.column);
         t->nullable = true;
     }
-    if (peek().type == TokenType::BANG) {
-        consume(TokenType::BANG);
-        auto error_type = parse_type();
-        return std::make_shared<ErrorUnionType>(t, error_type);
-    }
     if (peek().type == TokenType::DOUBLE_COLON) {
         // Template instance
         consume(TokenType::DOUBLE_COLON);
@@ -180,7 +174,11 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
         }
         consume(TokenType::GT);
         t = std::make_shared<TemplateInstanceType>(t, type_args);
-
+    }
+    if (peek().type == TokenType::BANG) {
+        consume(TokenType::BANG);
+        auto error_type = parse_type();
+        t = std::make_shared<ErrorUnionType>(t, error_type);
     }
     return t;
 }
