@@ -370,10 +370,21 @@ class ModuleResolver {
         }
 
         // Otherwise, check for common install dir
+#if defined(__APPLE__)
         std::filesystem::path common_paths[] = {
             "/usr/local/lib/crag/stdlib",
             "/usr/lib/crag/stdlib",
             std::filesystem::path(std::getenv("HOME") ? std::getenv("HOME") : "") / ".local/lib/crag/stdlib"};
+#elif defined(__linux__)
+        std::filesystem::path common_paths[] = {
+            "/usr/local/lib/crag/stdlib",
+            "/usr/lib/crag/stdlib",
+            std::filesystem::path(std::getenv("HOME") ? std::getenv("HOME") : "") / ".local/lib/crag/stdlib"};
+#elif defined(_WIN32)
+            std::filesystem::path common_paths[] = {
+                std::filesystem::path(std::getenv("APPDATA") ? std::getenv("APPDATA") : "") / "Crag/stdlib",
+                std::filesystem::path(std::getenv("LOCALAPPDATA") ? std::getenv("LOCALAPPDATA") : "") / "Crag/stdlib"};
+#endif
         for (const auto &path : common_paths) {
             std::filesystem::path stdlib_path = path / "std.crag";
             if (stdlib_path.string().find("~") == 0) {

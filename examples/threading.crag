@@ -1,0 +1,32 @@
+extern fn printf(fmt: *u8, ...) -> i32;
+
+
+using pthread_t = u64 when @target_ptr_width == 64;
+using pthread_t = u32 when @target_ptr_width == 32;
+
+extern fn pthread_exit(a1: *void) -> void;
+extern fn pthread_create(a1: *pthread_t, a2: *void, a3: *void, a4: *void) -> void;
+extern fn pthread_join(thread: pthread_t, a2: *void) -> void;
+
+extern fn sleep(second: u32) -> void;
+
+fn foo(arg: *void) -> *void {
+  printf("Thread is running\n");
+  for (let i = 0; i < 5; i += 1) {
+    printf("i: %d\n", i);
+    sleep(1);
+  }
+  pthread_exit(null);
+  return null;
+}
+
+fn main() -> i32 {
+    let threads: [10]pthread_t = {0,0,0,0,0,0,0,0,0,0};
+    for (let k = 0; k < threads.len; k++){
+      pthread_create(&threads[k], null, &foo, null);
+    }
+    for (let k = 0; k < threads.len; k += 1){
+      pthread_join(threads[k], null);
+    }
+    return 0;
+}

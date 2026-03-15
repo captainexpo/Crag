@@ -248,54 +248,17 @@ void LLVMCodegen::compileObjectFileToExecutable(
     const std::filesystem::path &runtime_path,
     bool no_runtime,
     std::string additional_linker_args) {
-    if (system("ld --version > /dev/null 2>&1") != 0) {
-        throw CodeGenError(nullptr, "ld not found.");
-    }
-
-    // Ask GCC where everything is
-    std::string crt1 = runAndCapture("gcc -print-file-name=crt1.o");
-    std::string crti = runAndCapture("gcc -print-file-name=crti.o");
-    std::string crtn = runAndCapture("gcc -print-file-name=crtn.o");
-    std::string libc = runAndCapture("gcc -print-file-name=libc.so");
-
-    if (crt1.empty() || crti.empty() || crtn.empty() || libc.empty()) {
-        throw CodeGenError(nullptr, "Failed to locate libc/CRT files via gcc.");
-    }
-
-    // Extract libc directory for -L
-    std::filesystem::path libcPath(libc);
-    std::string libcDir = libcPath.parent_path().string();
-
-    // Find dynamic linker
-    std::string ldso = runAndCapture(
-        "gcc -print-file-name=ld-linux-x86-64.so.2");
-
-    if (ldso.empty()) {
-        throw CodeGenError(nullptr, "Failed to locate dynamic linker.");
-    }
-
-    std::filesystem::path output =
-        executable_filepath.parent_path() / executable_filepath;
-
-    std::string cmd =
-        "ld " + crti + " " + crt1 + " " + object_filepath + " ";
-
+    std::string linker = "cc";
+    std::string cmd = linker + " " + object_filepath + " -o " + executable_filepath.string() + " " + additional_linker_args;
     if (!no_runtime) {
-        cmd += runtime_path.string() + " ";
+        std::string runtimeLib = runtime_path.string();
+        cmd += " " + runtimeLib;
+    }
+    int result = std::system(cmd.c_str());
+    if (result != 0) {
+        throw CodeGenError(nullptr, "Linking failed with command: " + cmd);
     }
 
-    cmd +=
-        "-L" + libcDir + " "
-                         "-lc " +
-        crtn + " "
-               "-dynamic-linker " +
-        ldso + " " + additional_linker_args + " "
-                                              "-o " +
-        output.string();
-
-    if (system(cmd.c_str()) != 0) {
-        throw CodeGenError(nullptr, "ld failed.");
-    }
 }
 
 llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const ASTNodePtr &node) {

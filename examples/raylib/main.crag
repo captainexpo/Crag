@@ -30,8 +30,10 @@ pub fn main() -> i32 {
     let bx: i32 = SCREEN_WIDTH / 2;
     let by: i32 = SCREEN_HEIGHT / 2;
 
-    let bvx: i32 = 5;
-    let bvy: i32 = -5;
+    let bvx: i32 = 7;
+    let bvy: i32 = -7;
+
+    let speed: f32 = 1.0;
 
 
     let p1_score: i32 = 0;
@@ -39,21 +41,38 @@ pub fn main() -> i32 {
 
     while (!rl::WindowShouldClose()) {
         // Game logic
+
+        std::cstdio::printf("%f\n", speed);
+
         if (rl::IsKeyDown(rl::Key:W)) {
-            p1_y -= 5;
+            p1_y -= 10;
         }
         if (rl::IsKeyDown(rl::Key:S)) {
-            p1_y += 5;
+            p1_y += 10;
         }
 
         if (rl::IsKeyDown(rl::Key:UP)) {
-            p2_y -= 5;
+            p2_y -= 10;
         }
         if (rl::IsKeyDown(rl::Key:DOWN)) {
-            p2_y += 5;
+            p2_y += 10;
         }
 
-        bx += bvx;
+        // Clamp paddles to screen
+        if (p1_y < 0) {
+            p1_y = 0;
+        }
+        if (p1_y > SCREEN_HEIGHT - PADDLE_HEIGHT) {
+            p1_y = SCREEN_HEIGHT - PADDLE_HEIGHT;
+        }
+        if (p2_y < 0) {
+            p2_y = 0;
+        }
+        if (p2_y > SCREEN_HEIGHT - PADDLE_HEIGHT) {
+            p2_y = SCREEN_HEIGHT - PADDLE_HEIGHT;
+        }
+
+        bx += bvx as f32 * speed;
         by += bvy;
 
         if (by <= 0 || by >= SCREEN_HEIGHT) {
@@ -77,21 +96,23 @@ pub fn main() -> i32 {
         }
 
         if (scored) {
-            bvx = -5*(bvx / std::abs(bvx));
-
+            bvx = -bvx;
+            speed = 1.0;
         }
 
         // Left paddle collision
         if (bx <= 50 + PADDLE_WIDTH && bx >= 50) {
             if (by >= p1_y && by <= p1_y + PADDLE_HEIGHT) {
-                bvx = -bvx + 1;
+                bvx = -bvx;
+                speed += 0.1;
             }
         }
 
         // Right paddle collision
         if (bx >= SCREEN_WIDTH - 50 - PADDLE_WIDTH && bx <= SCREEN_WIDTH - 50) {
             if (by >= p2_y && by <= p2_y + PADDLE_HEIGHT) {
-                bvx = -bvx - 1;
+                bvx = -bvx;
+                speed += 0.1;
             }
         }
 
@@ -100,7 +121,7 @@ pub fn main() -> i32 {
         rl::ClearBackground(rl::BLACK);
 
         // Draw dotted line down center
-        for (let i: i32 = 0; i < SCREEN_HEIGHT / 20; i+=1) {
+        for (let i: i32 = 0; i < SCREEN_HEIGHT / 20; i++) {
             rl::DrawLine(SCREEN_WIDTH / 2, i * 20, SCREEN_WIDTH / 2, i * 20 + 10, rl::WHITE);
         }
 

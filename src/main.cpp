@@ -6,15 +6,33 @@
 #include <iostream>
 #include <memory>
 
+#ifdef __APPLE__
+    #include <mach-o/dyld.h>
+#endif
+
 #define PRGM_NAME "Crag Compiler"
 
 namespace fs = std::filesystem;
 
 std::string defaultRuntimePath() {
+#if defined(__APPLE__)
+    // find lib/libruntime.a relative to executable
+    char execPath[1024];
+    uint32_t size = sizeof(execPath);
+    if (_NSGetExecutablePath(execPath, &size) != 0) {
+        std::cerr << "Error getting executable path\n";
+        return "libruntime.a";
+    }
+    fs::path runtimePath = fs::canonical(fs::path(execPath)).parent_path() / "lib" / "libruntime.a";
+    return runtimePath.string();
+#elif defined(__linux__)
     // find lib/libruntime.a relative to executable
     fs::path execPath = fs::canonical(fs::path("/proc/self/exe"));
     fs::path runtimePath = execPath.parent_path() / "lib" / "libruntime.a";
     return runtimePath.string();
+#else
+    return "libruntime.a";
+#endif
 }
 
 int main(int argc, char **argv) {

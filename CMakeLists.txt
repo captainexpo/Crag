@@ -60,10 +60,13 @@ target_link_libraries(crag PRIVATE argparse)
 
 if(WIN32)
   set(RUNTIME_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runtime/windows")
-elseif(UNIX)
-  set(RUNTIME_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runtime/linux")
+  message(WARNING "Windows detected. Note that the Windows runtime is currently untested and may not work correctly.")
 elseif(APPLE)
   set(RUNTIME_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runtime/macos")
+  message(WARNING "macOS detected. Note that the macOS runtime is currently untested and may not work correctly.")
+elseif(UNIX)
+  set(RUNTIME_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runtime/linux")
+  message("Using linux runtime.")
 else()
   # emit warning about unsupported platform and default to posix runtime
   message(WARNING "Unsupported platform detected. Defaulting to POSIX runtime.")
@@ -71,7 +74,7 @@ else()
 endif()
 
 # --- Runtime Library ---
-file(GLOB_RECURSE RUNTIME_SRC_FILES 
+file(GLOB_RECURSE RUNTIME_SRC_FILES
     "${RUNTIME_SRC_DIR}/*.crag"
 )
 
