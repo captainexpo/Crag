@@ -10,14 +10,7 @@
 //   <number> - go to line number
 //   . - on its own line ends append mode
 
-extern fn printf(fmt: *const u8, ...) -> i32;
-extern fn malloc(size: usize) -> *void;
-extern fn free(ptr: *u8) -> void;
-extern fn memcpy(dest: *u8, src: *const u8, n: usize) -> *u8;
-extern fn getchar() -> i32;
-extern fn strlen(s: *const u8) -> u32;
-extern fn strcmp(s1: *const u8, s2: *const u8) -> i32;
-extern fn exit(code: i32) -> void;
+import "stdlib" as std;
 
 struct Line {
   text: *u8,
@@ -32,7 +25,7 @@ struct Editor {
 
   fn init(self: *Editor) -> void {
     self.cap = 16;
-    self.lines = malloc(self.cap * 16) as *Line;
+    self.lines = std::cstdlib::malloc(self.cap * 16) as *Line;
     self.count = 0;
     self.current = 0;
   }
@@ -41,9 +34,9 @@ struct Editor {
     if (self.count < self.cap) return;
 
     let new_cap: usize = self.cap * 2;
-    let new_lines: *Line = malloc(new_cap * 16) as *Line;
-    memcpy(new_lines as *u8, self.lines as *u8, self.count * 16);
-    free(self.lines as *u8);
+    let new_lines: *Line = std::cstdlib::malloc(new_cap * 16) as *Line;
+    std::cstring::memcpy(new_lines as *u8, self.lines as *u8, self.count * 16);
+    std::cstdlib::free(self.lines as *u8);
     self.lines = new_lines;
     self.cap = new_cap;
   }
@@ -67,14 +60,14 @@ struct Editor {
 
   fn delete_line(self: *Editor) -> void {
     if (self.count == 0) {
-      printf("?\n");
+      std::cstdio::printf("?\n");
       return;
     }
     if (self.current >= self.count) {
       self.current = self.count - 1;
     }
 
-    free(self.lines[self.current].text);
+    std::cstdlib::free(self.lines[self.current].text);
 
     // Shift lines up
     let i: usize = self.current;
@@ -91,34 +84,34 @@ struct Editor {
 
   fn print_line(self: *Editor) -> void {
     if (self.count == 0) {
-      printf("?\n");
+      std::cstdio::printf("?\n");
       return;
     }
     if (self.current >= self.count) {
-      printf("?\n");
+      std::cstdio::printf("?\n");
       return;
     }
 
     let line: Line = self.lines[self.current];
     let i: usize = 0;
     while (i < line.len) {
-      printf("%c", line.text[i]);
+      std::cstdio::printf("%c", line.text[i]);
       i = i + 1;
     }
-    printf("\n");
+    std::cstdio::printf("\n");
   }
 
   fn print_numbered(self: *Editor) -> void {
     if (self.count == 0) {
-      printf("?\n");
+      std::cstdio::printf("?\n");
       return;
     }
     if (self.current >= self.count) {
-      printf("?\n");
+      std::cstdio::printf("?\n");
       return;
     }
 
-    printf("%d\t", self.current + 1);
+    std::cstdio::printf("%d\t", self.current + 1);
     self.print_line();
   }
 
@@ -129,21 +122,21 @@ struct Editor {
 
     let i: usize = 0;
     while (i < self.count) {
-      printf("%d\t", i + 1);
+      std::cstdio::printf("%d\t", i + 1);
       let line: Line = self.lines[i];
       let j: usize = 0;
       while (j < line.len) {
-        printf("%c", line.text[j]);
+        std::cstdio::printf("%c", line.text[j]);
         j = j + 1;
       }
-      printf("\n");
+      std::cstdio::printf("\n");
       i = i + 1;
     }
   }
 
   fn go_to_line(self: *Editor, num: usize) -> void {
     if (num == 0 || num > self.count) {
-      printf("?\n");
+      std::cstdio::printf("?\n");
       return;
     }
     self.current = num - 1;
@@ -152,24 +145,24 @@ struct Editor {
   fn deinit(self: *Editor) -> void {
     let i: usize = 0;
     while (i < self.count) {
-      free(self.lines[i].text);
+      std::cstdlib::free(self.lines[i].text);
       i = i + 1;
     }
-    free(self.lines as *u8);
+    std::cstdlib::free(self.lines as *u8);
   }
 }
 
 fn read_line() -> *u8 {
-  let buffer = malloc(256) as *u8;
+  let buffer = std::cstdlib::malloc(256) as *u8;
   let i: usize = 0;
-  let c: i32 = getchar();
+  let c: i32 = std::cstdio::getchar();
 
   while (c != 10 && c != -1) {
     if (i < 255) {
       buffer[i] = c as u8;
       i = i + 1;
     }
-    c = getchar();
+    c = std::cstdio::getchar();
   }
 
   buffer[i] = 0;
@@ -207,17 +200,17 @@ fn main() -> i32 {
   let running: i32 = 1;
 
   while (running == 1) {
-    printf("> ");
+    std::cstdio::printf("> ");
     let cmd: *u8 = read_line();
 
     if (cmd[0] == 'a') {  // 'a' - append
       while (true) {
         let line: *u8 = read_line();
         if (line[0] == '.' && line[1] == 0) {  // '.' alone
-          free(line);
+          std::cstdlib::free(line);
           break;
         }
-        let len: usize = strlen(line) as usize;
+        let len: usize = std::cstring::strlen(line) as usize;
         editor.insert_line(line, len);
       }
     } else if (cmd[0] == 'd') {  // delete
@@ -234,10 +227,10 @@ fn main() -> i32 {
       let num: i32 = parse_number(cmd);
       editor.go_to_line(num as usize);
     } else if (cmd[0] != 0) {
-      printf("?\n");
+      std::cstdio::printf("?\n");
     }
 
-    free(cmd);
+    std::cstdlib::free(cmd);
   }
 
   editor.deinit();

@@ -1,41 +1,122 @@
-import "crag_raylib.crag" as rl;
-import "../../stdlib/std.crag" as std;
+import "raylib" as rl;
+import "stdlib" as std;
+
+const PADDLE_WIDTH: i32 = 12;
+const PADDLE_HEIGHT: i32 = 100;
+
+const SCREEN_WIDTH: i32 = 800;
+const SCREEN_HEIGHT: i32 = 600;
+
+pub fn draw_paddle(left: bool, ypos: i32) -> void {
+    let x: i32 = 0;
+    if (left) {
+        x = 50;
+    } else {
+        x = SCREEN_WIDTH - 50 - PADDLE_WIDTH;
+    }
+    rl::DrawRectangle(x, ypos, PADDLE_WIDTH, PADDLE_HEIGHT, rl::WHITE);
+}
 
 pub fn main() -> i32 {
+    rl::InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Crong");
 
-    let x: i32 = 0;
-    let y: i32 = 0;
-
-    let dx: i32 = 5;
-    let dy: i32 = 5;
-
-    const w: i32 = 50;
-    const h: i32 = 50;
-
-    rl::InitWindow(800, 600, "Raylib Window");
+    //std::random::seed(0);
 
     rl::SetTargetFPS(60);
 
-    std::cstdio::printf("Random number: %f\n", std::random::random());
+    let p1_y: i32 = (SCREEN_HEIGHT - PADDLE_HEIGHT) / 2;
+    let p2_y: i32 = (SCREEN_HEIGHT - PADDLE_HEIGHT) / 2;
+
+    let bx: i32 = SCREEN_WIDTH / 2;
+    let by: i32 = SCREEN_HEIGHT / 2;
+
+    let bvx: i32 = 5;
+    let bvy: i32 = -5;
+
+
+    let p1_score: i32 = 0;
+    let p2_score: i32 = 0;
 
     while (!rl::WindowShouldClose()) {
-        rl::BeginDrawing();
-        rl::DrawRectangle(0, 0, rl::GetScreenWidth(), rl::GetScreenHeight(), rl::Color {
-            r: 255,
-            g: 255,
-            b: 255,
-            a: 100,
-        });
+        // Game logic
+        if (rl::IsKeyDown(rl::Key:W)) {
+            p1_y -= 5;
+        }
+        if (rl::IsKeyDown(rl::Key:S)) {
+            p1_y += 5;
+        }
 
-        rl::DrawRectangle(x, y, w, h, rl::MAROON);
-        x += dx;
-        y += dy;
-        if (x + w > rl::GetScreenWidth() || x < 0) {
-            dx = -dx;
+        if (rl::IsKeyDown(rl::Key:UP)) {
+            p2_y -= 5;
         }
-        if (y + h > rl::GetScreenHeight() || y < 0) {
-            dy = -dy;
+        if (rl::IsKeyDown(rl::Key:DOWN)) {
+            p2_y += 5;
         }
+
+        bx += bvx;
+        by += bvy;
+
+        if (by <= 0 || by >= SCREEN_HEIGHT) {
+            bvy = -bvy;
+        }
+
+
+        // Scoring
+        let scored: bool = false;
+        if (bx <= 0) {
+            p2_score += 1;
+            bx = SCREEN_WIDTH / 2;
+            by = SCREEN_HEIGHT / 2;
+            scored = true;
+        }
+        if (bx >= SCREEN_WIDTH) {
+            p1_score += 1;
+            bx = SCREEN_WIDTH / 2;
+            by = SCREEN_HEIGHT / 2;
+            scored = true;
+        }
+
+        if (scored) {
+            bvx = -5*(bvx / std::abs(bvx));
+
+        }
+
+        // Left paddle collision
+        if (bx <= 50 + PADDLE_WIDTH && bx >= 50) {
+            if (by >= p1_y && by <= p1_y + PADDLE_HEIGHT) {
+                bvx = -bvx + 1;
+            }
+        }
+
+        // Right paddle collision
+        if (bx >= SCREEN_WIDTH - 50 - PADDLE_WIDTH && bx <= SCREEN_WIDTH - 50) {
+            if (by >= p2_y && by <= p2_y + PADDLE_HEIGHT) {
+                bvx = -bvx - 1;
+            }
+        }
+
+
+        rl::BeginDrawing();
+        rl::ClearBackground(rl::BLACK);
+
+        // Draw dotted line down center
+        for (let i: i32 = 0; i < SCREEN_HEIGHT / 20; i+=1) {
+            rl::DrawLine(SCREEN_WIDTH / 2, i * 20, SCREEN_WIDTH / 2, i * 20 + 10, rl::WHITE);
+        }
+
+        draw_paddle(true, p1_y);
+        draw_paddle(false, p2_y);
+
+        rl::DrawCircle(bx, by, 7, rl::WHITE);
+
+        let tmp: [4]u8 = {0};
+
+        std::cstdio::snprintf(tmp.ptr, 4, "%d", p1_score);
+        rl::DrawText(tmp.ptr, SCREEN_WIDTH / 4, 20, 40, rl::WHITE);
+
+        std::cstdio::snprintf(tmp.ptr, 4, "%d", p2_score);
+        rl::DrawText(tmp.ptr , 3 * SCREEN_WIDTH / 4, 20, 40, rl::WHITE);
+
         rl::EndDrawing();
     }
     rl::CloseWindow();

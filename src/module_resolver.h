@@ -1,11 +1,11 @@
 #pragma once
+#include <optional>
 #ifndef MODULE_RESOLVER_H
 #define MODULE_RESOLVER_H
 
 #include "ast/ast.h"
 #include "parser.h" // assume you have a Parser class that can parse source text
 #include "utils.h"
-#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -62,8 +62,8 @@ inline std::string canonicalModuleName(const std::filesystem::path &abs_path) {
 
     std::string out;
     for (auto it = p.begin(); it != p.end(); ++it) {
-        if (!out.empty())
-            out += ".";
+        // if (!out.empty())
+        //     out += ".";
         out += it->string();
     }
     return out;
@@ -72,7 +72,10 @@ inline std::string canonicalModuleName(const std::filesystem::path &abs_path) {
 class ModuleResolver {
   public:
     explicit ModuleResolver(std::string base_path)
-        : m_base_path(std::move(base_path)) {}
+        : m_base_path(std::move(base_path)) {
+        initializeBuiltinShortcuts();
+        loadUserShortcuts();
+    }
 
     // adjacency list: module -> list of modules it depends on
     std::unordered_map<std::string, std::vector<std::string>> dependencyGraph;
@@ -84,9 +87,16 @@ class ModuleResolver {
     std::shared_ptr<Module> loadModule(
         const std::string &import_path,
         const std::filesystem::path &from_dir) {
-        auto abs_path =
-            std::filesystem::absolute(from_dir / import_path);
+        // First try to resolve as a shortcut
+        std::string resolved_path = resolveShortcut(import_path, from_dir);
 
+        auto abs_path =
+            std::filesystem::absolute(from_dir / resolved_path);
+
+        if (!std::filesystem::exists(abs_path)) {
+            std::cerr << "Error: Module file not found: " << abs_path << "\n";
+            exit(1);
+        }
         abs_path = std::filesystem::canonical(abs_path);
 
         // reuse cache
@@ -238,9 +248,149 @@ class ModuleResolver {
             return "";
         return m_module_cache.begin()->second->canon_name;
     }
+
+    void addShortcut(const std::string &shortcut, const std::string &path) {
+        m_shortcuts[shortcut] = path;
+    }
+
+    const std::unordered_map<std::string, std::string> &getShortcuts() const {
+        return m_shortcuts;
+    }
+
   private:
     std::string m_base_path;
     std::unordered_map<std::string, std::shared_ptr<Module>> m_module_cache;
+    std::unordered_map<std::string, std::string> m_shortcuts;
+    std::unordered_map<std::string, std::filesystem::path> m_shortcut_base_dirs; // Base directory for each shortcut
+
+    void initializeBuiltinShortcuts() {
+        m_shortcuts["stdlib"] = "<STDLIB>/std.crag";
+        m_shortcuts["string"] = "<STDLIB>/string.crag";
+        m_shortcuts["vector"] = "<STDLIB>/vector.crag";
+        m_shortcuts["random"] = "<STDLIB>/random.crag";
+        m_shortcuts["libc"] = "<STDLIB>/libc.crag";
+    }
+
+    void loadUserShortcuts() {
+        loadShortcutsFromFile(".cragrc");
+    }
+
+    void loadShortcutsFromFile(const std::string &filename) {
+        std::filesystem::path config_path = std::filesystem::path(m_base_path) / filename;
+        std::cout << "Looking for user shortcuts in: " << config_path << std::endl;
+
+        if (!std::filesystem::exists(config_path)) {
+            return;
+        }
+
+        try {
+            std::ifstream file(config_path);
+            if (!file.is_open()) {
+                return;
+            }
+
+            std::string line;
+            while (std::getline(file, line)) {
+                if (line.empty() || line[0] == '#')
+                    continue;
+
+                size_t eq_pos = line.find('=');
+                if (eq_pos != std::string::npos) {
+                    std::string key = line.substr(0, eq_pos);
+                    std::string value = line.substr(eq_pos + 1);
+
+                    key.erase(0, key.find_first_not_of(" \t"));
+                    key.erase(key.find_last_not_of(" \t") + 1);
+                    value.erase(0, value.find_first_not_of(" \t"));
+                    value.erase(value.find_last_not_of(" \t") + 1);
+
+                    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+                        value = value.substr(1, value.size() - 2);
+                    }
+
+                    m_shortcuts[key] = value;
+                    m_shortcut_base_dirs[key] = config_path.parent_path();
+                }
+            }
+        } catch (const std::exception &e) {
+            std::cerr << "Warning: Error loading shortcuts from " << config_path
+                      << ": " << e.what() << std::endl;
+        }
+    }
+
+    std::string resolveShortcut(const std::string &import_path, const std::filesystem::path &from_dir) const {
+
+        if (import_path.find('.') != std::string::npos ||
+            import_path.find('/') != std::string::npos ||
+            import_path.find('\\') != std::string::npos) {
+            return import_path;
+        }
+
+        if (auto it = m_shortcuts.find(import_path); it != m_shortcuts.end()) {
+            std::string shortcut_path = it->second;
+
+            if (shortcut_path.substr(0, 9) == "<STDLIB>/") {
+                auto stdlib_path_opt = findStdlibPath();
+                if (stdlib_path_opt) {
+                    std::filesystem::path stdlib_path = *stdlib_path_opt;
+                    info("stdlib path: " + stdlib_path.string());
+                    std::string relative_path = shortcut_path.substr(9);
+                    return (stdlib_path / relative_path).string();
+                } else {
+                    warn("Warning: Could not find stdlib. Make sure CRAGSTD is set or the stdlib is installed in a common location.");
+                }
+                fail("Warning: <STDLIB> shortcut used but stdlib not found. Have you set CRAGSTD or installed the stdlib? Falling back to default relative path.");
+            }
+
+            if (auto base_it = m_shortcut_base_dirs.find(import_path); base_it != m_shortcut_base_dirs.end()) {
+                std::filesystem::path abs_path = base_it->second / shortcut_path;
+                return abs_path.lexically_normal().string();
+            }
+
+            return shortcut_path;
+        }
+
+        return import_path;
+    }
+
+    std::optional<std::filesystem::path> findStdlibPath() const {
+        // Get env variable for CRAGSTD=...
+        // If it exists, check if stdlib is there
+        if (const char *env_p = std::getenv("CRAGSTD")) {
+            std::filesystem::path stdlib_path = std::filesystem::path(env_p) / "std.crag";
+            // Expand ~ to home directory if present
+            if (stdlib_path.string().find("~") == 0) {
+                if (const char *home_p = std::getenv("HOME")) {
+                    stdlib_path = std::filesystem::path(home_p) / stdlib_path.string().substr(1);
+                }
+            }
+            if (std::filesystem::exists(stdlib_path)) {
+                info("Found stdlib at CRAGSTD path: " + stdlib_path.string());
+                return stdlib_path.parent_path();
+            }
+        }
+
+        // Otherwise, check for common install dir
+        std::filesystem::path common_paths[] = {
+            "/usr/local/lib/crag/stdlib",
+            "/usr/lib/crag/stdlib",
+            std::filesystem::path(std::getenv("HOME") ? std::getenv("HOME") : "") / ".local/lib/crag/stdlib"};
+        for (const auto &path : common_paths) {
+            std::filesystem::path stdlib_path = path / "std.crag";
+            if (stdlib_path.string().find("~") == 0) {
+                if (const char *home_p = std::getenv("HOME")) {
+                    stdlib_path = std::filesystem::path(home_p) / stdlib_path.string().substr(1);
+                }
+            }
+            info("Checking for stdlib at: " + stdlib_path.string());
+            if (std::filesystem::exists(stdlib_path)) {
+                info("Found stdlib at common path: " + stdlib_path.string());
+                return stdlib_path.parent_path();
+            }
+        }
+        warn("Could not find stdlib in common paths. Checked /usr/local/lib/crag/stdlib, /usr/lib/crag/stdlib, and ~/.local/lib/crag/stdlib");
+        return std::nullopt;
+    }
 
     static std::string readFile(const std::string &path) {
         std::ifstream file(path);

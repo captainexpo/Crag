@@ -1,5 +1,9 @@
 import "./libc/libc.crag" as libc;
 
+pub fn seed(seed: i32) -> void {
+    libc::stdlib::srand(seed);
+}
+
 pub fn random() -> f32 {
     return libc::stdlib::rand() as f32 / 2147483647.0;
 }

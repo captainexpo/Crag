@@ -1,0 +1,15 @@
+//NAME: Hello World Stdlib
+//DESC: Test whether language is able to import from stdlib as an alias
+//BEGIN CODE
+
+import "stdlib" as std;
+
+fn main(argc: i32, argv: **u8) -> i32 {
+  std::cstdio::printf("Hello World!\n");
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//Hello World!\n
+//END EXPECT

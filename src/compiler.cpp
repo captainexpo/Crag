@@ -8,7 +8,7 @@
 #include <llvm/Support/TargetSelect.h>
 #include <memory>
 
-#define DBG_PRINT_AST
+//#define DBG_PRINT_AST
 
 void initializeLLVM() {
     static bool initialized = false;

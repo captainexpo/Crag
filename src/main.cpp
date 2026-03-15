@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
         .help("Source file to compile");
 
     program.add_argument("-o", "--output")
-        .default_value(std::string("a.out"))
+        .default_value(std::string("main"))
         .help("Specify output filename");
 
     program.add_argument("--emit-ir")

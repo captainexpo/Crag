@@ -2,6 +2,7 @@
 #include "typecheck.h"
 #include "../ast/ast.h"
 #include "src/const_eval.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstring>

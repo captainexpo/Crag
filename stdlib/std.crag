@@ -5,3 +5,27 @@ pub import "libc/stdio.crag"  as cstdio;
 pub import "libc/stdlib.crag" as cstdlib;
 pub import "libc/string.crag" as cstring;
 pub import "libc/math.crag"   as cmath;
+pub import "libc/time.crag"   as ctime;
+
+
+// Convenience functions
+pub fn abs(x: i32) -> i32 {
+    if (x < 0) {
+        return -x;
+    }
+    return x;
+}
+
+pub fn max(a: i32, b: i32) -> i32 {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+pub fn min(a: i32, b: i32) -> i32 {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}

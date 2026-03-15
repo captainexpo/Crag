@@ -1,6 +1,8 @@
-import "../stdlib/std.crag" as std;
+import "stdlib" as std;
+
 fn main() -> i32 {
     let a = std::vector::new::<i64>();
+
     a.append(0);
     a.append(1);
     for (let i: usize = 1; i < 100; i += 1) {

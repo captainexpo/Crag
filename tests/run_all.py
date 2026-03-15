@@ -1,4 +1,3 @@
-# Python pytest test suite that compiles every example with --emit-ir and checks output file
 import os
 import subprocess
 import glob
@@ -23,22 +22,33 @@ def parse_test_file(text: str):
     END_CODE = "END CODE"
     BEGIN_EXPECT_OUT = "BEGIN EXPECT"
     END_EXPECT_OUT = "END EXPECT"
-
     BEGIN_EXPECT_ERR = "BEGIN EXPECT ERR"
     END_EXPECT_ERR = "END EXPECT ERR"
 
     lines = text.splitlines()
+
+    requires = []
 
     name = None
     desc = None
     code = []
     expect = []
     expect_err = []
+    args = [] # for ARGS: <arg case 1> | <arg case 2> | ...
 
-    mode = None  # None, "code", "expect", "expect_err"
+    mode = None  # None, "code", "expect", "expect_err",
 
     for _line in lines:
-        line = _line[2:] # skip the leading comment characters
+        line = _line[2:] if _line.startswith('//') else _line # skip the leading comment characters
+        if line.strip().startswith("REQUIRES:"):
+            reqs = line.strip()[len("REQUIRES:"):].split(",")
+            requires.extend(req.strip() for req in reqs)
+            continue
+        if line.strip().startswith("ARGS:"):
+            arg_cases = line.strip()[len("ARGS:"):].split("|")
+            args.extend(arg_case.strip() for arg_case in arg_cases)
+            continue
+
         m = SECTION_NAME.match(line)
         if m:
             name = m.group(1)
@@ -82,6 +92,8 @@ def parse_test_file(text: str):
         "code": "\n".join(code).rstrip(),
         "expect": "\n".join(expect).rstrip(),
         "expect_err": "\n".join(expect_err).rstrip(),
+        "requires": requires,
+        "args": args,
     }
 
 
@@ -122,6 +134,7 @@ def run_unit_test(
     if comp is None or not isinstance(comp, str):
         printc("Compiler not found, skipping test.", C_YELLOW)
         return TestResult.SKIP, outs, 0
+
     outdir = tmp_path / "out"
     outdir.mkdir(exist_ok=True)
     base = os.path.splitext(os.path.basename(src_path))[0]
@@ -129,9 +142,31 @@ def run_unit_test(
     test_file_data = parse_test_file(open(src_path).read())
     src_code = test_file_data["code"]
     expected_output = test_file_data["expect"]
-    src_file = tmp_path / (base + ".y")
+    required_files = test_file_data["requires"]
+
+    # Create a test directory for this specific test
+    test_dir = tmp_path / base
+    test_dir.mkdir(exist_ok=True)
+
+    # Write main source file
+    src_file = test_dir / f"{base}.crag"
     with open(src_file, "w") as f:
         f.write(src_code)
+    for req in required_files:
+
+        # get only filename
+        n = Path(req).name
+
+        req_path = os.path.join(ROOT, "tests", req)
+        if not os.path.isfile(req_path):
+            printc(f"Required file '{req}' not found, skipping test.", C_YELLOW)
+            return TestResult.SKIP, outs, 0
+        with open(req_path) as f:
+            req_code = f.read()
+        req_file = test_dir / n
+        with open(req_file, "w") as f:
+            f.write(req_code)
+
     cmd = [comp, str(src_file), "-o", out_base]
 
     start_time = time.time()
@@ -141,6 +176,7 @@ def run_unit_test(
     except subprocess.TimeoutExpired:
         printc("Compilation timed out.", C_RED)
         return TestResult.FAIL, outs, time.time() - start_time
+
     if not result.returncode == 0:
         printc("Compilation failed:\n", C_RED)
         printc(f"----------Stdout----------\n{result.stdout.strip()}\n", C_RED)
@@ -149,6 +185,7 @@ def run_unit_test(
             C_RED,
         )
         return TestResult.FAIL, outs, time.time() - start_time
+
     # call the generated binary
     bin_file = out_base
     try:
@@ -156,8 +193,10 @@ def run_unit_test(
     except subprocess.TimeoutExpired:
         printc("Execution timed out.", C_RED)
         return TestResult.FAIL, outs, time.time() - start_time
+
     end_time = time.time()
     total_time = end_time - start_time
+
     if result.returncode != 0:
         if not test_file_data["expect_err"].strip():
             printc(
@@ -180,6 +219,7 @@ def run_unit_test(
     elif test_file_data["expect_err"].strip():
         printc("Expected execution to fail but it succeeded.", C_RED)
         return TestResult.FAIL, outs, total_time
+
     actual_output = result.stdout.rstrip()
     if test_file_data["expect"]:
         if actual_output != expected_output:
@@ -189,6 +229,7 @@ def run_unit_test(
             printc("Actual Stdout:", C_RED)
             printc(actual_output, C_RED)
             return TestResult.FAIL, outs, total_time
+
     return TestResult.PASS, outs, total_time
 
 

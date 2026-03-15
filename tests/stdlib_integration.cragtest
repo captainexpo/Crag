@@ -1,0 +1,16 @@
+//NAME: Simple stdlib test
+//DESC: Very bad test, should probably remove
+//REQUIRES:../stdlib/libc/stdio.crag
+//BEGIN CODE
+
+import "stdio.crag" as stdio;
+
+fn main() -> i32 {
+    stdio::printf("%d", 15);
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//15
+//END EXPECT

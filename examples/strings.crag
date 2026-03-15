@@ -1,5 +1,5 @@
-import "../stdlib/string.crag" as string;
-import "../stdlib/std.crag" as std;
+import "string" as string;
+import "stdlib" as std;
 
 
 fn main() -> i32 {

@@ -58,8 +58,22 @@ target_link_libraries(crag PRIVATE ${LLVM_LDFLAGS_LIST})
 # endif()
 target_link_libraries(crag PRIVATE argparse)
 
+if(WIN32)
+  set(RUNTIME_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runtime/windows")
+elseif(UNIX)
+  set(RUNTIME_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runtime/linux")
+elseif(APPLE)
+  set(RUNTIME_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runtime/macos")
+else()
+  # emit warning about unsupported platform and default to posix runtime
+  message(WARNING "Unsupported platform detected. Defaulting to POSIX runtime.")
+  set(RUNTIME_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runtime/linux")
+endif()
+
 # --- Runtime Library ---
-file(GLOB_RECURSE RUNTIME_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/builtin/*.crag")
+file(GLOB_RECURSE RUNTIME_SRC_FILES 
+    "${RUNTIME_SRC_DIR}/*.crag"
+)
 
 make_directory(lib)
 
