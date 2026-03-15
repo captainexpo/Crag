@@ -5,7 +5,7 @@
 extern fn printf(fmt: *u8, ...) -> i32;
 
 fn main() -> i32 {
-  for (let i: i32 = 0; i < 3; i = i + 1) {
+  for (let i: i32 = 0; i < 3; i++) {
     printf("%d\n", i);
   }
   return 0;

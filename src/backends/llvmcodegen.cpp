@@ -247,8 +247,7 @@ void LLVMCodegen::compileObjectFileToExecutable(
     const std::filesystem::path &executable_filepath,
     const std::filesystem::path &runtime_path,
     bool no_runtime,
-    std::string additional_linker_args)
-{
+    std::string additional_linker_args) {
     if (system("ld --version > /dev/null 2>&1") != 0) {
         throw CodeGenError(nullptr, "ld not found.");
     }
@@ -269,8 +268,7 @@ void LLVMCodegen::compileObjectFileToExecutable(
 
     // Find dynamic linker
     std::string ldso = runAndCapture(
-        "gcc -print-file-name=ld-linux-x86-64.so.2"
-    );
+        "gcc -print-file-name=ld-linux-x86-64.so.2");
 
     if (ldso.empty()) {
         throw CodeGenError(nullptr, "Failed to locate dynamic linker.");
@@ -280,10 +278,7 @@ void LLVMCodegen::compileObjectFileToExecutable(
         executable_filepath.parent_path() / executable_filepath;
 
     std::string cmd =
-        "ld "
-        + crti + " "
-        + crt1 + " "
-        + object_filepath + " ";
+        "ld " + crti + " " + crt1 + " " + object_filepath + " ";
 
     if (!no_runtime) {
         cmd += runtime_path.string() + " ";
@@ -291,11 +286,12 @@ void LLVMCodegen::compileObjectFileToExecutable(
 
     cmd +=
         "-L" + libcDir + " "
-        "-lc "
-        + crtn + " "
-        "-dynamic-linker " + ldso + " "
-        + additional_linker_args + " "
-        "-o " + output.string();
+                         "-lc " +
+        crtn + " "
+               "-dynamic-linker " +
+        ldso + " " + additional_linker_args + " "
+                                              "-o " +
+        output.string();
 
     if (system(cmd.c_str()) != 0) {
         throw CodeGenError(nullptr, "ld failed.");
@@ -395,7 +391,7 @@ llvm::Value *LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &exp
                                    false);
     } else if (IS_INSTANCE(expr, UnaryOperation)) {
         auto unOp = std::dynamic_pointer_cast<UnaryOperation>(expr);
-        return generateUnaryOp(unOp->operand, unOp->op, false);
+        return generateUnaryOp(unOp, false);
     } else if (IS_INSTANCE(expr, TypeCast)) {
         auto typeCast = std::dynamic_pointer_cast<TypeCast>(expr);
         return generateAddress(typeCast->expr);
@@ -439,7 +435,7 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
     }
     if (IS_INSTANCE(expr, UnaryOperation)) {
         auto unOp = std::dynamic_pointer_cast<UnaryOperation>(expr);
-        return generateUnaryOp(unOp->operand, unOp->op, loadValue);
+        return generateUnaryOp(unOp, loadValue);
     }
     if (IS_INSTANCE(expr, Literal)) {
         return generateLiteral(std::dynamic_pointer_cast<Literal>(expr), loadValue);
@@ -1147,9 +1143,10 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
 }
 
 llvm::Value *
-LLVMCodegen::generateUnaryOp(const std::shared_ptr<Expression> &operand,
-                             std::string op, bool loadValue) {
-    auto val = generateExpression(operand);
+LLVMCodegen::generateUnaryOp(const std::shared_ptr<UnaryOperation> &operation,
+                             bool load_value) {
+    auto val = generateExpression(operation->operand);
+    auto op = operation->op;
     if (op == "-") {
         if (val->getType()->isFloatingPointTy()) {
             return m_builder.CreateFNeg(val, "fnegtmp");
@@ -1160,12 +1157,40 @@ LLVMCodegen::generateUnaryOp(const std::shared_ptr<Expression> &operand,
     else if (op == "!")
         return m_builder.CreateNot(val, "nottmp");
     else if (op == "&")
-        return generateAddress(operand);
+        return generateAddress(operation->operand);
     else if (op == "~") {
         return m_builder.CreateNot(val, "bwnottmp");
+    } else if (op == "++") {
+        if (operation->is_prefix) {
+            llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
+            llvm::Value *inc = m_builder.CreateAdd(val, one, "inc");
+            llvm::Value *addr = generateAddress(operation->operand);
+            m_builder.CreateStore(inc, addr);
+            return inc;
+        } else {
+            llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
+            llvm::Value *inc = m_builder.CreateAdd(val, one, "inc");
+            llvm::Value *addr = generateAddress(operation->operand);
+            m_builder.CreateStore(inc, addr);
+            return val;
+        }
+    } else if (op == "--") {
+        if (operation->is_prefix) {
+            llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
+            llvm::Value *dec = m_builder.CreateSub(val, one, "dec");
+            llvm::Value *addr = generateAddress(operation->operand  );
+            m_builder.CreateStore(dec, addr);
+            return dec;
+        } else {
+            llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
+            llvm::Value *dec = m_builder.CreateSub(val, one, "dec");
+            llvm::Value *addr = generateAddress(operation->operand);
+            m_builder.CreateStore(dec, addr);
+            return val;
+        }
     }
 
-    throw CodeGenError(operand, "Unsupported unary operator: " + op);
+    throw CodeGenError(operation, "Unsupported unary operator: " + op);
 }
 
 llvm::Value *LLVMCodegen::generateLogicalOp(std::shared_ptr<Expression> left, std::shared_ptr<Expression> right, std::string op) {
@@ -1394,7 +1419,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(
 
     if (!obj) {
         throw CodeGenError(structAccess,
-            "Failed to generate address for method call object");
+                           "Failed to generate address for method call object");
     }
 
     auto structType =
@@ -1415,7 +1440,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(
 
     if (!structType) {
         throw CodeGenError(structAccess,
-            "Method call on non-struct type");
+                           "Method call on non-struct type");
     }
 
     std::string mangledName =
@@ -1426,7 +1451,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(
 
     if (!callee) {
         throw CodeGenError(methodCall,
-            "Unknown method: " + mangledName);
+                           "Unknown method: " + mangledName);
     }
 
     std::vector<llvm::Value *> args;
@@ -1526,7 +1551,7 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     }
 
     llvm::Value *result = m_builder.CreateCall(funcTy, calleeValue, argsV,
-                                                funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
+                                               funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
 
     // If calling an extern function that returns a coerced struct, convert it back
     if (isExtern && result && shouldCoerceForABI(funcTy->getReturnType())) {
@@ -1667,13 +1692,12 @@ llvm::Value *LLVMCodegen::generateArrayFieldAccess(const std::shared_ptr<FieldAc
     } else {
         if (!loadValue) {
             throw CodeGenError(fieldAccess,
-                "Cannot assign to field of temporary value");
+                               "Cannot assign to field of temporary value");
         }
 
         llvm::Value *baseVal = generateExpression(fieldAccess->base);
-        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
+        llvm::StructType *structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
         basePtr = materializeAggregate(baseVal, structType);
-
     }
     if (!basePtr) {
         throw CodeGenError(fieldAccess->base, "Failed to generate address for array field base");
@@ -1716,11 +1740,11 @@ llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<Fi
     } else {
         if (!loadValue) {
             throw CodeGenError(fieldAccess,
-                "Cannot assign to field of temporary value");
+                               "Cannot assign to field of temporary value");
         }
 
         llvm::Value *baseVal = generateExpression(fieldAccess->base);
-        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
+        llvm::StructType *structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
         basePtr = materializeAggregate(baseVal, structType);
     }
     if (!basePtr) {
@@ -1765,7 +1789,8 @@ llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<Fi
 }
 
 bool LLVMCodegen::isLValue(const std::shared_ptr<Expression> &expr) {
-    if (!expr) return false;
+    if (!expr)
+        return false;
 
     if (IS_INSTANCE(expr, VarAccess)) {
         return true;
@@ -1829,11 +1854,11 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
     } else {
         if (!loadValue) {
             throw CodeGenError(fieldAccess,
-                "Cannot assign to field of temporary value");
+                               "Cannot assign to field of temporary value");
         }
 
         llvm::Value *baseVal = generateExpression(fieldAccess->base);
-        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
+        llvm::StructType *structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
         basePtr = materializeAggregate(baseVal, structType);
     }
     if (!basePtr) {
@@ -2341,8 +2366,8 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
 
     // Bitcast to ABI type pointer and load
     llvm::Value *abiPtr = m_builder.CreateBitCast(structAlloca,
-                                                   llvm::PointerType::getUnqual(context),
-                                                   "abi.ptr");
+                                                  llvm::PointerType::getUnqual(context),
+                                                  "abi.ptr");
     llvm::Value *abiValue = m_builder.CreateLoad(abiType, abiPtr, "abi.val");
 
     return abiValue;
@@ -2361,8 +2386,8 @@ llvm::Value *LLVMCodegen::coerceFromABI(llvm::Value *abiValue, llvm::Type *struc
 
     // Bitcast to struct type pointer and load
     llvm::Value *structPtr = m_builder.CreateBitCast(abiAlloca,
-                                                      llvm::PointerType::getUnqual(context),
-                                                      "struct.ptr");
+                                                     llvm::PointerType::getUnqual(context),
+                                                     "struct.ptr");
     llvm::Value *structValue = m_builder.CreateLoad(structType, structPtr, "struct.val");
 
     return structValue;

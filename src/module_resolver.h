@@ -277,7 +277,6 @@ class ModuleResolver {
 
     void loadShortcutsFromFile(const std::string &filename) {
         std::filesystem::path config_path = std::filesystem::path(m_base_path) / filename;
-        std::cout << "Looking for user shortcuts in: " << config_path << std::endl;
 
         if (!std::filesystem::exists(config_path)) {
             return;

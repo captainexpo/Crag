@@ -921,8 +921,9 @@ struct BinaryOperation : public Expression {
 struct UnaryOperation : public Expression {
     std::string op;
     ExprPtr operand;
-    UnaryOperation(std::string o, ExprPtr e)
-        : op(std::move(o)), operand(std::move(e)) {}
+    bool is_prefix;
+    UnaryOperation(std::string o, ExprPtr e, bool is_prefix = false)
+        : op(std::move(o)), operand(std::move(e)), is_prefix(is_prefix) {}
     std::string str() const override {
         return "UnaryOperation(" + op + operand->toString() + ")";
     }

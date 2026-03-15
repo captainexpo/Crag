@@ -1,4 +1,5 @@
 #pragma once
+#include "llvm/IR/InstrTypes.h"
 #ifndef IR_H
 #define IR_H
 
@@ -202,8 +203,8 @@ class LLVMCodegen : public Backend {
     llvm::Value *generateBinaryOp(const std::shared_ptr<Expression> &left,
                                   const std::shared_ptr<Expression> &right,
                                   std::string op, bool loadValue = true);
-    llvm::Value *generateUnaryOp(const std::shared_ptr<Expression> &operand,
-                                 std::string op, bool loadValue = true);
+    llvm::Value *generateUnaryOp(const std::shared_ptr<UnaryOperation> &operand,
+                                 bool loadValue = true);
     llvm::Value *generateLogicalOp(std::shared_ptr<Expression> left, std::shared_ptr<Expression> right, std::string op);
 
     llvm::Value *generateLiteral(const std::shared_ptr<Literal> &lit,

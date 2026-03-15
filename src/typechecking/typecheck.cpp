@@ -1257,6 +1257,20 @@ TypeChecker::inferUnaryOp(const std::shared_ptr<UnaryOperation> &un) {
         un->inferred_type = resolveType(un, pt);
         return pt;
     }
+    if (un->op == "++"){
+        if (!ot->isGeneralNumeric()) {
+            throw TypeCheckError(un, "Increment operator expects numeric operand, got " + typeName(ot));
+        }
+        un->inferred_type = resolveType(un, ot);
+        return ot;
+    }
+    if (un->op == "--"){
+        if (!ot->isGeneralNumeric()) {
+            throw TypeCheckError(un, "Decrement operator expects numeric operand, got " + typeName(ot));
+        }
+        un->inferred_type = resolveType(un, ot);
+        return ot;
+    }
     throw TypeCheckError(un, "Unhandled unary operator: " + un->op);
 }
 

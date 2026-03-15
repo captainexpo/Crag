@@ -810,7 +810,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
         default:
             if (PREFIX_OPS.count(t.type)) {
                 auto right = parse_expression(get_precedence(t, false) + 1);
-                expr = std::make_shared<UnaryOperation>(t.value, right);
+                expr = std::make_shared<UnaryOperation>(t.value, right, true); // true indicates prefix
                 expr->line = t.line;
                 expr->col = t.column;
                 return expr;
@@ -922,6 +922,14 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
                 } else {
                     expr = std::make_shared<FuncCall>(left, args);
                 }
+                expr->line = t.line;
+                expr->col = t.column;
+                return expr;
+            }
+            case TokenType::INC:
+            case TokenType::DEC: {
+                auto op = t.type == TokenType::INC ? "++" : "--";
+                expr = std::make_shared<UnaryOperation>(op, left);
                 expr->line = t.line;
                 expr->col = t.column;
                 return expr;
