@@ -5,6 +5,7 @@
 #include <cstring>
 #include <memory>
 
+
 std::string mangleTemplateName(const std::string &base, const std::vector<std::shared_ptr<Type>> &params) {
     std::string mangled = base + "<";
     for (size_t i = 0; i < params.size(); ++i) {
@@ -18,7 +19,7 @@ std::string mangleTemplateName(const std::string &base, const std::vector<std::s
 
 // Returns type of expression, and replacement for the instantiation
 std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti) {
-        std::string temp = ti->base;
+    std::string temp = ti->base;
     std::vector<std::shared_ptr<Type>> params = ti->type_args;
 
     // Check if this is a module-qualified template (contains "::")
@@ -108,7 +109,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
     // Local template instantiation (existing code)
     auto maybe_to_instantiate = m_templates.find(temp);
     if (maybe_to_instantiate == m_templates.end()) {
-        throw TypeCheckError(ti, "Unknown template: " + ti->base);
+        throw TypeCheckError(ti, "Unknown template: " + temp);
     }
     auto to_instantiate = maybe_to_instantiate->second;
 
@@ -153,8 +154,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         return std::make_pair(
             ti->inferred_type,
             std::make_shared<VarAccess>(new_name));
-    }
-    else if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(to_instantiate)) {
+    } else if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(to_instantiate)) {
         auto new_name = mangleTemplateName(sd->name, params);
         // Check if already instantiated
         auto it = m_structs.find(new_name);
@@ -209,11 +209,10 @@ void replaceInType(std::shared_ptr<Type> &type, const std::unordered_map<std::st
         if (it != generic_map.end()) {
             type = it->second;
         }
-    }else if (auto eu = std::dynamic_pointer_cast<ErrorUnionType>(type)) {
+    } else if (auto eu = std::dynamic_pointer_cast<ErrorUnionType>(type)) {
         replaceInType(eu->errorType, generic_map);
         replaceInType(eu->valueType, generic_map);
-    }
-    else if (auto ti = std::dynamic_pointer_cast<TemplateInstanceType>(type)) {
+    } else if (auto ti = std::dynamic_pointer_cast<TemplateInstanceType>(type)) {
         for (auto &arg : ti->type_args) {
             replaceInType(arg, generic_map);
         }
@@ -248,7 +247,7 @@ void replaceInType(std::shared_ptr<Type> &type, const std::unordered_map<std::st
         }
     } else if (auto et = std::dynamic_pointer_cast<EnumType>(type)) {
         return;
-    }else
+    } else
         return;
 }
 

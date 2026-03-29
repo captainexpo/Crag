@@ -56,6 +56,7 @@ struct Module {
 };
 
 inline std::string canonicalModuleName(const std::filesystem::path &abs_path) {
+#if 0
     // example: /a/b/c/foo.cr → a.b.c.foo
     std::filesystem::path p = abs_path;
     p.replace_extension();
@@ -67,6 +68,18 @@ inline std::string canonicalModuleName(const std::filesystem::path &abs_path) {
         out += it->string();
     }
     return out;
+#else
+    std::filesystem::path p = abs_path;
+
+    p.replace_extension();
+
+    std::string filename = p.filename().string();
+    auto hash = std::hash<std::string>{}(p.string());
+    std::string hash_str = std::to_string(hash);
+    hash_str += "_" + filename;
+
+    return hash_str;
+#endif
 }
 
 class ModuleResolver {
@@ -369,6 +382,25 @@ class ModuleResolver {
             }
         }
 
+        // Prefer a stdlib bundled with the current working tree during local development.
+        const std::filesystem::path local_candidates[] = {
+            std::filesystem::path("stdlib"),
+            std::filesystem::path("../stdlib")
+        };
+        for (const auto &candidate : local_candidates) {
+            std::filesystem::path stdlib_path = candidate / "std.crag";
+            std::error_code ec;
+            if (std::filesystem::exists(stdlib_path, ec) && !ec) {
+                auto canonical_path = std::filesystem::weakly_canonical(stdlib_path, ec);
+                if (!ec) {
+                    info("Found stdlib at local path: " + canonical_path.string());
+                    return canonical_path.parent_path();
+                }
+                info("Found stdlib at local path: " + stdlib_path.string());
+                return stdlib_path.parent_path();
+            }
+        }
+
         // Otherwise, check for common install dir
 #if defined(__APPLE__)
         std::filesystem::path common_paths[] = {
@@ -381,9 +413,9 @@ class ModuleResolver {
             "/usr/lib/crag/stdlib",
             std::filesystem::path(std::getenv("HOME") ? std::getenv("HOME") : "") / ".local/lib/crag/stdlib"};
 #elif defined(_WIN32)
-            std::filesystem::path common_paths[] = {
-                std::filesystem::path(std::getenv("APPDATA") ? std::getenv("APPDATA") : "") / "Crag/stdlib",
-                std::filesystem::path(std::getenv("LOCALAPPDATA") ? std::getenv("LOCALAPPDATA") : "") / "Crag/stdlib"};
+        std::filesystem::path common_paths[] = {
+            std::filesystem::path(std::getenv("APPDATA") ? std::getenv("APPDATA") : "") / "Crag/stdlib",
+            std::filesystem::path(std::getenv("LOCALAPPDATA") ? std::getenv("LOCALAPPDATA") : "") / "Crag/stdlib"};
 #endif
         for (const auto &path : common_paths) {
             std::filesystem::path stdlib_path = path / "std.crag";

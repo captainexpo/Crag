@@ -1,0 +1,8 @@
+import "./libc/stdio.crag" as cstdio;
+import "./libc/stdlib.crag" as cstdlib;
+import "./libc/string.crag" as cstring;
+
+pub fn panic(msg: *const u8) -> void  {
+    cstdio::fprintf(cstdio::stderr, "PANIC: %s\n", msg);
+    cstdlib::abort();
+}

@@ -1,6 +1,5 @@
 #include "llvmcodegen.h"
 #include "../module_resolver.h"
-#include <array>
 #include <filesystem>
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
@@ -73,12 +72,14 @@ void registerGlobalCtor(llvm::Module &mod, llvm::Function *initFn, int priority 
 }
 
 void LLVMCodegen::emitBuiltinDeclarations() {
-    llvm::FunctionType *panicType = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {
-                                                                                                llvm::PointerType::getUnqual(context), // Error message
-                                                                                                llvm::Type::getInt32Ty(context),       // Line number
-                                                                                                llvm::Type::getInt32Ty(context)        // Column number
-                                                                                            },
-                                                            false);
+    llvm::FunctionType *panicType = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(context),
+        {
+            llvm::PointerType::getUnqual(context), // Error message
+            llvm::Type::getInt32Ty(context),       // Line number
+            llvm::Type::getInt32Ty(context)        // Column number
+        },
+        false);
     llvm::Function::Create(panicType, llvm::Function::ExternalLinkage, RUNTIME_PANIC_FUNC_NAME, m_llvm_module.get());
 
     // Prepare runtime panic strings
@@ -173,7 +174,7 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
 
 void LLVMCodegen::emitObjectToFile(const std::string &filename) {
     // REF:
-    // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html Make
+    // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html
 
     auto targetTriple = llvm::sys::getDefaultTargetTriple();
     llvm::InitializeAllTargetInfos();
@@ -258,7 +259,6 @@ void LLVMCodegen::compileObjectFileToExecutable(
     if (result != 0) {
         throw CodeGenError(nullptr, "Linking failed with command: " + cmd);
     }
-
 }
 
 llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const ASTNodePtr &node) {
@@ -585,8 +585,10 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
         abiType = llvm::FunctionType::get(abiRetType, abiParamTypes, fType->isVarArg());
     }
 
+    llvm::Function::LinkageTypes linkage = func->is_extern ? llvm::Function::ExternalLinkage : llvm::Function::ExternalLinkage;
+
     llvm::Function *function = llvm::Function::Create(
-        abiType, llvm::Function::ExternalLinkage, fname, m_llvm_module.get());
+        abiType, linkage, fname, m_llvm_module.get());
     CUR_SCOPE.set(fname, function, fType, func->type);
     // Set names for all arguments
     unsigned int idx = 0;
@@ -1141,7 +1143,7 @@ LLVMCodegen::generateUnaryOp(const std::shared_ptr<UnaryOperation> &operation,
         if (operation->is_prefix) {
             llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
             llvm::Value *dec = m_builder.CreateSub(val, one, "dec");
-            llvm::Value *addr = generateAddress(operation->operand  );
+            llvm::Value *addr = generateAddress(operation->operand);
             m_builder.CreateStore(dec, addr);
             return dec;
         } else {
@@ -1452,12 +1454,8 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     bool isExtern = false;
 
     if (auto *func = llvm::dyn_cast<llvm::Function>(calleeValue)) {
-        // Hacky way to determine if function is extern:
-        // If the function name starts with '/', it's internal
-        // TODO: Better way to mark internal vs extern functions b/c for some reason the cleaner ways don't work
         funcTy = func->getFunctionType();
-        std::string funcName = func->getName().str();
-        isExtern = !funcName.empty() && funcName[0] != '/';
+        isExtern = m_current_module->externLinkage.count(func->getName().str()) > 0;
     } else if (calleeValue->getType()->isPointerTy()) {
         // Indirect call via function pointer
         auto it = funcCall->func->inferred_type;
@@ -1705,7 +1703,6 @@ llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<Fi
             throw CodeGenError(fieldAccess,
                                "Cannot assign to field of temporary value");
         }
-
         llvm::Value *baseVal = generateExpression(fieldAccess->base);
         llvm::StructType *structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
         basePtr = materializeAggregate(baseVal, structType);
@@ -1791,6 +1788,7 @@ bool LLVMCodegen::isLValue(const std::shared_ptr<Expression> &expr) {
     // Literals, computations, temporaries, etc. are never lvalues
     return false;
 }
+
 llvm::Value *LLVMCodegen::generateFieldAccess(
     const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
 
@@ -2240,29 +2238,29 @@ llvm::Value *LLVMCodegen::materializeAggregate(llvm::Value *abiValue, llvm::Stru
     llvm::IRBuilder<> &B = m_builder;
     llvm::LLVMContext &C = context;
 
-    // 1. Allocate ABI-shaped temporary
+    // Allocate ABI-shaped temporary
     llvm::AllocaInst *abiTmp =
         B.CreateAlloca(abiTy, nullptr, "abi.tmp");
 
-    // ABI alignment (safe default)
+    // ABI alignment
     llvm::DataLayout DL = m_llvm_module->getDataLayout();
     unsigned abiAlign = DL.getABITypeAlign(abiTy).value();
     abiTmp->setAlignment(llvm::Align(abiAlign));
 
-    // 2. Store ABI value
+    // Store ABI value
     B.CreateStore(abiValue, abiTmp);
 
-    // 3. Allocate language-level struct
+    // Allocate language-level struct
     llvm::AllocaInst *langTmp =
         B.CreateAlloca(langType, nullptr, "agg.tmp");
 
     unsigned langAlign = DL.getABITypeAlign(langType).value();
     langTmp->setAlignment(llvm::Align(langAlign));
 
-    // 4. Compute copy size (language layout!)
+    // Compute copy size (language layout!)
     uint64_t copySize = DL.getTypeAllocSize(langType);
 
-    // 5. memcpy ABI → language object
+    // memcpy ABI → language object
     B.CreateMemCpy(
         langTmp,
         llvm::Align(langAlign),
@@ -2270,7 +2268,7 @@ llvm::Value *LLVMCodegen::materializeAggregate(llvm::Value *abiValue, llvm::Stru
         llvm::Align(abiAlign),
         copySize);
 
-    // 6. Return pointer to materialized object
+    // Return pointer to materialized object
     return langTmp;
 }
 

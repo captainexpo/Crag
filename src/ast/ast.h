@@ -478,8 +478,7 @@ enum class GenericConstraintKind {
     Pointer,
 };
 
-
-struct TemplateInstanceType  : Type {
+struct TemplateInstanceType : Type {
     std::shared_ptr<Type> base;
     std::vector<std::shared_ptr<Type>> type_args;
 
@@ -562,7 +561,7 @@ struct StructType : Type {
     StructType(std::string n) : name(std::move(n)), fields(), complete(false) {}
 
     std::shared_ptr<Type> getFieldType(const std::string &fname) const {
-        for (const auto &field : fields){
+        for (const auto &field : fields) {
             if (field.first == fname)
                 return field.second;
         }
@@ -662,6 +661,7 @@ struct FunctionType : Type {
     std::vector<std::shared_ptr<Type>> params;
     std::shared_ptr<Type> ret;
     bool variadic;
+    // TODO: Add `bool is_extern`
 
     FunctionType(std::vector<std::shared_ptr<Type>> p,
                  std::shared_ptr<Type> r,
@@ -1197,7 +1197,6 @@ struct TypeAliasDeclaration : Declaration {
         return "TypeAliasDeclaration(" + name + " = " +
                (aliased_type != nullptr ? aliased_type->str() : "unknown") +
                (condition ? ", if " + condition->toString() : "") + ")";
-
     }
     NodeKind kind() const override { return NodeKind::TypeAliasDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }

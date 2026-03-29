@@ -1,4 +1,5 @@
 pub extern fn printf(fmt: *const u8, ...) -> i32;
+pub extern fn vprintf(fmt: *const u8, args: *void) -> i32;
 pub extern fn puts(s: *const u8) -> i32;
 pub extern fn putchar(c: i32) -> i32;
 pub extern fn getchar() -> i32;
@@ -8,3 +9,27 @@ pub extern fn fprintf(stream: *void, fmt: *const u8, ...) -> i32;
 pub extern fn sprintf(str: *u8, fmt: *const u8, ...) -> i32;
 pub extern fn snprintf(str: *u8, size: usize, fmt: *const u8, ...) -> i32;
 
+struct File {
+    _ptr:    *u8,
+    _cnt:    i32,
+    _base:   *u8,
+    _flag:   i32,
+    _file:   i32,
+    _charbuf: i32,
+    _bufsiz: i32,
+    _tmpfname: *u8,
+}
+
+pub extern const stderr: *File;
+pub extern const stdout: *File;
+
+// File utility functions
+pub extern fn fopen(filename: *const u8, mode: *const u8) -> *void;
+pub extern fn fclose(file: *void) -> i32;
+pub extern fn fread(ptr: *void, size: usize, count: usize, stream: *void) -> usize;
+pub extern fn fwrite(ptr: *const void, size: usize, count: usize, stream: *void) -> usize;
+pub extern fn fseek(stream: *void, offset: i64, whence: i32) -> i32;
+pub extern fn ftell(stream: *void) -> i64;
+pub extern fn rewind(stream: *void) -> void;
+pub extern fn feof(stream: *void) -> i32;
+pub extern fn ferror(stream: *void) -> i32;

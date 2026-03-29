@@ -1,0 +1,33 @@
+//NAME: Hello World
+//DESC: Test whether language is able to print "Hello World!\n" and return 0
+//BEGIN CODE
+
+import "stdlib" as std;
+
+fn Q_rsqrt( number: f32 ) -> f32
+{
+	let i: i32;
+	let x2: f32;
+    let y: f32;
+	const threehalfs: f32 = 1.5;
+
+	x2 = number * 0.5;
+	y  = number;
+	i  = (&y as *i32).* ;                              // evil floating point bit level hacking
+	i  = 0x5f3759df - ( i >> 1 );               // what the fuck?
+	y  = (&i as *f32).* ;
+	y  = y * ( threehalfs - ( x2 * y * y ) );   // 1st iteration
+//	y  = y * ( threehalfs - ( x2 * y * y ) );   // 2nd iteration, this can be removed
+	return y;
+}
+
+
+fn main() -> i32 {
+    std::cstdio::printf("%f\n", Q_rsqrt(0.15625));
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//2.525486\n
+//END EXPECT

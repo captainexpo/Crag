@@ -2,6 +2,4 @@ using time_t = i64 when @target_ptr_width == 64;
 using time_t = i32 when @target_ptr_width == 32;
 
 extern fn time(t: *time_t) -> time_t;
-pub fn now() -> time_t {
-    return time(null);
-}
+

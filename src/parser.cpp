@@ -6,8 +6,24 @@
 #include <cstddef>
 #include <llvm/IR/Intrinsics.h>
 #include <memory>
+#include <sstream>
 #include <unordered_map>
 #include <vector>
+
+namespace {
+std::string describeToken(const Token &token) {
+    if (token.type == TokenType::EOF_T) {
+        return "end of file";
+    }
+
+    std::ostringstream oss;
+    oss << tokenTypeName(token.type);
+    if (!token.value.empty()) {
+        oss << " ('" << token.value << "')";
+    }
+    return oss.str();
+}
+} // namespace
 
 Parser::Parser(const std::vector<Token> &tokens)
     : tokens(tokens), position(0) {}
@@ -53,7 +69,7 @@ Token Parser::consume(TokenType expected_type) {
         return t;
     }
     throw ParseError("Expected " + tokenTypeName(expected_type) +
-                         ", got " + tokenTypeName(t.type),
+                         " but found " + describeToken(t),
                      t.line, t.column);
     return Token{TokenType::EOF_T, "", -1, -1};
 }
@@ -153,7 +169,7 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
             t = parse_function_ptr_type();
             break;
         default:
-            throw ParseError("Unexpected token in type", current.line, current.column);
+            throw ParseError("Unexpected token in type: " + describeToken(current), current.line, current.column);
     }
     if (top_level && peek().type == TokenType::QUESTION) {
         consume(TokenType::QUESTION);
@@ -207,7 +223,7 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
         return std::make_shared<Void>();
     if (std::find(current_generic_params.begin(), current_generic_params.end(), val) != current_generic_params.end())
         return std::make_shared<GenericType>(val);
-    throw ParseError("Unknown type " + val, peek().line,
+    throw ParseError("Unknown type '" + val + "'", peek().line,
                      peek().column);
 }
 
@@ -316,7 +332,7 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
             return ed;
         }
         default:
-            throw ParseError("Unexpected token in declaration", t.line,
+            throw ParseError("Unexpected token in declaration: " + describeToken(t), t.line,
                              t.column);
     }
 }
@@ -809,7 +825,8 @@ std::shared_ptr<Expression> Parser::parse_nud() {
         }
         default:
             if (PREFIX_OPS.count(t.type)) {
-                auto right = parse_expression(get_precedence(t, false) + 1);
+                constexpr int PREFIX_PRECEDENCE = 41;
+                auto right = parse_expression(PREFIX_PRECEDENCE);
                 expr = std::make_shared<UnaryOperation>(t.value, right, true); // true indicates prefix
                 expr->line = t.line;
                 expr->col = t.column;

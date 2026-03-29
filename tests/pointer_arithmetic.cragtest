@@ -1,0 +1,27 @@
+//NAME: Pointer Arithmetic
+//DESC: Test whether language is able to print "Hello World!\n" and return 0
+//BEGIN CODE
+
+import "stdlib" as std;
+
+fn main(argc: i32, argv: **u8) -> i32 {
+    let hello = "Hello World!";
+    let buf: [13]u8 = {0};
+    std::cstring::memcpy(buf.ptr, hello, 12);
+    buf[12] = '\n';
+    std::cstdio::printf("%s", buf);
+
+    let arr2: [5]i32 = {1,2,3,4,5};
+    std::cstdio::printf("%d\n", arr2.ptr.*);
+    std::cstdio::printf("%d\n", (arr2.ptr + sizeof(i32)).*);
+
+    return 0;
+}
+
+
+//END CODE
+//BEGIN EXPECT
+//Hello World!
+//1
+//2
+//END EXPECT

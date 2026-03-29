@@ -1,0 +1,40 @@
+import "./libc/stdlib.crag" as cstd;
+import "io.crag" as io;
+
+pub struct Arena {
+    ptr: *void,
+    size: usize,
+    used: usize,
+
+    fn alloc(self: *Arena, size: usize) -> *void {
+        let new_used = self.used + size;
+        if (new_used > self.size) {
+            io::panic("Arena out of memory");
+        }
+        let ptr = (self.ptr + self.used) as *void;
+        self.used = new_used;
+        return ptr;
+    }
+
+    fn free(self: *Arena, ptr: *void) -> void {
+        // No-op, since we don't actually free memory in an arena
+    }
+
+    fn reset(self: *Arena) -> void {
+        self.used = 0;
+    }
+
+    fn destroy(self: *Arena) -> void {
+        cstd::free(self.ptr);
+    }
+}
+
+
+pub fn arena_new(size: usize) -> Arena {
+    let ptr = cstd::malloc(size) as *void;
+    if (ptr == null) {
+        io::panic("Failed to allocate memory for arena");
+    }
+    return Arena { ptr: ptr, size: size, used: 0 };
+}
+

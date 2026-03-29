@@ -75,6 +75,10 @@ int main(int argc, char **argv) {
         .default_value(defaultRuntimePath())
         .help("Path to runtime library");
 
+    program.add_argument("--stdlib-path")
+        .default_value(std::string(""))
+        .help("Manually specify path to standard library");
+
     program.add_argument("--backend")
         .default_value(std::string("llvm"))
         .help("Specify backend (currently only 'llvm' is supported)");

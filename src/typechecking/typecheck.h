@@ -11,6 +11,44 @@
 #include <unordered_map>
 #include <vector>
 
+#define DUMP_TYPECHECKER_STATE()                                                                     \
+    do {                                                                                             \
+        std::cerr << "=== TypeChecker State Dump ===\n";                                             \
+        std::cerr << "LINE: " << __LINE__ << " in " << __FILE__ << "\n";                             \
+        std::cerr << "Current module: " << (current_module ? current_module->path : "null") << "\n"; \
+        std::cerr << "Current scopes:\n";                                                            \
+        for (size_t i = 0; i < m_scopes.size(); ++i) {                                               \
+            std::cerr << "  Scope " << i << ":\n";                                                   \
+            for (const auto &sym : m_scopes[i].symbols) {                                            \
+                std::cerr << "    " << sym.first << ": " << sym.second->str() << "\n";               \
+            }                                                                                        \
+        }                                                                                            \
+        std::cerr << "Structs:\n";                                                                   \
+        for (const auto &st : m_structs) {                                                           \
+            std::cerr << "  " << st.first << ": " << st.second->str() << "\n";                       \
+        }                                                                                            \
+        std::cerr << "Unions:\n";                                                                    \
+        for (const auto &ud : m_unions) {                                                            \
+            std::cerr << "  " << ud.first << ": " << ud.second->str() << "\n";                       \
+        }                                                                                            \
+        std::cerr << "Enums:\n";                                                                     \
+        for (const auto &en : m_enums) {                                                             \
+            std::cerr << "  " << en.first << ": " << en.second->str() << "\n";                       \
+        }                                                                                            \
+        std::cerr << "Type aliases:\n";                                                              \
+        for (const auto &ta : m_type_aliases) {                                                      \
+            std::cerr << "  " << ta.first << ": " << ta.second->str() << "\n";                       \
+        }                                                                                            \
+        std::cerr << "Templates:\n";                                                                 \
+        for (const auto &t : m_templates) {                                                          \
+            std::cerr << "  " << t.first << ": " << t.second->str() << "\n";                         \
+        }                                                                                            \
+        std::cerr << "Functions:\n";                                                                 \
+        for (const auto &f : m_functions) {                                                          \
+            std::cerr << "  " << f.first << ": " << f.second->str() << "\n";                         \
+        }                                                                                            \
+    } while (0);
+
 class TypeCheckError : public std::runtime_error {
   public:
     TypeCheckError(ASTNodePtr node, const std::string &msg)
@@ -59,6 +97,10 @@ class TypeChecker {
     bool ok() const { return m_errors.empty(); }
 
     std::unordered_map<std::string, std::shared_ptr<TypeChecker>> imported_module_checkers;
+
+    void dump_state_to_stderr() {
+    }
+
   private:
     std::shared_ptr<Module> current_module;
 
@@ -87,7 +129,6 @@ class TypeChecker {
     std::unordered_map<std::string, std::shared_ptr<FunctionType>> m_functions;
 
     std::shared_ptr<Type> m_expected_return_type; // Current function return type
-
 
     // Scope helpers
     void pushScope();

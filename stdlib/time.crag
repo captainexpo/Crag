@@ -1,0 +1,13 @@
+import "./libc/unistd.crag" as cunistd;
+import "./libc/time.crag" as ctime;
+
+pub using time_t = i64 when @target_ptr_width == 64;
+pub using time_t = i32 when @target_ptr_width == 32;
+
+pub fn now() -> time_t {
+    return ctime::time(null);
+}
+
+pub fn sleep(seconds: i32) -> void {
+    cunistd::sleep(seconds);
+}

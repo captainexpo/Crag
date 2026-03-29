@@ -1,12 +1,15 @@
 pub import "vector.crag"      as vector;
 pub import "random.crag"      as random;
 pub import "string.crag"      as string;
+pub import "io.crag"          as io;
+pub import "arena.crag"       as arena;
+pub import "time.crag"        as time;
+
 pub import "libc/stdio.crag"  as cstdio;
 pub import "libc/stdlib.crag" as cstdlib;
 pub import "libc/string.crag" as cstring;
 pub import "libc/math.crag"   as cmath;
 pub import "libc/time.crag"   as ctime;
-
 
 // Convenience functions
 pub fn abs(x: i32) -> i32 {
@@ -29,3 +32,5 @@ pub fn min(a: i32, b: i32) -> i32 {
     }
     return b;
 }
+
+
