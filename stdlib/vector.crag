@@ -5,6 +5,7 @@ pub enum VecError(i32){
     OUT_OF_BOUNDS,
 }
 
+
 pub struct Vec<T> {
     cur_elem: usize,
     size: usize,

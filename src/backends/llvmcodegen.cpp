@@ -2136,11 +2136,13 @@ llvm::Value *LLVMCodegen::generateForStatement(
         llvm::BasicBlock::Create(context, "for.cond", theFunction);
     auto body_block =
         llvm::BasicBlock::Create(context, "for.body", theFunction);
+    auto inc_block=
+        llvm::BasicBlock::Create(context, "for.inc", theFunction);
     auto after_block =
         llvm::BasicBlock::Create(context, "for.end", theFunction);
     m_loop_stack.push_back(LoopInfo{
         .breakBB = after_block,
-        .continueBB = cond_block,
+        .continueBB = inc_block,
     });
     m_builder.CreateBr(cond_block);
     m_builder.SetInsertPoint(cond_block);
@@ -2155,12 +2157,11 @@ llvm::Value *LLVMCodegen::generateForStatement(
     m_builder.CreateCondBr(condition, body_block, after_block);
     m_builder.SetInsertPoint(body_block);
     generateStatement(forStmt->body);
-    // Only execute increment and branch if block is not already terminated
-    if (!m_builder.GetInsertBlock()->getTerminator()) {
-        if (forStmt->increment)
-            generateStatement(forStmt->increment);
-        m_builder.CreateBr(cond_block);
-    }
+    m_builder.CreateBr(inc_block);
+    m_builder.SetInsertPoint(inc_block);
+    if (forStmt->increment)
+        generateStatement(forStmt->increment);
+    m_builder.CreateBr(cond_block);
     m_builder.SetInsertPoint(after_block);
     m_loop_stack.pop_back();
     return nullptr;

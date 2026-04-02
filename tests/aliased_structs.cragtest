@@ -1,0 +1,18 @@
+//NAME: Aliased Structs
+//DESC:
+//BEGIN CODE
+
+import "stdlib" as std;
+
+using S = std::string::Str;
+
+fn main() -> i32 {
+    let str: S = std::string::str("Hello World!\n");
+    std::cstdio::printf("%s", str.c_str());
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//Hello World!\n
+//END EXPECT
