@@ -293,7 +293,6 @@ std::shared_ptr<ASTNode> VariableDeclaration::copy() const {
     c->col = col;
     c->inferred_type = inferred_type;
     c->is_pub = is_pub;
-    c->generic_params = generic_params;
     c->is_const = is_const;
     c->is_extern = is_extern;
     return c;
@@ -315,7 +314,6 @@ std::shared_ptr<ASTNode> ImportDeclaration::copy() const {
     c->col = col;
     c->inferred_type = inferred_type;
     c->is_pub = is_pub;
-    c->generic_params = generic_params;
     return c;
 }
 

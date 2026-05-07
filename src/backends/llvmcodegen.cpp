@@ -1452,10 +1452,20 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
 
     llvm::FunctionType *funcTy = nullptr;
     bool isExtern = false;
+    if(auto ft = std::dynamic_pointer_cast<FunctionType>(funcCall->func->inferred_type)){
+        isExtern = ft->is_extern;
+    }
+    else if (auto fpt = std::dynamic_pointer_cast<PointerType>(funcCall->func->inferred_type)) {
+        if (auto ft = std::dynamic_pointer_cast<FunctionType>(fpt->base)) {
+            isExtern = ft->is_extern;
+        }
+    }
+    else {
+        throw CodeGenError(funcCall, "Unable to determine function type for call: " + funcCall->func->inferred_type->str());
+    }
 
     if (auto *func = llvm::dyn_cast<llvm::Function>(calleeValue)) {
         funcTy = func->getFunctionType();
-        isExtern = m_current_module->externLinkage.count(func->getName().str()) > 0;
     } else if (calleeValue->getType()->isPointerTy()) {
         // Indirect call via function pointer
         auto it = funcCall->func->inferred_type;

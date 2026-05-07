@@ -21,96 +21,98 @@ std::string mangleTemplateName(const std::string &base, const std::vector<std::s
 std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti) {
     std::string temp = ti->base;
     std::vector<std::shared_ptr<Type>> params = ti->type_args;
-
-    // Check if this is a module-qualified template (contains "::")
-    size_t double_colon_pos = temp.find("::");
-    if (double_colon_pos != std::string::npos) {
-        // Parse the module path and template name
-        std::vector<std::string> parts;
-        size_t start = 0;
-        size_t pos = 0;
-        while ((pos = temp.find("::", start)) != std::string::npos) {
-            parts.push_back(temp.substr(start, pos - start));
-            start = pos + 2;
-        }
-        parts.push_back(temp.substr(start)); // Add the final part (template name)
-
-        if (parts.size() < 2) {
-            throw TypeCheckError(ti, "Invalid module-qualified template: " + temp);
-        }
-
-        // The first parts form the module path, last part is the template name
-        std::string template_name = parts.back();
-        parts.pop_back();
-
-        // Look up the module
-        auto module_it = imported_module_checkers.find(parts[0]);
-        if (module_it == imported_module_checkers.end()) {
-            throw TypeCheckError(ti, "Unknown module in template: " + parts[0]);
-        }
-
-        // If there are more path components, recursively resolve
-        std::shared_ptr<TypeChecker> target_checker = module_it->second;
-        for (size_t i = 1; i < parts.size(); ++i) {
-            auto sub_module_it = target_checker->imported_module_checkers.find(parts[i]);
-            if (sub_module_it == target_checker->imported_module_checkers.end()) {
-                throw TypeCheckError(ti, "Unknown module in path: " + parts[i]);
-            }
-            target_checker = sub_module_it->second;
-        }
-
-        // Now instantiate the template in the target module's context
-        auto template_it = target_checker->m_templates.find(template_name);
-        if (template_it == target_checker->m_templates.end()) {
-            throw TypeCheckError(ti, "Unknown template in module: " + template_name);
-        }
-
-        // Create a new template instantiation for the target module to process
-        auto ti_copy = std::make_shared<TemplateInstantiation>(template_name, params);
-        ti_copy->line = ti->line;
-        ti_copy->col = ti->col;
-
-        // Let the target module instantiate it
-        auto result = target_checker->inferTemplateInstantiation(ti_copy);
-        std::cout << "Instantiated module-qualified template: " << ti->str()
-                  << " to type " << result.first->str() << "\n";
-
-        // If the result type contains a struct, we need to get the complete version
-        // from the target module's m_structs and register it in the calling module
-        if (auto fn_type = std::dynamic_pointer_cast<FunctionType>(result.first)) {
-            if (auto st = std::dynamic_pointer_cast<StructType>(fn_type->ret)) {
-                // Look up the complete struct in the target module
-                auto it = target_checker->m_structs.find(st->name);
-                if (it != target_checker->m_structs.end()) {
-                    // Replace the return type with the complete struct
-                    fn_type->ret = it->second;
-                    // Register it in the calling module's m_structs
-                    m_structs[st->name] = it->second;
-                }
-            }
-        } else if (auto st = std::dynamic_pointer_cast<StructType>(result.first)) {
-            // Look up the complete struct in the target module
-            auto it = target_checker->m_structs.find(st->name);
-            if (it != target_checker->m_structs.end()) {
-                result.first = it->second;
-                m_structs[st->name] = it->second;
-            }
-        }
-
-        ti->inferred_type = result.first;
-
-        // Return a module-qualified access to the instantiated template
-        std::string mangled_name = mangleTemplateName(template_name, params);
-        auto ma = std::make_shared<ModuleAccess>(parts, mangled_name);
-        ma->inferred_type = result.first;
-        return std::make_pair(result.first, ma);
-    }
-
-    // Local template instantiation (existing code)
+    //
+    // // Check if this is a module-qualified template (contains "::")
+    // size_t double_colon_pos = temp.find("::");
+    // if (double_colon_pos != std::string::npos) {
+    //     // Parse the module path and template name
+    //     std::vector<std::string> parts;
+    //     size_t start = 0;
+    //     size_t pos = 0;
+    //     while ((pos = temp.find("::", start)) != std::string::npos) {
+    //         parts.push_back(temp.substr(start, pos - start));
+    //         start = pos + 2;
+    //     }
+    //     parts.push_back(temp.substr(start)); // Add the final part (template name)
+    //
+    //     if (parts.size() < 2) {
+    //         throw TypeCheckError(ti, "Invalid module-qualified template: " + temp);
+    //     }
+    //
+    //     // The first parts form the module path, last part is the template name
+    //     std::string template_name = parts.back();
+    //     parts.pop_back();
+    //
+    //     // Look up the module
+    //     auto module_it = imported_module_checkers.find(parts[0]);
+    //     if (module_it == imported_module_checkers.end()) {
+    //         throw TypeCheckError(ti, "Unknown module in template: " + parts[0]);
+    //     }
+    //
+    //     // If there are more path components, recursively resolve
+    //     std::shared_ptr<TypeChecker> target_checker = module_it->second;
+    //     for (size_t i = 1; i < parts.size(); ++i) {
+    //         auto sub_module_it = target_checker->imported_module_checkers.find(parts[i]);
+    //         if (sub_module_it == target_checker->imported_module_checkers.end()) {
+    //             throw TypeCheckError(ti, "Unknown module in path: " + parts[i]);
+    //         }
+    //         target_checker = sub_module_it->second;
+    //     }
+    //
+    //     // Now instantiate the template in the target module's context
+    //     auto template_it = target_checker->m_templates.find(template_name);
+    //     if (template_it == target_checker->m_templates.end()) {
+    //         throw TypeCheckError(ti, "Unknown template in module: " + template_name);
+    //     }
+    //
+    //     // Create a new template instantiation for the target module to process
+    //     auto ti_copy = std::make_shared<TemplateInstantiation>(template_name, params);
+    //     ti_copy->line = ti->line;
+    //     ti_copy->col = ti->col;
+    //
+    //     // Let the target module instantiate it
+    //     auto result = target_checker->inferTemplateInstantiation(ti_copy);
+    //     std::cout << "Instantiated module-qualified template: " << ti->str()
+    //               << " to type " << result.first->str() << "\n";
+    //
+    //     // If the result type contains a struct, we need to get the complete version
+    //     // from the target module's m_structs and register it in the calling module
+    //     if (auto fn_type = std::dynamic_pointer_cast<FunctionType>(result.first)) {
+    //         if (auto st = std::dynamic_pointer_cast<StructType>(fn_type->ret)) {
+    //             // Look up the complete struct in the target module
+    //             auto it = target_checker->m_structs.find(st->name);
+    //             if (it != target_checker->m_structs.end()) {
+    //                 // Replace the return type with the complete struct
+    //                 fn_type->ret = it->second;
+    //                 // Register it in the calling module's m_structs
+    //                 m_structs[st->name] = it->second;
+    //             }
+    //         }
+    //     } else if (auto st = std::dynamic_pointer_cast<StructType>(result.first)) {
+    //         // Look up the complete struct in the target module
+    //         auto it = target_checker->m_structs.find(st->name);
+    //         if (it != target_checker->m_structs.end()) {
+    //             result.first = it->second;
+    //             m_structs[st->name] = it->second;
+    //         }
+    //     }
+    //
+    //     ti->inferred_type = result.first;
+    //
+    //     // Return a module-qualified access to the instantiated template
+    //     std::string mangled_name = mangleTemplateName(template_name, params);
+    //     auto ma = std::make_shared<ModuleAccess>(parts, mangled_name);
+    //     ma->inferred_type = result.first;
+    //     return std::make_pair(result.first, ma);
+    // }
+    //
     auto maybe_to_instantiate = m_templates.find(temp);
     if (maybe_to_instantiate == m_templates.end()) {
+        auto maybe = m_type_aliases.find(temp);
+
         throw TypeCheckError(ti, "Unknown template: " + temp);
     }
+
     auto to_instantiate = maybe_to_instantiate->second;
 
     if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(to_instantiate)) {

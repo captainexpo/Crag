@@ -55,6 +55,12 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
 
 #ifdef DBG_PRINT_AST
     std::cout << mod->ast->toString();
+#else
+    if (options.dump_ast) {
+        std::cout << "Dumping AST and exiting as requested by --dump-ast:\n";
+        std::cout << mod->ast->toString();
+        return nullptr;
+    }
 #endif
 
     auto typeChecker = TypeChecker();

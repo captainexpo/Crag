@@ -1,5 +1,4 @@
 #include "parser.h"
-#include <algorithm>
 #include "ast/ast.h"
 #include "lexer.h"
 #include <algorithm>
@@ -132,7 +131,7 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
             }
             if (declared_type_aliases.count(current.value)) {
                 std::string name = consume(TokenType::ID).value;
-                t = std::make_shared<AliasedType>(name);
+                t = declared_type_aliases[name];
                 break;
             }
             if (str_in_vector(current.value, current_generic_params, nullptr)) {
@@ -297,8 +296,23 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
             // Type alias
             consume(TokenType::USING);
             std::string alias_name = consume(TokenType::ID).value;
+
+            std::vector<std::string> generic_params;
+            if (match({TokenType::LT})) {
+                while (true) {
+                    std::string param_name = consume(TokenType::ID).value;
+                    generic_params.push_back(param_name);
+                    if (!match({TokenType::COMMA}))
+                        break;
+                }
+                consume(TokenType::GT);
+            }
+
             consume(TokenType::ASSIGN);
+
+            current_generic_params.insert(current_generic_params.end(), generic_params.begin(), generic_params.end());
             auto alias_type = parse_type();
+
             std::shared_ptr<Expression> condition = nullptr;
             if (match({TokenType::WHEN})) {
                 condition = parse_expression();
@@ -354,6 +368,7 @@ std::shared_ptr<Declaration> Parser::parse_extern_declaration() {
         case TokenType::FN: {
             auto fn = parse_function_declaration();
             fn->is_extern = true;
+            fn->type->is_extern = true;
             return fn;
         }
         default:
@@ -765,7 +780,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
 
                     // Create a qualified name for the template
                     std::string qualified_name;
-                    for (const auto& part : module_path) {
+                    for (const auto &part : module_path) {
                         qualified_name += part + "::";
                     }
                     qualified_name += member_name;
@@ -821,7 +836,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
         }
         case TokenType::ATTRIBUTE: {
             // Compiler intrinsic access
-            return std::make_shared<VarAccess>("@"+t.value); // TODO: Add separate Intrinsic node?
+            return std::make_shared<VarAccess>("@" + t.value); // TODO: Add separate Intrinsic node?
         }
         default:
             if (PREFIX_OPS.count(t.type)) {

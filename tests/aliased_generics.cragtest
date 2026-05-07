@@ -1,0 +1,26 @@
+
+//NAME: Aliased Generics !THIS TEST IS MEANT TO FAIL, THE FEATURE IS UNIMPLEMENTED AS OF RIGHT NOW!
+//DESC:
+//BEGIN CODE
+
+struct Point<T> {
+    x: T,
+    y: T,
+}
+
+fn identity<T>(x: T) -> T {
+    return x;
+}
+
+using Palias<T> = Point::<T>;
+
+fn main() -> i32 {
+    let p1 = Palias::<i32>{x: 1, y: 2};
+    let k = identity::<bool>(true);
+    return k as i32;
+}
+
+//END CODE
+//BEGIN EXPECT
+//Hello World!\n
+//END EXPECT

@@ -8,7 +8,6 @@
 #include <map>
 #include <memory>
 #include <set>
-#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -39,7 +38,6 @@ class Parser {
     std::vector<ParseError> m_errors; // Collected errors
 
     std::vector<Token> tokens;
-
 
     // HACK: Assume single level generics for now as that's all the language needs, but it might be expanded later (and should be)
     std::vector<std::string> current_generic_params;

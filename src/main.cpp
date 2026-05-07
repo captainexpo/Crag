@@ -103,6 +103,11 @@ int main(int argc, char **argv) {
         .implicit_value(true)
         .help("Do not link against the runtime library");
 
+    program.add_argument("--dump-ast")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Dump the AST and exit");
+
     try {
         program.parse_args(argc, argv2.data());
     } catch (const std::runtime_error &err) {
@@ -120,6 +125,8 @@ int main(int argc, char **argv) {
         std::cerr << "Unsupported backend: " << backend << "\n";
         return 1;
     }
+
+    options.dump_ast = program.get<bool>("--dump-ast");
 
     if (program.get<bool>("-ODebug")) {
         options.opt_level = Debug;

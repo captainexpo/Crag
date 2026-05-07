@@ -1,5 +1,4 @@
-extern fn printf(fmt: *u8, ...) -> i32;
-
+extern fn printf(format: *const u8, ...) -> i32;
 
 using pthread_t = u64 when @target_ptr_width == 64;
 using pthread_t = u32 when @target_ptr_width == 32;
@@ -23,9 +22,11 @@ fn foo(arg: *void) -> *void {
 fn main() -> i32 {
     let threads: [10]pthread_t = {0,0,0,0,0,0,0,0,0,0};
     for (let k = 0; k < threads.len; k++){
+      printf("creating thread %d\n", k);
       pthread_create(&threads[k], null, &foo, null);
     }
-    for (let k = 0; k < threads.len; k += 1){
+    for (let k = 0; k < threads.len; k++){
+      printf("joining thread %d\n", k);
       pthread_join(threads[k], null);
     }
     return 0;

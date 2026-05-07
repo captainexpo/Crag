@@ -415,30 +415,6 @@ struct ErrorUnionType : Type {
                                                 errorType->copy());
     }
 };
-
-struct AliasedType : Type {
-    TypeKind kind() const override { return TypeKind::Unknown; }
-
-    std::string name;
-    std::shared_ptr<Type> actual_type;
-
-    AliasedType(std::string n)
-        : name(std::move(n)) {};
-    std::string str() const override {
-        return "Alias<" + name + ">";
-    }
-
-    bool equals(const std::shared_ptr<Type> &other) const override {
-        auto o = dynamic_cast<AliasedType *>(other.get());
-        if (!o)
-            return false;
-        return name == o->name;
-    }
-    std::shared_ptr<Type> copy() const override {
-        return std::make_shared<AliasedType>(name);
-    }
-};
-
 struct QualifiedType : Type {
     TypeKind kind() const override { return TypeKind::Qualified; }
 
@@ -449,12 +425,12 @@ struct QualifiedType : Type {
         : module_path(std::move(mp)), type_name(std::move(tn)) {}
 
     std::string str() const override {
-        std::string result;
+        std::string result = "QualifiedType(";
         for (const auto &mod : module_path) {
-            result += mod + "::";
+            result += mod + ", ";
         }
         result += type_name;
-        return result;
+        return result + ")";
     }
 
     bool equals(const std::shared_ptr<Type> &other) const override {
@@ -474,8 +450,11 @@ enum class GenericConstraintKind {
     Integer,
     Unsigned,
     Signed,
-    Floating,
+    FloatingPoint,
     Pointer,
+    Structure,
+    Enum,
+    Union,
 };
 
 struct TemplateInstanceType : Type {
@@ -487,13 +466,13 @@ struct TemplateInstanceType : Type {
         : base(std::move(b)), type_args(std::move(ta)) {}
 
     std::string str() const override {
-        std::string result = base->str() + "::<";
+        std::string result = "TemplateInstance(" + base->str() + ", ";
         for (size_t i = 0; i < type_args.size(); ++i) {
             if (i > 0)
                 result += ", ";
             result += type_args[i]->str();
         }
-        result += ">";
+        result += ")";
         return result;
     }
 
@@ -596,7 +575,6 @@ struct StructType : Type {
         if (!o)
             return false;
         return name == o->name;
-        // optional: deep field comparison if you want structural typing
     }
 
     std::shared_ptr<Type> copy() const override {
@@ -661,15 +639,18 @@ struct FunctionType : Type {
     std::vector<std::shared_ptr<Type>> params;
     std::shared_ptr<Type> ret;
     bool variadic;
-    // TODO: Add `bool is_extern`
+    bool is_extern;
 
     FunctionType(std::vector<std::shared_ptr<Type>> p,
                  std::shared_ptr<Type> r,
-                 bool v = false)
-        : params(std::move(p)), ret(std::move(r)), variadic(v) {}
+                 bool v = false, bool ie = false)
+        : params(std::move(p)), ret(std::move(r)), variadic(v), is_extern(ie) {}
 
     std::string str() const override {
-        std::string result = "fn(";
+        std::string result = "";
+        if (is_extern)
+            result += "extern ";
+        result += "fn(";
         for (size_t i = 0; i < params.size(); ++i) {
             result += params[i]->str();
             if (i + 1 < params.size())
@@ -709,8 +690,8 @@ struct FunctionType : Type {
 
 struct Declaration : virtual ASTNode {
     bool is_pub;
-    std::vector<std::string> generic_params;
 };
+
 using ExprPtr = std::shared_ptr<Expression>;
 using StmtPtr = std::shared_ptr<Statement>;
 
@@ -832,7 +813,7 @@ struct EnumAccess : public Access {
     std::shared_ptr<Expression> enum_expr;
     std::string variant;
     EnumAccess(std::shared_ptr<Expression> e, std::string v) : enum_expr(e), variant(std::move(v)) {}
-    std::string str() const override { return "EnumAccess(" + enum_expr->toString() + "::" + variant + ")"; }
+    std::string str() const override { return "EnumAccess(" + enum_expr->toString() + ":" + variant + ")"; }
     NodeKind kind() const override { return NodeKind::VarAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
     std::shared_ptr<ASTNode> copy() const override;
@@ -858,13 +839,13 @@ struct TemplateInstantiation : public Expression {
                           std::vector<std::shared_ptr<Type>> ta)
         : base(std::move(b)), type_args(std::move(ta)) {}
     std::string str() const override {
-        std::string result = "TemplateInstantiation(" + base + "<";
+        std::string result = "TemplateInstantiation(" + base + ", ";
         for (size_t i = 0; i < type_args.size(); ++i) {
             if (i > 0)
                 result += ", ";
             result += type_args[i]->str();
         }
-        result += ">)";
+        result += ")";
         return result;
     }
     NodeKind kind() const override { return NodeKind::TemplateInstantiation; }
@@ -1017,18 +998,24 @@ struct StructInitializer : public Expression {
 
 // ----------------- Statements -----------------
 
+struct TypeDecl : Declaration {
+    std::string name;
+    std::vector<std::string> generic_params;
+    // virtual std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) = 0;
+};
+
 struct Block : public Statement {
     std::vector<StmtPtr> statements;
     Block() = default;
     void append(StmtPtr stmt) { statements.push_back(std::move(stmt)); }
     std::string str() const override {
-        std::string result = "Block { ";
+        std::string result = "Block { \n";
         for (size_t i = 0; i < statements.size(); ++i) {
             if (i > 0)
-                result += ";\n";
-            result += statements[i]->toString();
+                result += "\n";
+            result += "\t" + statements[i]->toString();
         }
-        result += " }";
+        result += "\n}";
         return result;
     }
     NodeKind kind() const override { return NodeKind::Block; }
@@ -1145,9 +1132,8 @@ struct Assignment : public Statement {
     std::shared_ptr<ASTNode> copy() const override;
 };
 
-struct FunctionDeclaration : Declaration {
+struct FunctionDeclaration : public TypeDecl {
     bool is_extern;
-    std::string name;
     std::shared_ptr<FunctionType> type;
     std::vector<std::string> param_names;
     std::shared_ptr<Statement> body;
@@ -1156,8 +1142,10 @@ struct FunctionDeclaration : Declaration {
     FunctionDeclaration(std::string n, std::shared_ptr<FunctionType> t,
                         std::vector<std::string> params,
                         std::shared_ptr<Statement> b, bool ext = false)
-        : name(std::move(n)), type(std::move(t)), param_names(std::move(params)),
-          body(std::move(b)), is_extern(ext) {}
+        : type(std::move(t)), param_names(std::move(params)),
+          body(std::move(b)), is_extern(ext) {
+        name = std::move(n);
+    }
     std::string str() const override {
         return std::string(is_extern ? "Extern" : "") + "FunctionDeclaration(" + type->str() + ", " + name + "){" +
                (body ? body->toString() : " ;") + "}";
@@ -1165,6 +1153,8 @@ struct FunctionDeclaration : Declaration {
     NodeKind kind() const override { return NodeKind::FunctionDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
     std::shared_ptr<ASTNode> copy() const override;
+
+    // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
 
 struct VariableDeclaration : Statement, Declaration {
@@ -1184,25 +1174,6 @@ struct VariableDeclaration : Statement, Declaration {
     void accept(ASTVisitor &v) override { v.visit(*this); }
     std::shared_ptr<ASTNode> copy() const override;
 };
-
-struct TypeAliasDeclaration : Declaration {
-    std::string name;
-    std::shared_ptr<Type> aliased_type;
-
-    ExprPtr condition; // Optional condition for conditional type aliases
-
-    TypeAliasDeclaration(std::string n, std::shared_ptr<Type> t, ExprPtr c = nullptr)
-        : name(std::move(n)), aliased_type(std::move(t)), condition(std::move(c)) {}
-    std::string str() const override {
-        return "TypeAliasDeclaration(" + name + " = " +
-               (aliased_type != nullptr ? aliased_type->str() : "unknown") +
-               (condition ? ", if " + condition->toString() : "") + ")";
-    }
-    NodeKind kind() const override { return NodeKind::TypeAliasDeclaration; }
-    void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
-};
-
 struct ImportDeclaration : Declaration {
     std::string path;
     std::string alias;
@@ -1244,8 +1215,7 @@ struct EnumType : Type {
     }
 };
 
-struct EnumDeclaration : Declaration {
-    std::string name;
+struct EnumDeclaration : public TypeDecl {
     std::shared_ptr<Type> base_type;
     std::shared_ptr<EnumType> enum_type; // Set after declaration
     std::unordered_map<std::string, std::shared_ptr<Literal>> variants;
@@ -1253,7 +1223,9 @@ struct EnumDeclaration : Declaration {
     EnumDeclaration(std::string n,
                     std::shared_ptr<Type> t,
                     std::unordered_map<std::string, std::shared_ptr<Literal>> v)
-        : name(std::move(n)), base_type(std::move(t)), variants(std::move(v)) {}
+        : base_type(std::move(t)), variants(std::move(v)) {
+        name = std::move(n);
+    }
     std::string str() const override {
         std::string result = "EnumDeclaration(" + name + ") { ";
         for (const auto &variant : variants) {
@@ -1265,11 +1237,12 @@ struct EnumDeclaration : Declaration {
     NodeKind kind() const override { return NodeKind::EnumDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
     std::shared_ptr<ASTNode> copy() const override;
+
+    // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
 
-struct StructDeclaration : Declaration {
+struct StructDeclaration : public TypeDecl {
     bool is_extern = false;
-    std::string name;
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
     std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
     std::vector<std::string> generic_params;
@@ -1286,7 +1259,9 @@ struct StructDeclaration : Declaration {
     StructDeclaration(
         std::string n,
         std::vector<std::pair<std::string, std::shared_ptr<Type>>> f)
-        : name(std::move(n)), fields(std::move(f)) {}
+        : fields(std::move(f)) {
+        name = std::move(n);
+    }
     std::string str() const override {
         std::string result = "StructDeclaration(" + name + ") { ";
         for (const auto &field : fields) {
@@ -1303,11 +1278,12 @@ struct StructDeclaration : Declaration {
     NodeKind kind() const override { return NodeKind::StructDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
     std::shared_ptr<ASTNode> copy() const override;
+
+    // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
 
-struct UnionDeclaration : Declaration {
+struct UnionDeclaration : public TypeDecl {
     bool is_extern = false;
-    std::string name;
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
 
     std::pair<std::string, std::shared_ptr<Type>>
@@ -1322,7 +1298,9 @@ struct UnionDeclaration : Declaration {
     UnionDeclaration(
         std::string n,
         std::vector<std::pair<std::string, std::shared_ptr<Type>>> f)
-        : name(std::move(n)), fields(std::move(f)) {}
+        : fields(std::move(f)) {
+        name = std::move(n);
+    }
 
     std::string str() const override {
         std::string result = "UnionDeclaration(" + name + ") { ";
@@ -1336,6 +1314,27 @@ struct UnionDeclaration : Declaration {
     NodeKind kind() const override { return NodeKind::UnionDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
     std::shared_ptr<ASTNode> copy() const override;
+
+    // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
+};
+
+struct TypeAliasDeclaration : public TypeDecl {
+    std::shared_ptr<Type> aliased_type;
+    ExprPtr condition; // Optional condition for conditional type aliases
+
+    TypeAliasDeclaration(std::string n, std::shared_ptr<Type> t, ExprPtr c = nullptr)
+        : aliased_type(std::move(t)), condition(std::move(c)) {
+        name = std::move(n);
+    }
+    std::string str() const override {
+        return "TypeAliasDeclaration(" + name + " = " + aliased_type->str() +
+               (condition ? " if " + condition->toString() : "") + ")";
+    }
+    NodeKind kind() const override { return NodeKind::TypeAliasDeclaration; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> copy() const override;
+
+    // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
 
 uint64_t getLitValue(const std::shared_ptr<Literal> &lit);

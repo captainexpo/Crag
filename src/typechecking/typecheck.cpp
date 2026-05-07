@@ -34,6 +34,8 @@ bool TypeChecker::insertSymbol(const std::string &name,
 }
 
 std::optional<std::shared_ptr<Type>> TypeChecker::lookupSymbol(const std::string &name) const {
+    if (m_type_aliases.find(name) != m_type_aliases.end())
+        return m_type_aliases.at(name);
     for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
         auto found = it->find(name);
         if (found != nullptr)
@@ -195,15 +197,6 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
         auto et = resolveType(node, eut->errorType);
         return std::make_shared<ErrorUnionType>(vt, et);
     }
-    if (auto at = std::dynamic_pointer_cast<AliasedType>(t)) {
-        auto it = m_type_aliases.find(at->name);
-        if (it != m_type_aliases.end()) {
-            std::cout << "Found type alias: " << at->name << " -> " << it->second->str() << std::endl;
-            return resolveType(node, it->second);
-        }
-        throw TypeCheckError(node, "Unknown type alias '" + at->name + "'");
-    }
-
     if (auto st = std::dynamic_pointer_cast<StructType>(t)) {
         auto it = m_structs.find(st->name);
         if (it != m_structs.end()) {
@@ -238,7 +231,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                 throw TypeCheckError(node, "Could not resolve one of the function parameter types in '" + ft->str() + "'");
             pts.push_back(pt);
         }
-        return std::make_shared<FunctionType>(pts, rt, ft->variadic);
+        return std::make_shared<FunctionType>(pts, rt, ft->variadic, ft->is_extern);
     }
     if (auto qt = std::dynamic_pointer_cast<QualifiedType>(t)) {
         if (qt->module_path.empty()) {
@@ -1367,7 +1360,7 @@ TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call,
                                                " got " + typeName(at));
         }
     }
-
+    call->func->inferred_type = resolveType(call->func, ft);
     call->inferred_type = resolveType(call, ftype->ret);
     return ftype->ret;
 }
