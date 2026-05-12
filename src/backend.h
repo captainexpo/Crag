@@ -32,7 +32,7 @@ class Backend {
     virtual void compileObjectFileToExecutable(const std::string &object_filepath,
                                                const std::filesystem::path &executable_filepath,
                                                const std::filesystem::path &runtime_path,
-                                               bool no_runtime, std::string additional_compiler_args = "") = 0;
+                                               bool no_runtime, std::optional<std::vector<std::string>> backend_args = std::nullopt) = 0;
 };
 
 #endif

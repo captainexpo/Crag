@@ -248,9 +248,15 @@ void LLVMCodegen::compileObjectFileToExecutable(
     const std::filesystem::path &executable_filepath,
     const std::filesystem::path &runtime_path,
     bool no_runtime,
-    std::string additional_linker_args) {
+    std::optional<std::vector<std::string>> backend_args) {
     std::string linker = "cc";
-    std::string cmd = linker + " " + object_filepath + " -o " + executable_filepath.string() + " " + additional_linker_args;
+    std::string cmd = linker + " " + object_filepath + " -o " + executable_filepath.string() + " -lm ";
+    if (backend_args) {
+        for (const auto &arg : *backend_args) {
+            cmd += arg + " ";
+        }
+     }
+
     if (!no_runtime) {
         std::string runtimeLib = runtime_path.string();
         cmd += " " + runtimeLib;
@@ -280,8 +286,15 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const AS
         return llvm::Type::getInt1Ty(context);
     if (IS_INSTANCE(type, Void))
         return llvm::Type::getVoidTy(context);
-    if (IS_INSTANCE(type, USize))
-        return llvm::Type::getInt64Ty(context); // Assuming 64-bit for USize
+    if (IS_INSTANCE(type, USize)){
+        if (sizeof(size_t) == 4) {
+            return llvm::Type::getInt32Ty(context);
+        } else if (sizeof(size_t) == 8) {
+            return llvm::Type::getInt64Ty(context);
+        } else {
+            throw CodeGenError(node, "Unsupported platform: size_t is neither 32-bit nor 64-bit");
+        }
+    }
     if (IS_INSTANCE(type, StructType)) {
         auto structType = std::dynamic_pointer_cast<StructType>(type);
         auto it = m_structTypes.find(structType->name);
@@ -1452,15 +1465,13 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
 
     llvm::FunctionType *funcTy = nullptr;
     bool isExtern = false;
-    if(auto ft = std::dynamic_pointer_cast<FunctionType>(funcCall->func->inferred_type)){
+    if (auto ft = std::dynamic_pointer_cast<FunctionType>(funcCall->func->inferred_type)) {
         isExtern = ft->is_extern;
-    }
-    else if (auto fpt = std::dynamic_pointer_cast<PointerType>(funcCall->func->inferred_type)) {
+    } else if (auto fpt = std::dynamic_pointer_cast<PointerType>(funcCall->func->inferred_type)) {
         if (auto ft = std::dynamic_pointer_cast<FunctionType>(fpt->base)) {
             isExtern = ft->is_extern;
         }
-    }
-    else {
+    } else {
         throw CodeGenError(funcCall, "Unable to determine function type for call: " + funcCall->func->inferred_type->str());
     }
 
@@ -2146,7 +2157,7 @@ llvm::Value *LLVMCodegen::generateForStatement(
         llvm::BasicBlock::Create(context, "for.cond", theFunction);
     auto body_block =
         llvm::BasicBlock::Create(context, "for.body", theFunction);
-    auto inc_block=
+    auto inc_block =
         llvm::BasicBlock::Create(context, "for.inc", theFunction);
     auto after_block =
         llvm::BasicBlock::Create(context, "for.end", theFunction);

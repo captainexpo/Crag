@@ -102,7 +102,7 @@ class LLVMCodegen : public Backend {
     void compileObjectFileToExecutable(const std::string &object_filepath,
                                        const std::filesystem::path &executable_filepath,
                                        const std::filesystem::path &runtime_path,
-                                       bool no_runtime, std::string additional_compiler_args = "") override;
+                                       bool no_runtime, std::optional<std::vector<std::string>> backend_args = std::nullopt) override;
 
     void finished(bool is_final_module); // Call after all code generation is done
 
