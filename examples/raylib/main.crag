@@ -7,6 +7,18 @@ const PADDLE_HEIGHT: i32 = 100;
 const SCREEN_WIDTH: i32 = 800;
 const SCREEN_HEIGHT: i32 = 600;
 
+const BALL_START_SPEED: f32 = 40;
+const BALL_SPEED_INCREMENT: f32 = 5;
+const MAX_BALL_SPEED: f32 = 200;
+
+const PADDLE_SPEED: f32 = 600;
+
+pub fn calculate_ball_bounce(ball_y: f32, paddle_y: f32) -> f32 {
+    let relative_intersect_y = (paddle_y + PADDLE_HEIGHT / 2) - ball_y;
+    let normalized_relative_intersection_y = relative_intersect_y / (PADDLE_HEIGHT / 2);
+    return normalized_relative_intersection_y;
+}
+
 pub fn draw_paddle(left: bool, ypos: i32) -> void {
     let x: i32 = 0;
     if (left) {
@@ -20,38 +32,55 @@ pub fn draw_paddle(left: bool, ypos: i32) -> void {
 pub fn main() -> i32 {
     rl::InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Crong");
 
-    //std::random::seed(0);
+    rl::SetTargetFPS(rl::GetMonitorRefreshRate(0));
 
-    rl::SetTargetFPS(60);
+    let p1_y: f32 = (SCREEN_HEIGHT - PADDLE_HEIGHT) / 2;
+    let p2_y: f32 = (SCREEN_HEIGHT - PADDLE_HEIGHT) / 2;
 
-    let p1_y: i32 = (SCREEN_HEIGHT - PADDLE_HEIGHT) / 2;
-    let p2_y: i32 = (SCREEN_HEIGHT - PADDLE_HEIGHT) / 2;
+    let bx: f32 = SCREEN_WIDTH / 2;
+    let by: f32 = SCREEN_HEIGHT / 2;
 
-    let bx: i32 = SCREEN_WIDTH / 2;
-    let by: i32 = SCREEN_HEIGHT / 2;
 
-    let bvx = 7;
-    let bvy = -7;
+    let ball_speed: f32 = BALL_START_SPEED;
 
-    let speed: f32 = 1.0;
+    let bvx: f32 = 7;
+    let bvy: f32 = -7;
 
     let p1_score = 0;
     let p2_score = 0;
 
     let scored: bool = false;
 
+    let sleep_for: f32 = 0.0;
+
+    let ball_can_move = true;
+
+    let timer: f32 = 0.0;
+
+    let text_buffer: *u8 = std::cstdlib::malloc(16) as *u8;
+
     while (!rl::WindowShouldClose()) {
+        timer -= rl::GetFrameTime();
+        if (timer > 0) {
+            ball_can_move = false;
+        } else {
+            ball_can_move = true;
+            timer = 0.0;
+        }
+
+        let delta = rl::GetFrameTime();
+
         if (rl::IsKeyDown(rl::Key:W)) {
-            p1_y -= 10;
+            p1_y -= PADDLE_SPEED * delta;
         }
         if (rl::IsKeyDown(rl::Key:S)) {
-            p1_y += 10;
+            p1_y += PADDLE_SPEED * delta;
         }
         if (rl::IsKeyDown(rl::Key:UP)) {
-            p2_y -= 10;
+            p2_y -= PADDLE_SPEED * delta;
         }
         if (rl::IsKeyDown(rl::Key:DOWN)) {
-            p2_y += 10;
+            p2_y += PADDLE_SPEED * delta;
         }
 
         // Clamp paddles to screen
@@ -67,9 +96,10 @@ pub fn main() -> i32 {
         if (p2_y > SCREEN_HEIGHT - PADDLE_HEIGHT) {
             p2_y = SCREEN_HEIGHT - PADDLE_HEIGHT;
         }
-
-        bx += bvx as f32 * speed;
-        by += bvy;
+        if (ball_can_move) {
+            bx += bvx *ball_speed* delta;
+            by += bvy *ball_speed * delta;
+        }
 
         if (by <= 0 || by >= SCREEN_HEIGHT) {
             bvy = -bvy;
@@ -92,26 +122,34 @@ pub fn main() -> i32 {
         if (scored) {
             p1_y = (SCREEN_HEIGHT - PADDLE_HEIGHT) / 2;
             p2_y = (SCREEN_HEIGHT - PADDLE_HEIGHT) / 2;
+            bvx = 7;
+            bvy = -7;
             bvx = -bvx;
-            speed = 1.0;
+            ball_speed = BALL_START_SPEED;
         }
 
         // Left paddle collision
         if (bx <= 50 + PADDLE_WIDTH && bx >= 50) {
             if (by >= p1_y && by <= p1_y + PADDLE_HEIGHT) {
-                bvx = -bvx;
-                speed += 0.1;
+                let true_speed = std::math::sqrt(bvx * bvx + bvy * bvy);
+                let bounce_angle = calculate_ball_bounce(by, p1_y);
+                bvx = true_speed * std::math::cos(bounce_angle);
+                bvy = true_speed * -std::math::sin(bounce_angle);
+                ball_speed += BALL_SPEED_INCREMENT;
             }
         }
 
         // Right paddle collision
         if (bx >= SCREEN_WIDTH - 50 - PADDLE_WIDTH && bx <= SCREEN_WIDTH - 50) {
             if (by >= p2_y && by <= p2_y + PADDLE_HEIGHT) {
+                let true_speed = std::math::sqrt(bvx * bvx + bvy * bvy);
+                let bounce_angle = calculate_ball_bounce(by, p2_y);
+                bvx = true_speed * std::math::cos(bounce_angle);
+                bvy = true_speed * -std::math::sin(bounce_angle);
                 bvx = -bvx;
-                speed += 0.1;
+                ball_speed += BALL_SPEED_INCREMENT;
             }
         }
-
 
         rl::BeginDrawing();
         rl::ClearBackground(rl::BLACK);
@@ -121,26 +159,23 @@ pub fn main() -> i32 {
             rl::DrawLine(SCREEN_WIDTH / 2, i * 20, SCREEN_WIDTH / 2, i * 20 + 10, rl::WHITE);
         }
 
-        draw_paddle(true, p1_y);
-        draw_paddle(false, p2_y);
+        draw_paddle(true, p1_y as i32);
+        draw_paddle(false, p2_y as i32);
 
-        rl::DrawCircle(bx, by, 7, rl::WHITE);
+        rl::DrawCircle(bx as i32, by as i32, 7, rl::WHITE);
 
-        let tmp: [4]u8 = {0};
+        std::cstdio::snprintf(text_buffer, 4, "%d", p1_score);
+        rl::DrawText(text_buffer, SCREEN_WIDTH / 4, 20, 40, rl::WHITE);
 
-        std::cstdio::snprintf(tmp.ptr, 4, "%d", p1_score);
-        rl::DrawText(tmp.ptr, SCREEN_WIDTH / 4, 20, 40, rl::WHITE);
-
-        std::cstdio::snprintf(tmp.ptr, 4, "%d", p2_score);
-        rl::DrawText(tmp.ptr , 3 * SCREEN_WIDTH / 4, 20, 40, rl::WHITE);
+        std::cstdio::snprintf(text_buffer, 4, "%d", p2_score);
+        rl::DrawText(text_buffer , 3 * SCREEN_WIDTH / 4, 20, 40, rl::WHITE);
 
         rl::EndDrawing();
 
         if (scored) {
-            std::time::sleep(1);
+            timer = 1.0;
             scored = false;
         }
-
     }
     rl::CloseWindow();
     return 0;

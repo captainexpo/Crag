@@ -62,6 +62,11 @@ pub extern fn GetTime() -> f64;
 pub extern fn GetScreenWidth() -> i32;
 pub extern fn GetScreenHeight() -> i32;
 
+pub extern fn GetMonitorCount() -> i32;
+pub extern fn GetMonitorWidth(monitor: i32) -> i32;
+pub extern fn GetMonitorHeight(monitor: i32) -> i32;
+pub extern fn GetMonitorRefreshRate(monitor: i32) -> i32;
+
 pub extern fn BeginDrawing() -> void;
 pub extern fn EndDrawing() -> void;
 
@@ -96,6 +101,8 @@ pub extern fn EndMode2D() -> void;
 
 pub extern fn BeginMode3D(camera: Camera3D) -> void;
 pub extern fn EndMode3D() -> void;
+
+pub extern fn WaitTime(s: f32) -> void;
 
 pub const LIGHTGRAY  = Color{ r: 200, g: 200, b: 200, a: 255 };
 pub const GRAY       = Color{ r: 130, g: 130, b: 130, a: 255 };
