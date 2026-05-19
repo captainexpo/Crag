@@ -1,7 +1,9 @@
 import "./libc/math.crag" as cmath;
 pub const PI: f64 = 3.141592653589793238;
 
-const sin = &cmath::sin;
-const cos = &cmath::cos;
-const atan2 = &cmath::atan2;
-const sqrt = &cmath::sqrt;
+pub const sinf = &cmath::sinf;
+pub const cosf = &cmath::cosf;
+pub const sin = &cmath::sin;
+pub const cos = &cmath::cos;
+pub const atan2 = &cmath::atan2;
+pub const sqrt = &cmath::sqrt;

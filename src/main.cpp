@@ -38,15 +38,15 @@ std::string defaultRuntimePath() {
 struct Arguments {
     std::string input;
     std::string output;
-    bool emit_ir;
     std::string runtime_path;
     std::string stdlib_path;
     std::string backend;
+    std::vector<std::string> backend_args;
     OptLevel opt;
+    bool emit_ir;
     bool unsafe;
     bool no_runtime;
     bool dump_ast;
-    std::vector<std::string> backend_args;
 };
 
 void printHelp(int argc, char** argv) {
@@ -62,6 +62,8 @@ void printHelp(int argc, char** argv) {
     std::cout << "  --unsafe                  Disable safety checks (bounds checking, null pointer checks)\n";
     std::cout << "  --no-runtime              Do not link against the runtime library\n";
     std::cout << "  --dump-ast               Dump the AST and exit\n";
+    std::cout << "  -l<arg>, -L<arg>, -W<arg> Pass <arg> to the backend as a linker or compiler flag\n";
+    std::cout << "  --help or -h              Show this help message\n";
 }
 
 Arguments parseArguments(int argc, char** argv) {
@@ -78,8 +80,11 @@ Arguments parseArguments(int argc, char** argv) {
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-
-        if (arg == "-o" || arg == "--output") {
+        if (arg == "--help" || arg == "-h") {
+            printHelp(argc, argv);
+            exit(0);
+        }
+        else if (arg == "-o" || arg == "--output") {
             if (i + 1 < argc) {
                 args.output = argv[++i];
             } else {

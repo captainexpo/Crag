@@ -98,9 +98,6 @@ class TypeChecker {
 
     std::unordered_map<std::string, std::shared_ptr<TypeChecker>> imported_module_checkers;
 
-    void dump_state_to_stderr() {
-    }
-
   private:
     std::shared_ptr<Module> current_module;
 

@@ -3,9 +3,13 @@
 #include <filesystem>
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
+#include <llvm/BinaryFormat/Dwarf.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/DIBuilder.h>
+#include <llvm/IR/DebugInfoMetadata.h>
+#include <llvm/IR/DebugLoc.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
@@ -71,6 +75,183 @@ void registerGlobalCtor(llvm::Module &mod, llvm::Function *initFn, int priority 
         "llvm.global_ctors");
 }
 
+void LLVMCodegen::initDebugInfo() {
+    if (!m_emit_debug || m_di_builder) {
+        return;
+    }
+
+    m_llvm_module->addModuleFlag(llvm::Module::Warning, "Debug Info Version",
+                                 llvm::DEBUG_METADATA_VERSION);
+    m_llvm_module->addModuleFlag(llvm::Module::Warning, "Dwarf Version", 5);
+
+    m_di_builder = std::make_unique<llvm::DIBuilder>(*m_llvm_module);
+    m_di_file = getDIFileForPath(m_current_module ? m_current_module->path : "");
+    m_llvm_module->setSourceFileName(m_current_module ? m_current_module->path : "");
+
+    m_di_compile_unit = m_di_builder->createCompileUnit(
+        llvm::dwarf::DW_LANG_C,
+        m_di_file,
+        "Crag",
+        false,
+        "",
+        0);
+    m_di_scope = m_di_compile_unit;
+}
+
+void LLVMCodegen::finalizeDebugInfo() {
+    if (!m_emit_debug || m_debug_finalized || !m_di_builder) {
+        return;
+    }
+    m_di_builder->finalize();
+    m_di_builder.reset();
+    m_debug_finalized = true;
+}
+
+llvm::DIFile *LLVMCodegen::getDIFileForPath(const std::string &path) {
+    if (!m_di_builder) {
+        return nullptr;
+    }
+
+    std::filesystem::path filePath = path.empty() ? std::filesystem::path("<unknown>")
+                                                  : std::filesystem::path(path);
+    std::string filename = filePath.filename().string();
+    std::string directory = filePath.parent_path().string();
+    std::string key = directory + "/" + filename;
+
+    auto it = m_di_file_cache.find(key);
+    if (it != m_di_file_cache.end()) {
+        return it->second;
+    }
+
+    llvm::DIFile *file = m_di_builder->createFile(filename, directory);
+    m_di_file_cache[key] = file;
+    return file;
+}
+
+void LLVMCodegen::setDebugLocation(const ASTNodePtr &node) {
+    if (!m_emit_debug || !m_di_builder) {
+        return;
+    }
+
+    if (!node) {
+        m_builder.SetCurrentDebugLocation(llvm::DebugLoc());
+        return;
+    }
+
+    llvm::DIScope *scope = m_di_scope;
+    if (scope && llvm::isa<llvm::DICompileUnit>(scope)) {
+        scope = nullptr;
+    }
+    if (!scope) {
+        auto *bb = m_builder.GetInsertBlock();
+        auto *func = bb ? bb->getParent() : nullptr;
+        if (func) {
+            scope = func->getSubprogram();
+        }
+    }
+
+    if (!scope) {
+        m_builder.SetCurrentDebugLocation(llvm::DebugLoc());
+        return;
+    }
+
+    unsigned line = node->line > 0 ? static_cast<unsigned>(node->line) : 1;
+    unsigned col = node->col > 0 ? static_cast<unsigned>(node->col) : 1;
+    auto *loc = llvm::DILocation::get(context, line, col, scope);
+    m_builder.SetCurrentDebugLocation(loc);
+}
+
+llvm::DIType *LLVMCodegen::getDIType(const std::shared_ptr<Type> &type, const ASTNodePtr &node) {
+    if (!m_di_builder || !type) {
+        return nullptr;
+    }
+
+    std::string key = type->str();
+    auto it = m_di_type_cache.find(key);
+    if (it != m_di_type_cache.end()) {
+        return it->second;
+    }
+
+    llvm::DIType *diType = nullptr;
+    if (IS_INSTANCE(type, Void)) {
+        diType = nullptr;
+    } else if (IS_INSTANCE(type, I32)) {
+        diType = m_di_builder->createBasicType("i32", 32, llvm::dwarf::DW_ATE_signed);
+    } else if (IS_INSTANCE(type, I64)) {
+        diType = m_di_builder->createBasicType("i64", 64, llvm::dwarf::DW_ATE_signed);
+    } else if (IS_INSTANCE(type, U8)) {
+        diType = m_di_builder->createBasicType("u8", 8, llvm::dwarf::DW_ATE_unsigned);
+    } else if (IS_INSTANCE(type, U32)) {
+        diType = m_di_builder->createBasicType("u32", 32, llvm::dwarf::DW_ATE_unsigned);
+    } else if (IS_INSTANCE(type, U64)) {
+        diType = m_di_builder->createBasicType("u64", 64, llvm::dwarf::DW_ATE_unsigned);
+    } else if (IS_INSTANCE(type, F32)) {
+        diType = m_di_builder->createBasicType("f32", 32, llvm::dwarf::DW_ATE_float);
+    } else if (IS_INSTANCE(type, F64)) {
+        diType = m_di_builder->createBasicType("f64", 64, llvm::dwarf::DW_ATE_float);
+    } else if (IS_INSTANCE(type, Boolean)) {
+        diType = m_di_builder->createBasicType("bool", 1, llvm::dwarf::DW_ATE_boolean);
+    } else if (IS_INSTANCE(type, USize)) {
+        unsigned bits = m_llvm_module->getDataLayout().getPointerSizeInBits();
+        diType = m_di_builder->createBasicType("usize", bits, llvm::dwarf::DW_ATE_unsigned);
+    } else if (IS_INSTANCE(type, PointerType)) {
+        auto ptrType = std::dynamic_pointer_cast<PointerType>(type);
+        llvm::DIType *pointee = getDIType(ptrType->base, node);
+        unsigned bits = m_llvm_module->getDataLayout().getPointerSizeInBits();
+        diType = m_di_builder->createPointerType(pointee, bits);
+    } else if (IS_INSTANCE(type, StructType)) {
+        auto structType = std::dynamic_pointer_cast<StructType>(type);
+        llvm::DIFile *file = m_di_file ? m_di_file : getDIFileForPath(m_current_module ? m_current_module->path : "");
+        llvm::Type *llvmTy = getLLVMType(type, node);
+        uint64_t size = m_llvm_module->getDataLayout().getTypeAllocSize(llvmTy);
+        uint32_t align = m_llvm_module->getDataLayout().getABITypeAlign(llvmTy).value();
+        diType = m_di_builder->createStructType(
+            m_di_compile_unit,
+            structType->name,
+            file,
+            node ? node->line : 1,
+            size,
+            align,
+            llvm::DINode::FlagZero,
+            nullptr,
+            llvm::DINodeArray());
+    } else if (IS_INSTANCE(type, UnionType)) {
+        auto unionType = std::dynamic_pointer_cast<UnionType>(type);
+        llvm::DIFile *file = m_di_file ? m_di_file : getDIFileForPath(m_current_module ? m_current_module->path : "");
+        llvm::Type *llvmTy = getLLVMType(type, node);
+        uint64_t size = m_llvm_module->getDataLayout().getTypeAllocSize(llvmTy);
+        uint32_t align = m_llvm_module->getDataLayout().getABITypeAlign(llvmTy).value();
+        diType = m_di_builder->createUnionType(
+            m_di_compile_unit,
+            unionType->name,
+            file,
+            node ? node->line : 1,
+            size,
+            align,
+            llvm::DINode::FlagZero,
+            llvm::DINodeArray());
+    } else if (IS_INSTANCE(type, EnumType)) {
+        auto enumType = std::dynamic_pointer_cast<EnumType>(type);
+        diType = m_di_builder->createUnspecifiedType("enum " + enumType->name);
+    } else {
+        diType = m_di_builder->createUnspecifiedType(type->str());
+    }
+
+    if (diType) {
+        m_di_type_cache[key] = diType;
+    }
+    return diType;
+}
+
+llvm::AllocaInst *LLVMCodegen::createEntryBlockAlloca(llvm::Function *function, llvm::Type *type, const llvm::Twine &name) {
+    if (!function) {
+        return nullptr;
+    }
+    llvm::IRBuilder<> entryBuilder(&function->getEntryBlock(), function->getEntryBlock().begin());
+    entryBuilder.SetCurrentDebugLocation(llvm::DebugLoc());
+    return entryBuilder.CreateAlloca(type, nullptr, name);
+}
+
 void LLVMCodegen::emitBuiltinDeclarations() {
     llvm::FunctionType *panicType = llvm::FunctionType::get(
         llvm::Type::getVoidTy(context),
@@ -106,6 +287,14 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module) {
     std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> funcDecls;
 
     m_current_module = module;
+    if (m_emit_debug) {
+        if (!m_di_builder) {
+            initDebugInfo();
+        }
+        if (m_di_builder) {
+            m_di_file = getDIFileForPath(m_current_module ? m_current_module->path : "");
+        }
+    }
 
     try {
         for (const auto &decl : module->ast->declarations) {
@@ -228,12 +417,15 @@ void LLVMCodegen::emitObjectToFile(const std::string &filename) {
         throw CodeGenError(nullptr, "TargetMachine can't emit a file of this type");
     }
 
+    finalizeDebugInfo();
+
     pass.run(*m_llvm_module);
     dest.flush();
 }
 
 void LLVMCodegen::emitIrToFile(const std::string &filepath) {
     if (m_llvm_module) {
+        finalizeDebugInfo();
         std::error_code ec;
         llvm::raw_fd_ostream out(filepath, ec, llvm::sys::fs::OF_None);
         if (ec) {
@@ -405,6 +597,7 @@ llvm::Value *LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &exp
 llvm::Value *
 LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
                                 bool loadValue) {
+    setDebugLocation(expr);
     if (IS_INSTANCE(expr, BinaryOperation)) {
         auto binOp = std::dynamic_pointer_cast<BinaryOperation>(expr);
         return generateBinaryOp(binOp->left, binOp->right, binOp->op, loadValue);
@@ -532,6 +725,7 @@ LLVMCodegen::generateCast(const std::shared_ptr<TypeCast> &typeCast,
 
 llvm::Value *
 LLVMCodegen::generateStatement(const std::shared_ptr<Statement> &stmt) {
+    setDebugLocation(stmt);
     if (IS_INSTANCE(stmt, VariableDeclaration)) {
         return generateVariableDeclaration(
             std::dynamic_pointer_cast<VariableDeclaration>(stmt));
@@ -621,6 +815,32 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
     llvm::BasicBlock *entry =
         llvm::BasicBlock::Create(context, "entry", function);
     m_builder.SetInsertPoint(entry);
+
+    if (m_emit_debug && m_di_builder) {
+        llvm::DIFile *file = m_di_file ? m_di_file : getDIFileForPath(m_current_module ? m_current_module->path : "");
+        unsigned line = func->line > 0 ? static_cast<unsigned>(func->line) : 1;
+        unsigned col = func->col > 0 ? static_cast<unsigned>(func->col) : 1;
+        std::vector<llvm::Metadata *> di_params;
+        di_params.push_back(getDIType(func->type->ret, func));
+        for (const auto &paramType : func->type->params) {
+            di_params.push_back(getDIType(paramType, func));
+        }
+        auto funcType = m_di_builder->createSubroutineType(
+            m_di_builder->getOrCreateTypeArray(di_params));
+        auto subprogram = m_di_builder->createFunction(
+            file,
+            func->name,
+            function->getName(),
+            file,
+            line,
+            funcType,
+            line,
+            llvm::DINode::FlagPrototyped,
+            llvm::DISubprogram::SPFlagDefinition);
+        function->setSubprogram(subprogram);
+        m_di_scope = subprogram;
+        m_builder.SetCurrentDebugLocation(llvm::DILocation::get(context, line, col, m_di_scope));
+    }
     // Allocate space for arguments and store them
     unsigned int idx = 0;
     for (auto &arg : function->args()) {
@@ -630,6 +850,27 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
         auto argname = arg.getName().str();
         CUR_SCOPE.set(canonicalizeNonexternName(argname), alloca, arg.getType(),
                       func->type->params[idx]);
+
+        if (m_emit_debug && m_di_builder && m_di_scope) {
+            llvm::DIFile *file = m_di_file ? m_di_file : getDIFileForPath(m_current_module ? m_current_module->path : "");
+            unsigned line = func->line > 0 ? static_cast<unsigned>(func->line) : 1;
+            unsigned col = func->col > 0 ? static_cast<unsigned>(func->col) : 1;
+            llvm::DIType *diType = getDIType(func->type->params[idx], func);
+            auto *var = m_di_builder->createParameterVariable(
+                llvm::cast<llvm::DIScope>(m_di_scope),
+                argname,
+                idx + 1,
+                file,
+                line,
+                diType,
+                true);
+            m_di_builder->insertDeclare(
+                alloca,
+                var,
+                m_di_builder->createExpression(),
+                llvm::DILocation::get(context, line, col, m_di_scope),
+                m_builder.GetInsertBlock());
+        }
         idx++;
     }
 
@@ -648,6 +889,11 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
         }
     }
     m_error_union_return_type = nullptr;
+
+    if (m_emit_debug) {
+        m_di_scope = m_di_compile_unit;
+        m_builder.SetCurrentDebugLocation(llvm::DebugLoc());
+    }
 
     return function;
 }
@@ -736,6 +982,8 @@ void LLVMCodegen::finished(bool is_final_module) {
             m_builder.SetInsertPoint(currentBB);
         }
     }
+
+    finalizeDebugInfo();
 }
 llvm::Value *LLVMCodegen::addGlobalVarInitializer(llvm::Value *var, std::shared_ptr<Expression> initializer) {
     if (!var || !initializer) {
@@ -790,6 +1038,20 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
             *m_llvm_module, varType, false,
             llvm::GlobalValue::ExternalLinkage, initVal, canonicalizeNonexternName(varDecl->name));
         CUR_SCOPE.set(canonicalizeNonexternName(varDecl->name), gVar, varType, varDecl->var_type);
+        if (m_emit_debug && m_di_builder && m_di_compile_unit) {
+            llvm::DIFile *file = m_di_file ? m_di_file : getDIFileForPath(m_current_module ? m_current_module->path : "");
+            unsigned line = varDecl->line > 0 ? static_cast<unsigned>(varDecl->line) : 1;
+            llvm::DIType *diType = getDIType(varDecl->var_type, varDecl);
+            auto *expr = m_di_builder->createGlobalVariableExpression(
+                m_di_compile_unit,
+                varDecl->name,
+                gVar->getName(),
+                file,
+                line,
+                diType,
+                false);
+            gVar->addDebugInfo(expr);
+        }
         if (varDecl->initializer) {
             if (auto expr = std::dynamic_pointer_cast<Expression>(varDecl->initializer)) {
                 addGlobalVarInitializer(gVar, expr);
@@ -801,8 +1063,30 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
     }
 
     llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
-    llvm::Value *alloca = m_builder.CreateAlloca(varType, nullptr, varDecl->name);
+    llvm::Function *currentFunction = m_builder.GetInsertBlock() ? m_builder.GetInsertBlock()->getParent() : nullptr;
+    llvm::Value *alloca = createEntryBlockAlloca(currentFunction, varType, varDecl->name);
+    if (!alloca) {
+        alloca = m_builder.CreateAlloca(varType, nullptr, varDecl->name);
+    }
     CUR_SCOPE.set(canonicalizeNonexternName(varDecl->name), alloca, varType, varDecl->var_type);
+    if (m_emit_debug && m_di_builder && m_di_scope) {
+        llvm::DIFile *file = m_di_file ? m_di_file : getDIFileForPath(m_current_module ? m_current_module->path : "");
+        unsigned line = varDecl->line > 0 ? static_cast<unsigned>(varDecl->line) : 1;
+        unsigned col = varDecl->col > 0 ? static_cast<unsigned>(varDecl->col) : 1;
+        llvm::DIType *diType = getDIType(varDecl->var_type, varDecl);
+        auto *var = m_di_builder->createAutoVariable(
+            llvm::cast<llvm::DIScope>(m_di_scope),
+            varDecl->name,
+            file,
+            line,
+            diType);
+        m_di_builder->insertDeclare(
+            alloca,
+            var,
+            m_di_builder->createExpression(),
+            llvm::DILocation::get(context, line, col, m_di_scope),
+            m_builder.GetInsertBlock());
+    }
     if (varDecl->initializer) {
         llvm::Value *initVal = nullptr;
         if (IS_INSTANCE(varDecl->initializer, Expression)) {
@@ -2204,14 +2488,14 @@ llvm::Value *LLVMCodegen::generateReturnStatement(
 
         llvm::StructType *errUnionStruct = llvm ::
             cast<llvm::StructType>(getLLVMType(m_error_union_return_type, retStmt));
-        llvm::Value *undefVal = llvm::UndefValue::get(errUnionStruct);
+        llvm::Value *zeroVal = llvm::Constant::getNullValue(errUnionStruct);
 
         if (retStmt->is_error) {
             errVal = retVal;
             okVal = llvm::Constant::getNullValue(getLLVMType(m_error_union_return_type->valueType, retStmt));
             // Create the struct for error return
             // {okType, errType, i1 (is_error, should be true)}
-            auto withOk = m_builder.CreateInsertValue(undefVal, okVal, 0, "insert_ok");
+            auto withOk = m_builder.CreateInsertValue(zeroVal, okVal, 0, "insert_ok");
 
             auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1, "insert_err");
             withTag = m_builder.CreateInsertValue(withErr,
@@ -2224,7 +2508,7 @@ llvm::Value *LLVMCodegen::generateReturnStatement(
 
             // Create the struct for ok return
             // {okType, errType, i1 (is_error, should be false)}
-            auto withOk = m_builder.CreateInsertValue(undefVal, okVal, 0, "insert_ok");
+            auto withOk = m_builder.CreateInsertValue(zeroVal, okVal, 0, "insert_ok");
 
             auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1, "insert_err");
             withTag = m_builder.CreateInsertValue(withErr,

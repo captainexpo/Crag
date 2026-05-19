@@ -53,7 +53,7 @@ pub struct Vec<T> {
     }
 }
 
-fn new<T>() -> Vec::<T> {
+pub fn new<T>() -> Vec::<T> {
     let v = Vec::<T> { cur_elem: 0, size: 0, elements: null };
     v.init();
     return v;

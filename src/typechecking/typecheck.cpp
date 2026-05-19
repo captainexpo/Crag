@@ -13,6 +13,19 @@ TypeChecker::TypeChecker() : m_const_eval(*new ConstEvaluator(this)) {
 
     m_const_eval.addIntrinsic("@target_ptr_width", std::make_shared<Literal>(static_cast<int64_t>(64), std::make_shared<I64>()));
     pushScope();
+
+    m_expected_return_type = nullptr;
+    m_errors.clear();
+    m_scopes.clear();
+    m_structs.clear();
+    m_unions.clear();
+    m_enums.clear();
+    m_type_aliases.clear();
+    m_templates.clear();
+    m_current_generic_types.clear();
+    m_struct_methods.clear();
+    m_functions.clear();
+    imported_module_checkers.clear();
 }
 
 void TypeChecker::pushScope() { m_scopes.emplace_back(); }
@@ -1418,7 +1431,7 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
         if (!bt)
             throw TypeCheckError(fa, "Failed to infer type of field access base");
         auto st = std::dynamic_pointer_cast<StructType>(bt);
-        if (st){
+        if (st) {
             auto ft = st->getFieldType(fa->field);
             if (!ft) {
                 throw TypeCheckError(fa, fa->str() + " has no field " + fa->field);
@@ -1427,7 +1440,7 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
             return ft;
         }
         auto pt = std::dynamic_pointer_cast<PointerType>(bt);
-        if (pt){
+        if (pt) {
             st = std::dynamic_pointer_cast<StructType>(resolveType(fa, pt->base));
             if (!st) {
                 throw TypeCheckError(fa, "Field access on pointer to non-struct type: " + typeName(pt->base));
@@ -1458,7 +1471,6 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
             return ft;
         }
         throw TypeCheckError(fa, "Field access on disallowed type: " + typeName(bt));
-
     }
     throw TypeCheckError(fa->base, "FieldAccess base is not an expression: " + fa->base->str());
 }

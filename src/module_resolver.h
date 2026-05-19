@@ -194,6 +194,22 @@ class ModuleResolver {
         return m_module_cache;
     }
 
+    void replaceModuleTree(const std::shared_ptr<Module> &root) {
+        std::unordered_set<std::string> seen;
+        std::function<void(const std::shared_ptr<Module> &)> dfs = [&](const std::shared_ptr<Module> &m) {
+            if (!m)
+                return;
+            if (seen.count(m->path))
+                return;
+            seen.insert(m->path);
+            m_module_cache[m->path] = m;
+            for (const auto &imp : m->imports) {
+                dfs(imp.second);
+            }
+        };
+        dfs(root);
+    }
+
     bool hasDependencyCycle() {
         // Simple DFS to detect cycles
         std::unordered_set<std::string> visited;

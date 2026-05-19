@@ -148,7 +148,7 @@ enum class NodeKind {
     Unknown
 };
 
-struct ASTNode {
+struct ASTNode : std::enable_shared_from_this<ASTNode> {
     int line = 0;
     int col = 0;
     std::shared_ptr<Type> inferred_type = nullptr;

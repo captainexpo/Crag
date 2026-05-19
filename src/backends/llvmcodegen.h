@@ -7,12 +7,21 @@
 #include "../backend.h"
 #include "../lexer.h"
 #include "../module_resolver.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_ostream.h"
 #include <memory>
+#include <unordered_map>
+
+namespace llvm {
+class DICompileUnit;
+class DIFile;
+class DIScope;
+class DIType;
+}
 
 class CodeGenError : public std::exception {
   public:
@@ -92,6 +101,7 @@ class LLVMCodegen : public Backend {
 
         m_llvm_module = std::make_unique<llvm::Module>(module_name, ctx);
         m_scopeStack.push_back(Scope(nullptr));
+        m_emit_debug = (options.opt_level == Debug);
 
         if (options.do_runtime_safety)
             emitBuiltinDeclarations();
@@ -159,6 +169,15 @@ class LLVMCodegen : public Backend {
 
     std::vector<llvm::Value *> m_runtime_panic_strings;
 
+    bool m_emit_debug = false;
+    bool m_debug_finalized = false;
+    std::unique_ptr<llvm::DIBuilder> m_di_builder;
+    llvm::DICompileUnit *m_di_compile_unit = nullptr;
+    llvm::DIFile *m_di_file = nullptr;
+    llvm::DIScope *m_di_scope = nullptr;
+    std::unordered_map<std::string, llvm::DIType *> m_di_type_cache;
+    std::unordered_map<std::string, llvm::DIFile *> m_di_file_cache;
+
 
     const std::string RUNTIME_PANIC_FUNC_NAME = "__panic__";
     const std::string GLOBAL_VAR_INIT_FUNC_NAME = "__global_var_init__";
@@ -166,6 +185,12 @@ class LLVMCodegen : public Backend {
     llvm::Value* addGlobalVarInitializer(llvm::Value* var, std::shared_ptr<Expression> initializer);
 
     void emitBuiltinDeclarations();
+    void initDebugInfo();
+    void finalizeDebugInfo();
+    void setDebugLocation(const ASTNodePtr &node);
+    llvm::DIType *getDIType(const std::shared_ptr<Type> &type, const ASTNodePtr &node);
+    llvm::DIFile *getDIFileForPath(const std::string &path);
+    llvm::AllocaInst *createEntryBlockAlloca(llvm::Function *function, llvm::Type *type, const llvm::Twine &name);
 
     inline std::string canonicalizeNonexternName(const std::string &name) const {
         // HACK: assume extern functions are globally unique and aren't overwritten in lower scopes
