@@ -5,16 +5,16 @@
 import "stdlib" as std;
 
 fn main() -> i32 {
-    let arena = std::arena::arena_new(1024);
+    let arena = std.arena.arena_new(1024);
 
     for (let i: usize = 0; i < 16; i++){
         arena.alloc(32);
     }
 
-    std::cstdio::printf("%zu\n", arena.used);
+    std.cstdio.printf("%zu\n", arena.used);
     arena.reset();
     arena.destroy();
-    std::cstdio::printf("%zu\n", arena.used);
+    std.cstdio.printf("%zu\n", arena.used);
     return 0;
 }
 

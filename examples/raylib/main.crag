@@ -26,13 +26,13 @@ pub fn draw_paddle(left: bool, ypos: i32) -> void {
     } else {
         x = SCREEN_WIDTH - 50 - PADDLE_WIDTH;
     }
-    rl::DrawRectangle(x, ypos, PADDLE_WIDTH, PADDLE_HEIGHT, rl::WHITE);
+    rl.DrawRectangle(x, ypos, PADDLE_WIDTH, PADDLE_HEIGHT, rl.WHITE);
 }
 
 pub fn main() -> i32 {
-    rl::InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Crong");
+    rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Crong");
 
-    rl::SetTargetFPS(rl::GetMonitorRefreshRate(0));
+    rl.SetTargetFPS(rl.GetMonitorRefreshRate(0));
 
     let p1_y: f32 = (SCREEN_HEIGHT - PADDLE_HEIGHT) / 2;
     let p2_y: f32 = (SCREEN_HEIGHT - PADDLE_HEIGHT) / 2;
@@ -57,10 +57,10 @@ pub fn main() -> i32 {
 
     let timer: f32 = 0.0;
 
-    let text_buffer: *u8 = std::cstdlib::malloc(16) as *u8;
+    let text_buffer: *u8 = std.cstdlib.malloc(16) as *u8;
 
-    while (!rl::WindowShouldClose()) {
-        timer -= rl::GetFrameTime();
+    while (!rl.WindowShouldClose()) {
+        timer -= rl.GetFrameTime();
         if (timer > 0) {
             ball_can_move = false;
         } else {
@@ -68,18 +68,18 @@ pub fn main() -> i32 {
             timer = 0.0;
         }
 
-        let delta = rl::GetFrameTime();
+        let delta = rl.GetFrameTime();
 
-        if (rl::IsKeyDown(rl::Key:W)) {
+        if (rl.IsKeyDown(rl.Key:W)) {
             p1_y -= PADDLE_SPEED * delta;
         }
-        if (rl::IsKeyDown(rl::Key:S)) {
+        if (rl.IsKeyDown(rl.Key:S)) {
             p1_y += PADDLE_SPEED * delta;
         }
-        //if (rl::IsKeyDown(rl::Key:UP)) {
+        //if (rl.IsKeyDown(rl.Key:UP)) {
         //    p2_y -= PADDLE_SPEED * delta;
         //}
-        //if (rl::IsKeyDown(rl::Key:DOWN)) {
+        //if (rl.IsKeyDown(rl.Key:DOWN)) {
         //    p2_y += PADDLE_SPEED * delta;
         //}
 
@@ -156,10 +156,10 @@ pub fn main() -> i32 {
         // Left paddle collision
         if (bx <= 50 + PADDLE_WIDTH && bx >= 50) {
             if (by >= p1_y && by <= p1_y + PADDLE_HEIGHT) {
-                let true_speed = std::math::sqrt(bvx * bvx + bvy * bvy);
+                let true_speed = std.math.sqrt(bvx * bvx + bvy * bvy);
                 let bounce_angle = calculate_ball_bounce(by, p1_y);
-                bvx = true_speed * std::math::cosf(bounce_angle);
-                bvy = true_speed * -std::math::sinf(bounce_angle);
+                bvx = true_speed * std.math.cosf(bounce_angle);
+                bvy = true_speed * -std.math.sinf(bounce_angle);
                 ball_speed += BALL_SPEED_INCREMENT;
             }
         }
@@ -167,41 +167,41 @@ pub fn main() -> i32 {
         // Right paddle collision
         if (bx >= SCREEN_WIDTH - 50 - PADDLE_WIDTH && bx <= SCREEN_WIDTH - 50) {
             if (by >= p2_y && by <= p2_y + PADDLE_HEIGHT) {
-                let true_speed = std::math::sqrt(bvx * bvx + bvy * bvy);
+                let true_speed = std.math.sqrt(bvx * bvx + bvy * bvy);
                 let bounce_angle = calculate_ball_bounce(by, p2_y);
-                bvx = true_speed * std::math::cosf(bounce_angle);
-                bvy = true_speed * -std::math::sinf(bounce_angle);
+                bvx = true_speed * std.math.cosf(bounce_angle);
+                bvy = true_speed * -std.math.sinf(bounce_angle);
                 bvx = -bvx;
                 ball_speed += BALL_SPEED_INCREMENT;
             }
         }
 
-        rl::BeginDrawing();
-        rl::ClearBackground(rl::BLACK);
+        rl.BeginDrawing();
+        rl.ClearBackground(rl.BLACK);
 
         // Draw dotted line down center
         for (let i: i32 = 0; i < SCREEN_HEIGHT / 20; i++) {
-            rl::DrawLine(SCREEN_WIDTH / 2, i * 20, SCREEN_WIDTH / 2, i * 20 + 10, rl::WHITE);
+            rl.DrawLine(SCREEN_WIDTH / 2, i * 20, SCREEN_WIDTH / 2, i * 20 + 10, rl.WHITE);
         }
 
         draw_paddle(true, p1_y as i32);
         draw_paddle(false, p2_y as i32);
 
-        rl::DrawCircle(bx as i32, by as i32, 7, rl::WHITE);
+        rl.DrawCircle(bx as i32, by as i32, 7, rl.WHITE);
 
-        std::cstdio::snprintf(text_buffer, 4, "%d", p1_score);
-        rl::DrawText(text_buffer, SCREEN_WIDTH / 4, 20, 40, rl::WHITE);
+        std.cstdio.snprintf(text_buffer, 4, "%d", p1_score);
+        rl.DrawText(text_buffer, SCREEN_WIDTH / 4, 20, 40, rl.WHITE);
 
-        std::cstdio::snprintf(text_buffer, 4, "%d", p2_score);
-        rl::DrawText(text_buffer , 3 * SCREEN_WIDTH / 4, 20, 40, rl::WHITE);
+        std.cstdio.snprintf(text_buffer, 4, "%d", p2_score);
+        rl.DrawText(text_buffer , 3 * SCREEN_WIDTH / 4, 20, 40, rl.WHITE);
 
-        rl::EndDrawing();
+        rl.EndDrawing();
 
         if (scored) {
             timer = 1.0;
             scored = false;
         }
     }
-    rl::CloseWindow();
+    rl.CloseWindow();
     return 0;
 }

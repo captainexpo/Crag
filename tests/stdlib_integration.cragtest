@@ -6,7 +6,7 @@
 import "stdio.crag" as stdio;
 
 fn main() -> i32 {
-    stdio::printf("%d", 15);
+    stdio.printf("%d", 15);
     return 0;
 }
 

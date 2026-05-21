@@ -97,10 +97,11 @@ std::shared_ptr<ASTNode> FieldAccess::copy() const {
 }
 
 std::shared_ptr<ASTNode> TemplateInstantiation::copy() const {
-    auto c = std::make_shared<TemplateInstantiation>(base, type_args);
+    auto c = std::make_shared<TemplateInstantiation>(module_path, template_name, type_args);
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type;
+    c->template_id = template_id;
     return c;
 }
 

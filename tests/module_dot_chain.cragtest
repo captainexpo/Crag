@@ -1,0 +1,18 @@
+//NAME: Module Dot Chain
+//DESC: Chained dot-style module access through nested imports
+//REQUIRES:outer_mod.crag,inner_mod.crag
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+import "outer_mod.crag" as outer;
+
+fn main() -> i32 {
+    printf("%d\n", outer.inner.V + outer.X);
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//10
+//END EXPECT

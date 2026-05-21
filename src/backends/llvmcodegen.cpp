@@ -529,9 +529,18 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const AS
     }
     if (IS_INSTANCE(type, ErrorUnionType)) {
         auto eut = std::dynamic_pointer_cast<ErrorUnionType>(type);
+        if (IS_INSTANCE(eut->valueType, Void)) {
+            // Represent as a struct { errorType, isError (i1) }
+            std::vector<llvm::Type *> elements = {
+                getLLVMType(eut->errorType, node),
+                llvm::Type::getInt1Ty(context)};
+            auto st = llvm::StructType::get(context, elements);
+            return st;
+        }
         // Represent as a struct { valueType, errorType, isError (i1) }
         std::vector<llvm::Type *> elements = {
-            getLLVMType(eut->valueType, node), getLLVMType(eut->errorType, node),
+            getLLVMType(eut->valueType, node),
+            getLLVMType(eut->errorType, node),
             llvm::Type::getInt1Ty(context)};
         auto st = llvm::StructType::get(context, elements);
         return st;
@@ -882,11 +891,7 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
     }
     generateStatement(func->body);
     if (m_builder.GetInsertBlock()->getTerminator() == nullptr) {
-        if (IS_INSTANCE(func->type->ret, Void)) {
-            m_builder.CreateRetVoid();
-        } else {
-            throw CodeGenError(func, "Non-void function missing return: " + func->name);
-        }
+        emitDefaultReturn(func);
     }
     m_error_union_return_type = nullptr;
 
@@ -2023,31 +2028,25 @@ llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<Fi
     }
     llvm::StructType *euStructType =
         llvm::cast<llvm::StructType>(getLLVMType(eu_type, fieldAccess->base));
+    auto layout = getErrorUnionLayout(eu_type);
 
     if (fieldAccess->field == "ok") {
-        // Return index 0
+        if (layout.okIsVoid) {
+            if (!loadValue) {
+                throw CodeGenError(fieldAccess, "Cannot take address of void ok field");
+            }
+            return nullptr;
+        }
         llvm::Type *ok_type = getLLVMType(eu_type->valueType, fieldAccess);
-        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 0, "ok_access");
-        return loadValue
-                   ? m_builder.CreateLoad(ok_type, gep, "load_ok")
-                   : gep;
+        return createStructFieldAccess(euStructType, basePtr, layout.okIndex, ok_type, "ok", loadValue);
 
     } else if (fieldAccess->field == "err") {
-        // Return index 1
         llvm::Type *err_type = getLLVMType(eu_type->errorType, fieldAccess);
-        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 1, "err_access");
-        return loadValue
-                   ? m_builder.CreateLoad(err_type, gep, "load_err")
-                   : gep;
+        return createStructFieldAccess(euStructType, basePtr, layout.errIndex, err_type, "err", loadValue);
 
     } else if (fieldAccess->field == "is_err") {
-        // Return index 2
         llvm::Type *bool_type = llvm::Type::getInt1Ty(context);
-
-        auto gep = m_builder.CreateStructGEP(euStructType, basePtr, 2, "is_err_access");
-        return loadValue
-                   ? m_builder.CreateLoad(bool_type, gep, "load_is_err")
-                   : gep;
+        return createStructFieldAccess(euStructType, basePtr, layout.isErrIndex, bool_type, "is_err", loadValue);
     } else {
         throw CodeGenError(fieldAccess, "Unknown field on error union: " + fieldAccess->field);
     }
@@ -2229,27 +2228,13 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
                                "' has no field named '" + fieldName + "'");
     }
 
-    // Build GEP safely
-    llvm::Value *gep = m_builder.CreateGEP(
-        llvmStruct, basePtr,
-        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
-         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), fieldIndex)},
-        fieldName);
-
-    if (!gep) {
-        throw CodeGenError(fieldAccess->base, "Failed to create GEP for field '" + fieldName +
-                                                  "' in struct '" + structType->name + "'");
+    if (!fieldAccess->inferred_type) {
+        throw CodeGenError(fieldAccess, "Field '" + fieldName +
+                                            "' has no inferred type for load");
     }
-
-    if (loadValue) {
-        if (!fieldAccess->inferred_type) {
-            throw CodeGenError(fieldAccess, "Field '" + fieldName +
-                                                "' has no inferred type for load");
-        }
-        return m_builder.CreateLoad(getLLVMType(fieldAccess->inferred_type, fieldAccess), gep);
-    }
-
-    return gep;
+    return createStructFieldAccess(llvmStruct, basePtr, static_cast<unsigned>(fieldIndex),
+                                   getLLVMType(fieldAccess->inferred_type, fieldAccess),
+                                   fieldName, loadValue);
 }
 
 llvm::Value *LLVMCodegen::generateModuleAccess(const std::shared_ptr<ModuleAccess> &moduleAccess,
@@ -2288,8 +2273,16 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
             throw CodeGenError(structInit, "Unknown union type: " + union_type->name);
         }
         llvm::StructType *llvmUnion = it->second;
-        llvm::Value *alloca =
-            m_builder.CreateAlloca(llvmUnion, nullptr, "uniontmp");
+        llvm::Value *alloca = nullptr;
+        if (loadValue) {
+            llvm::Function *currentFunction = m_builder.GetInsertBlock()
+                                                 ? m_builder.GetInsertBlock()->getParent()
+                                                 : nullptr;
+            alloca = createEntryBlockAlloca(currentFunction, llvmUnion, "uniontmp");
+        }
+        if (!alloca) {
+            alloca = m_builder.CreateAlloca(llvmUnion, nullptr, "uniontmp");
+        }
 
         // Unions can only initialize one field at a time
         if (structInit->field_values.size() != 1) {
@@ -2336,11 +2329,30 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
         throw CodeGenError(structInit, "Unknown struct type: " + if_type->name);
     }
     llvm::StructType *llvmStruct = it->second;
+    if (loadValue) {
+        llvm::Value *agg = llvm::UndefValue::get(llvmStruct);
+        for (const auto &field : structInit->field_values) {
+            auto fieldIndex = if_type->getFieldIndex(field.first);
+            if (fieldIndex < 0) {
+                throw CodeGenError(structInit, "Struct '" + if_type->name +
+                                               "' has no field named '" + field.first + "'");
+            }
+            llvm::Value *fieldVal = generateExpression(field.second);
+            agg = m_builder.CreateInsertValue(agg, fieldVal, fieldIndex,
+                                              field.first + "_insert");
+        }
+        return agg;
+    }
+
     llvm::Value *alloca =
         m_builder.CreateAlloca(llvmStruct, nullptr, "structtmp");
     for (const auto &field : structInit->field_values) {
         // Find field index
         auto fieldIndex = if_type->getFieldIndex(field.first);
+        if (fieldIndex < 0) {
+            throw CodeGenError(structInit, "Struct '" + if_type->name +
+                                           "' has no field named '" + field.first + "'");
+        }
         // Generate GEP for field
         llvm::Value *fieldPtr = m_builder.CreateGEP(
             llvmStruct, alloca,
@@ -2350,9 +2362,7 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
         llvm::Value *fieldVal = generateExpression(field.second);
         m_builder.CreateStore(fieldVal, fieldPtr);
     }
-    if (!loadValue)
-        return alloca;
-    return m_builder.CreateLoad(llvmStruct, alloca, "loadstruct");
+    return alloca;
 }
 
 llvm::Value *
@@ -2403,119 +2413,67 @@ LLVMCodegen::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
 
 llvm::Value *LLVMCodegen::generateWhileStatement(
     const std::shared_ptr<WhileStatement> &whileStmt) {
-    llvm::Function *theFunction = m_builder.GetInsertBlock()->getParent();
-    auto cond_block =
-        llvm::BasicBlock::Create(context, "while.cond", theFunction);
-    auto body_block =
-        llvm::BasicBlock::Create(context, "while.body", theFunction);
-    auto after_block =
-        llvm::BasicBlock::Create(context, "while.end", theFunction);
-    m_loop_stack.push_back(LoopInfo{
-        .breakBB = after_block,
-        .continueBB = cond_block,
-    });
-    m_builder.CreateBr(cond_block);
-    m_builder.SetInsertPoint(cond_block);
-    auto condition = generateExpression(whileStmt->condition);
-    condition = m_builder.CreateICmpNE(
-        condition, llvm::ConstantInt::get(condition->getType(), 0), "whilecond");
-    m_builder.CreateCondBr(condition, body_block, after_block);
-    m_builder.SetInsertPoint(body_block);
-    generateStatement(whileStmt->body);
-    // Only branch back to condition if the block is not already terminated
-    if (!m_builder.GetInsertBlock()->getTerminator()) {
-        m_builder.CreateBr(cond_block);
-    }
-    m_builder.SetInsertPoint(after_block);
-    m_loop_stack.pop_back();
+    emitLoop(
+        nullptr,
+        [&]() -> llvm::Value* { return generateExpression(whileStmt->condition); },
+        [&]() { generateStatement(whileStmt->body); },
+        nullptr,
+        false,
+        "while");
     return nullptr;
 }
 
 llvm::Value *LLVMCodegen::generateForStatement(
     const std::shared_ptr<ForStatement> &forStmt) {
-
-    llvm::Function *theFunction = m_builder.GetInsertBlock()->getParent();
-    if (forStmt->init)
-        generateStatement(forStmt->init);
-    auto cond_block =
-        llvm::BasicBlock::Create(context, "for.cond", theFunction);
-    auto body_block =
-        llvm::BasicBlock::Create(context, "for.body", theFunction);
-    auto inc_block =
-        llvm::BasicBlock::Create(context, "for.inc", theFunction);
-    auto after_block =
-        llvm::BasicBlock::Create(context, "for.end", theFunction);
-    m_loop_stack.push_back(LoopInfo{
-        .breakBB = after_block,
-        .continueBB = inc_block,
-    });
-    m_builder.CreateBr(cond_block);
-    m_builder.SetInsertPoint(cond_block);
-    llvm::Value *condition = nullptr;
-    if (forStmt->condition) {
-        condition = generateExpression(forStmt->condition);
-        condition = m_builder.CreateICmpNE(
-            condition, llvm::ConstantInt::get(condition->getType(), 0), "forcond");
-    } else {
-        condition = llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 1);
-    }
-    m_builder.CreateCondBr(condition, body_block, after_block);
-    m_builder.SetInsertPoint(body_block);
-    generateStatement(forStmt->body);
-    m_builder.CreateBr(inc_block);
-    m_builder.SetInsertPoint(inc_block);
-    if (forStmt->increment)
-        generateStatement(forStmt->increment);
-    m_builder.CreateBr(cond_block);
-    m_builder.SetInsertPoint(after_block);
-    m_loop_stack.pop_back();
+    emitLoop(
+        [&]() {
+            if (forStmt->init)
+                generateStatement(forStmt->init);
+        },
+        [&]() -> llvm::Value* {
+            if (!forStmt->condition)
+                return nullptr;
+            return generateExpression(forStmt->condition);
+        },
+        [&]() { generateStatement(forStmt->body); },
+        [&]() {
+            if (forStmt->increment)
+                generateStatement(forStmt->increment);
+        },
+        true,
+        "for");
     return nullptr;
 }
 
 llvm::Value *LLVMCodegen::generateReturnStatement(
     const std::shared_ptr<ReturnStatement> &retStmt) {
     if (retStmt->value == nullptr) {
+        if (m_error_union_return_type != nullptr) {
+            bool okIsVoid = IS_INSTANCE(m_error_union_return_type->valueType, Void);
+            if (!okIsVoid) {
+                throw CodeGenError(retStmt, "Return type mismatch: expected value");
+            }
+            if (retStmt->is_error) {
+                throw CodeGenError(retStmt, "Error return requires a value");
+            }
+            llvm::Value *okReturn = buildErrorUnionValue(m_error_union_return_type, nullptr, nullptr, false, retStmt);
+            auto retInstr = m_builder.CreateRet(okReturn);
+            return retInstr;
+        }
         auto retInstr = m_builder.CreateRetVoid();
         return retInstr;
     }
     auto retVal = generateExpression(retStmt->value);
     if (m_error_union_return_type != nullptr) {
-        // should return error union struct
-        llvm::Value *okVal = nullptr;
-        llvm::Value *errVal = nullptr;
-
-        llvm::Value *withTag = nullptr;
-
-        llvm::StructType *errUnionStruct = llvm ::
-            cast<llvm::StructType>(getLLVMType(m_error_union_return_type, retStmt));
-        llvm::Value *zeroVal = llvm::Constant::getNullValue(errUnionStruct);
-
-        if (retStmt->is_error) {
-            errVal = retVal;
-            okVal = llvm::Constant::getNullValue(getLLVMType(m_error_union_return_type->valueType, retStmt));
-            // Create the struct for error return
-            // {okType, errType, i1 (is_error, should be true)}
-            auto withOk = m_builder.CreateInsertValue(zeroVal, okVal, 0, "insert_ok");
-
-            auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1, "insert_err");
-            withTag = m_builder.CreateInsertValue(withErr,
-                                                  llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 1),
-                                                  2, "insert_is_err");
-
-        } else {
-            okVal = retVal;
-            errVal = llvm::Constant::getNullValue(getLLVMType(m_error_union_return_type->errorType, retStmt));
-
-            // Create the struct for ok return
-            // {okType, errType, i1 (is_error, should be false)}
-            auto withOk = m_builder.CreateInsertValue(zeroVal, okVal, 0, "insert_ok");
-
-            auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1, "insert_err");
-            withTag = m_builder.CreateInsertValue(withErr,
-                                                  llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 0),
-                                                  2, "insert_is_err");
+        bool okIsVoid = IS_INSTANCE(m_error_union_return_type->valueType, Void);
+        if (okIsVoid && !retStmt->is_error) {
+            throw CodeGenError(retStmt, "Return type mismatch: expected void ok");
         }
-        retVal = withTag;
+        if (retStmt->is_error) {
+            retVal = buildErrorUnionValue(m_error_union_return_type, nullptr, retVal, true, retStmt);
+        } else {
+            retVal = buildErrorUnionValue(m_error_union_return_type, retVal, nullptr, false, retStmt);
+        }
     }
 
     auto retInstr = m_builder.CreateRet(retVal);
@@ -2525,6 +2483,163 @@ llvm::Value *LLVMCodegen::generateReturnStatement(
 llvm::Value *LLVMCodegen::generateExpressionStatement(
     const std::shared_ptr<ExpressionStatement> &exprStmt) {
     return generateExpression(exprStmt->expression);
+}
+
+llvm::Value *LLVMCodegen::buildErrorUnionValue(const std::shared_ptr<ErrorUnionType> &euType,
+                                               llvm::Value *okVal,
+                                               llvm::Value *errVal,
+                                               bool isErr,
+                                               const ASTNodePtr &node) {
+    if (!euType) {
+        throw CodeGenError(node, "Error union type is null");
+    }
+    bool okIsVoid = IS_INSTANCE(euType->valueType, Void);
+    llvm::StructType *errUnionStruct = llvm::cast<llvm::StructType>(getLLVMType(euType, node));
+    llvm::Value *zeroVal = llvm::Constant::getNullValue(errUnionStruct);
+
+    if (okIsVoid) {
+        if (!isErr && okVal != nullptr) {
+            throw CodeGenError(node, "Void ok error union cannot carry a value");
+        }
+        if (isErr && errVal == nullptr) {
+            throw CodeGenError(node, "Error return requires a value");
+        }
+        if (!errVal) {
+            errVal = llvm::Constant::getNullValue(getLLVMType(euType->errorType, node));
+        }
+        auto withErr = m_builder.CreateInsertValue(zeroVal, errVal, 0, "insert_err");
+        return m_builder.CreateInsertValue(withErr,
+                                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), isErr ? 1 : 0),
+                                            1, "insert_is_err");
+    }
+
+    if (isErr && errVal == nullptr) {
+        throw CodeGenError(node, "Error return requires a value");
+    }
+    if (!okVal) {
+        okVal = llvm::Constant::getNullValue(getLLVMType(euType->valueType, node));
+    }
+    if (!errVal) {
+        errVal = llvm::Constant::getNullValue(getLLVMType(euType->errorType, node));
+    }
+
+    auto withOk = m_builder.CreateInsertValue(zeroVal, okVal, 0, "insert_ok");
+    auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1, "insert_err");
+    return m_builder.CreateInsertValue(withErr,
+                                        llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), isErr ? 1 : 0),
+                                        2, "insert_is_err");
+}
+
+void LLVMCodegen::emitDefaultReturn(const std::shared_ptr<FunctionDeclaration> &funcDecl) {
+    if (IS_INSTANCE(funcDecl->type->ret, Void)) {
+        m_builder.CreateRetVoid();
+        return;
+    }
+    if (IS_INSTANCE(funcDecl->type->ret, ErrorUnionType)) {
+        auto expected_error = std::dynamic_pointer_cast<ErrorUnionType>(funcDecl->type->ret);
+        if (expected_error && IS_INSTANCE(expected_error->valueType, Void)) {
+            llvm::Value *okReturn = buildErrorUnionValue(expected_error, nullptr, nullptr, false, funcDecl);
+            m_builder.CreateRet(okReturn);
+            return;
+        }
+    }
+    throw CodeGenError(funcDecl, "Non-void function missing return: " + funcDecl->name);
+}
+
+LLVMCodegen::ErrorUnionLayout LLVMCodegen::getErrorUnionLayout(
+    const std::shared_ptr<ErrorUnionType> &euType) const {
+    ErrorUnionLayout layout{};
+    layout.okIsVoid = IS_INSTANCE(euType->valueType, Void);
+    if (layout.okIsVoid) {
+        layout.okIndex = 0;
+        layout.errIndex = 0;
+        layout.isErrIndex = 1;
+    } else {
+        layout.okIndex = 0;
+        layout.errIndex = 1;
+        layout.isErrIndex = 2;
+    }
+    return layout;
+}
+
+llvm::Value *LLVMCodegen::createStructFieldAccess(llvm::StructType *structType,
+                                                  llvm::Value *basePtr,
+                                                  unsigned fieldIndex,
+                                                  llvm::Type *fieldType,
+                                                  const std::string &name,
+                                                  bool loadValue) {
+    llvm::Value *gep = m_builder.CreateGEP(
+        structType, basePtr,
+        {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+         llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), fieldIndex)},
+        name + "_ptr");
+
+    if (!gep) {
+        throw CodeGenError(nullptr, "Failed to create GEP for field '" + name + "'");
+    }
+
+    if (loadValue) {
+        return m_builder.CreateLoad(fieldType, gep, "load_" + name);
+    }
+    return gep;
+}
+
+void LLVMCodegen::emitLoop(const std::function<void()> &emitInit,
+                           const std::function<llvm::Value*()> &emitCondition,
+                           const std::function<void()> &emitBody,
+                           const std::function<void()> &emitIncrement,
+                           bool hasIncrement,
+                           const std::string &labelPrefix) {
+    llvm::Function *theFunction = m_builder.GetInsertBlock()->getParent();
+    if (emitInit) {
+        emitInit();
+    }
+
+    auto cond_block =
+        llvm::BasicBlock::Create(context, labelPrefix + ".cond", theFunction);
+    auto body_block =
+        llvm::BasicBlock::Create(context, labelPrefix + ".body", theFunction);
+    auto inc_block =
+        llvm::BasicBlock::Create(context, labelPrefix + ".inc", theFunction);
+    auto after_block =
+        llvm::BasicBlock::Create(context, labelPrefix + ".end", theFunction);
+
+    m_loop_stack.push_back(LoopInfo{
+        .breakBB = after_block,
+        .continueBB = hasIncrement ? inc_block : cond_block,
+    });
+
+    m_builder.CreateBr(cond_block);
+    m_builder.SetInsertPoint(cond_block);
+
+    llvm::Value *condition = nullptr;
+    if (emitCondition) {
+        condition = emitCondition();
+    }
+    if (condition) {
+        condition = m_builder.CreateICmpNE(
+            condition, llvm::ConstantInt::get(condition->getType(), 0), labelPrefix + "cond");
+    } else {
+        condition = llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 1);
+    }
+
+    m_builder.CreateCondBr(condition, body_block, after_block);
+    m_builder.SetInsertPoint(body_block);
+    if (emitBody) {
+        emitBody();
+    }
+    if (!m_builder.GetInsertBlock()->getTerminator()) {
+        m_builder.CreateBr(hasIncrement ? inc_block : cond_block);
+    }
+
+    m_builder.SetInsertPoint(inc_block);
+    if (hasIncrement && emitIncrement) {
+        emitIncrement();
+    }
+    m_builder.CreateBr(cond_block);
+
+    m_builder.SetInsertPoint(after_block);
+    m_loop_stack.pop_back();
 }
 
 llvm::Value *LLVMCodegen::materializeAggregate(llvm::Value *abiValue, llvm::StructType *langType) {

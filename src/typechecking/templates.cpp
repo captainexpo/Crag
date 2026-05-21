@@ -17,112 +17,188 @@ std::string mangleTemplateName(const std::string &base, const std::vector<std::s
     return mangled;
 }
 
+static void replaceInTypePreserveTemplates(std::shared_ptr<Type> &type,
+                                           const std::unordered_map<std::string, std::shared_ptr<Type>> &generic_map) {
+    if (auto gt = std::dynamic_pointer_cast<GenericType>(type)) {
+        auto it = generic_map.find(gt->name);
+        if (it != generic_map.end()) {
+            type = it->second;
+        }
+    } else if (auto eu = std::dynamic_pointer_cast<ErrorUnionType>(type)) {
+        replaceInTypePreserveTemplates(eu->errorType, generic_map);
+        replaceInTypePreserveTemplates(eu->valueType, generic_map);
+    } else if (auto ti = std::dynamic_pointer_cast<TemplateInstanceType>(type)) {
+        for (auto &arg : ti->type_args) {
+            replaceInTypePreserveTemplates(arg, generic_map);
+        }
+        replaceInTypePreserveTemplates(ti->base, generic_map);
+    } else if (auto ft = std::dynamic_pointer_cast<FunctionType>(type)) {
+        for (auto &param : ft->params) {
+            replaceInTypePreserveTemplates(param, generic_map);
+        }
+        replaceInTypePreserveTemplates(ft->ret, generic_map);
+    } else if (auto pt = std::dynamic_pointer_cast<PointerType>(type)) {
+        replaceInTypePreserveTemplates(pt->base, generic_map);
+    } else if (auto at = std::dynamic_pointer_cast<ArrayType>(type)) {
+        replaceInTypePreserveTemplates(at->element_type, generic_map);
+    } else if (auto st = std::dynamic_pointer_cast<StructType>(type)) {
+        for (auto &field : st->fields) {
+            replaceInTypePreserveTemplates(field.second, generic_map);
+        }
+        for (auto &method : st->methods) {
+            replaceGenericTypes(method.second, generic_map);
+        }
+    } else if (auto ut = std::dynamic_pointer_cast<UnionType>(type)) {
+        for (auto &variant : ut->fields) {
+            replaceInTypePreserveTemplates(variant.second, generic_map);
+        }
+    }
+}
+
+static std::string formatQualifiedTemplateName(const std::vector<std::string> &module_path,
+                                               const std::string &template_name) {
+    std::string qualified;
+    for (const auto &part : module_path) {
+        qualified += part + "::";
+    }
+    qualified += template_name;
+    return qualified;
+}
+
+static std::string templateDeclName(const std::shared_ptr<Declaration> &decl) {
+    if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl))
+        return fd->name;
+    if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl))
+        return sd->name;
+    if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl))
+        return ta->name;
+    return "<unknown>";
+}
+
+static bool isTemplateDeclaration(const std::shared_ptr<Declaration> &decl) {
+    if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl))
+        return !fd->generic_params.empty();
+    if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl))
+        return !sd->generic_params.empty();
+    if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl))
+        return !ta->generic_params.empty();
+    return false;
+}
+
 // Returns type of expression, and replacement for the instantiation
 std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti) {
-    std::string temp = ti->base;
-    std::vector<std::shared_ptr<Type>> params = ti->type_args;
+    std::string qualified_name = formatQualifiedTemplateName(ti->module_path, ti->template_name);
 
-    // Check if this is a module-qualified template (contains "::")
-    size_t double_colon_pos = temp.find("::");
-    if (double_colon_pos != std::string::npos) {
-        // Parse the module path and template name
-        std::vector<std::string> parts;
-        size_t start = 0;
-        size_t pos = 0;
-        while ((pos = temp.find("::", start)) != std::string::npos) {
-            parts.push_back(temp.substr(start, pos - start));
-            start = pos + 2;
-        }
-        parts.push_back(temp.substr(start)); // Add the final part (template name)
-
-        if (parts.size() < 2) {
-            throw TypeCheckError(ti, "Invalid module-qualified template: " + temp);
+    TypeChecker *target_checker = this;
+    if (!ti->module_path.empty()) {
+        auto module_it = imported_modules.find(ti->module_path[0]);
+        if (module_it == imported_modules.end()) {
+            throw TypeCheckError(ti, "Unknown module in template: " + ti->module_path[0]);
         }
 
-        // The first parts form the module path, last part is the template name
-        std::string template_name = parts.back();
-        parts.pop_back();
-
-        // Look up the module
-        auto module_it = imported_module_checkers.find(parts[0]);
-        if (module_it == imported_module_checkers.end()) {
-            throw TypeCheckError(ti, "Unknown module in template: " + parts[0]);
-        }
-
-        // If there are more path components, recursively resolve
-        std::shared_ptr<TypeChecker> target_checker = module_it->second;
-        for (size_t i = 1; i < parts.size(); ++i) {
-            auto sub_module_it = target_checker->imported_module_checkers.find(parts[i]);
-            if (sub_module_it == target_checker->imported_module_checkers.end()) {
-                throw TypeCheckError(ti, "Unknown module in path: " + parts[i]);
+        std::shared_ptr<TypeChecker> module_checker = module_it->second->type_checker;
+        for (size_t i = 1; i < ti->module_path.size(); ++i) {
+            auto sub_module_it = module_checker->imported_modules.find(ti->module_path[i]);
+            if (sub_module_it == module_checker->imported_modules.end()) {
+                throw TypeCheckError(ti, "Unknown module in path: " + ti->module_path[i]);
             }
-            target_checker = sub_module_it->second;
+            module_checker = sub_module_it->second->type_checker;
+        }
+        target_checker = module_checker.get();
+    }
+
+    std::vector<std::shared_ptr<Type>> params;
+    params.reserve(ti->type_args.size());
+    for (const auto &arg : ti->type_args) {
+        params.push_back(target_checker->resolveType(ti, arg));
+    }
+
+    SymbolId template_id = ti->template_id != UINT32_MAX ? static_cast<SymbolId>(ti->template_id) : INVALID_SYMBOL_ID;
+    if (template_id == INVALID_SYMBOL_ID) {
+        if (!target_checker->m_scopes.empty()) {
+            template_id = target_checker->m_scopes.front().find(ti->template_name);
+        }
+        if (template_id == INVALID_SYMBOL_ID) {
+            throw TypeCheckError(ti, "Unknown template: " + qualified_name);
+        }
+        ti->template_id = template_id;
+    }
+
+    auto entry = target_checker->symbolTable().get(template_id);
+    auto decl = entry ? std::dynamic_pointer_cast<Declaration>(entry->decl) : nullptr;
+    if (!decl || !isTemplateDeclaration(decl)) {
+        throw TypeCheckError(ti, "Unknown template: " + qualified_name);
+    }
+
+    if (auto alias_decl = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
+        if (alias_decl->generic_params.size() != params.size()) {
+            throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + templateDeclName(decl) +
+                                        ": expected " + std::to_string(alias_decl->generic_params.size()) +
+                                        ", got " + std::to_string(params.size()));
         }
 
-        // Now instantiate the template in the target module's context
-        auto template_it = target_checker->m_templates.find(template_name);
-        if (template_it == target_checker->m_templates.end()) {
-            throw TypeCheckError(ti, "Unknown template in module: " + template_name);
+        std::unordered_map<std::string, std::shared_ptr<Type>> generic_map;
+        for (size_t i = 0; i < alias_decl->generic_params.size(); ++i) {
+            generic_map[alias_decl->generic_params[i]] = params[i];
+        }
+        auto alias_type = alias_decl->aliased_type->copy();
+        replaceInTypePreserveTemplates(alias_type, generic_map);
+        auto resolved = target_checker->resolveType(alias_decl, alias_type);
+
+        if (auto st = std::dynamic_pointer_cast<StructType>(resolved)) {
+            auto complete = target_checker->lookupStructType(st->name);
+            if (complete) {
+                resolved = complete;
+                insertGlobalSymbol(st->name, complete, nullptr);
+            }
         }
 
-        // Create a new template instantiation for the target module to process
-        auto ti_copy = std::make_shared<TemplateInstantiation>(template_name, params);
+        ti->inferred_type = resolved;
+        return std::make_pair(resolved, std::make_shared<TypeExpression>(resolved));
+    }
+
+    if (target_checker != this) {
+        auto ti_copy = std::make_shared<TemplateInstantiation>(templateDeclName(decl), params);
         ti_copy->line = ti->line;
         ti_copy->col = ti->col;
+        ti_copy->template_id = template_id;
 
-        // Let the target module instantiate it
         auto result = target_checker->inferTemplateInstantiation(ti_copy);
         std::cout << "Instantiated module-qualified template: " << ti->str()
                   << " to type " << result.first->str() << "\n";
 
-        // If the result type contains a struct, we need to get the complete version
-        // from the target module's m_structs and register it in the calling module
         if (auto fn_type = std::dynamic_pointer_cast<FunctionType>(result.first)) {
             if (auto st = std::dynamic_pointer_cast<StructType>(fn_type->ret)) {
-                // Look up the complete struct in the target module
-                auto it = target_checker->m_structs.find(st->name);
-                if (it != target_checker->m_structs.end()) {
-                    // Replace the return type with the complete struct
-                    fn_type->ret = it->second;
-                    // Register it in the calling module's m_structs
-                    m_structs[st->name] = it->second;
+                auto complete = target_checker->lookupStructType(st->name);
+                if (complete) {
+                    fn_type->ret = complete;
+                    insertGlobalSymbol(st->name, complete, nullptr);
                 }
             }
         } else if (auto st = std::dynamic_pointer_cast<StructType>(result.first)) {
-            // Look up the complete struct in the target module
-            auto it = target_checker->m_structs.find(st->name);
-            if (it != target_checker->m_structs.end()) {
-                result.first = it->second;
-                m_structs[st->name] = it->second;
+            auto complete = target_checker->lookupStructType(st->name);
+            if (complete) {
+                result.first = complete;
+                insertGlobalSymbol(st->name, complete, nullptr);
             }
         }
 
         ti->inferred_type = result.first;
-
-        // Return a module-qualified access to the instantiated template
-        std::string mangled_name = mangleTemplateName(template_name, params);
-        auto ma = std::make_shared<ModuleAccess>(parts, mangled_name);
+        std::string mangled_name = mangleTemplateName(templateDeclName(decl), params);
+        auto ma = std::make_shared<ModuleAccess>(ti->module_path, mangled_name);
         ma->inferred_type = result.first;
         return std::make_pair(result.first, ma);
     }
 
-    auto maybe_to_instantiate = m_templates.find(temp);
-    if (maybe_to_instantiate == m_templates.end()) {
-        auto maybe_alias = m_type_aliases.find(temp); // This just returns a type for some reason, kinda shit innit?
-
-        throw TypeCheckError(ti, "Unknown template: " + temp);
-    }
-
-
-    auto to_instantiate = maybe_to_instantiate->second;
+    auto to_instantiate = decl;
 
     if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(to_instantiate)) {
         auto new_name = mangleTemplateName(fd->name, params);
         // std::cout << "Instantiating function template: " << fd->name << " as " << new_name << "\n";
         // Check if already instantiated
-        auto it = m_functions.find(new_name);
-        if (it != m_functions.end()) {
-            ti->inferred_type = it->second;
+        auto existing = lookupFunctionType(new_name);
+        if (existing) {
+            ti->inferred_type = existing;
             return std::make_pair(
                 ti->inferred_type,
                 std::make_shared<VarAccess>(new_name));
@@ -151,8 +227,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         checkFunctionDeclaration(declCopy);
         m_expected_return_type = saved_expected_return_type;
         ti->inferred_type = declCopy->type;
-        m_functions.insert({new_name, std::dynamic_pointer_cast<FunctionType>(ti->inferred_type)});
-        // std::cout << m_functions[new_name]->str() << "\n";
+        insertGlobalSymbol(new_name, ti->inferred_type, declCopy);
         current_module->ast->declarations.push_back(declCopy);
         return std::make_pair(
             ti->inferred_type,
@@ -160,9 +235,9 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
     } else if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(to_instantiate)) {
         auto new_name = mangleTemplateName(sd->name, params);
         // Check if already instantiated
-        auto it = m_structs.find(new_name);
-        if (it != m_structs.end()) {
-            ti->inferred_type = it->second;
+        auto existing = lookupStructType(new_name);
+        if (existing) {
+            ti->inferred_type = existing;
             std::cout << new_name << " (already instantiated)\n";
             return std::make_pair(
                 ti->inferred_type,
@@ -188,16 +263,15 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
 
         auto st = std::make_shared<StructType>(new_name);
         st->complete = false;
-        m_structs[new_name] = st;
-        insertSymbol(new_name, st, sd);
+        insertGlobalSymbol(new_name, st, sd);
 
         auto old_expected_return_type = m_expected_return_type;
         m_expected_return_type = nullptr;
         checkStructDeclaration(declCopy);
-        std::cout << "TYP" << m_structs[new_name]->str() << "\n";
+        // std::cout << "TYP " << st->str() << "\n";
         current_module->ast->declarations.push_back(declCopy);
 
-        ti->inferred_type = m_structs[new_name];
+        ti->inferred_type = st;
         m_expected_return_type = old_expected_return_type;
         return std::make_pair(
             ti->inferred_type,

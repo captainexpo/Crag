@@ -139,6 +139,18 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
                 t = std::make_shared<GenericType>(name);
                 break;
             }
+            if (imported_modules.count(current.value) && peek(1).type == TokenType::DOT) {
+                std::vector<std::string> path;
+                path.push_back(consume(TokenType::ID).value);
+                while (peek().type == TokenType::DOT) {
+                    consume(TokenType::DOT);
+                    path.push_back(consume(TokenType::ID).value);
+                }
+                auto b = path.back();
+                path.pop_back();
+                t = std::make_shared<QualifiedType>(path, b);
+                break;
+            }
             if (peek(1).type == TokenType::DOUBLE_COLON) {
                 std::vector<std::string> path;
                 path.push_back(consume(TokenType::ID).value);
@@ -320,7 +332,11 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
             consume(TokenType::SEMICOLON);
             auto type_alias = std::make_shared<TypeAliasDeclaration>(alias_name, alias_type, condition);
             type_alias->is_pub = is_pub;
+            type_alias->generic_params = generic_params;
             declared_type_aliases[alias_name] = alias_type;
+            for (const auto &gp : generic_params) {
+                current_generic_params.pop_back();
+            }
             return type_alias;
         }
         case TokenType::STRUCT: {
@@ -778,14 +794,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                     }
                     consume(TokenType::GT);
 
-                    // Create a qualified name for the template
-                    std::string qualified_name;
-                    for (const auto &part : module_path) {
-                        qualified_name += part + "::";
-                    }
-                    qualified_name += member_name;
-
-                    expr = std::make_shared<TemplateInstantiation>(qualified_name, type_args);
+                    expr = std::make_shared<TemplateInstantiation>(module_path, member_name, type_args);
                     expr->line = t.line;
                     expr->col = t.column;
                 } else {
@@ -876,9 +885,36 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
                     return expr;
                 }
                 std::string field_name = consume(TokenType::ID).value;
-                expr = std::make_shared<FieldAccess>(left, field_name);
+                if (auto va = std::dynamic_pointer_cast<VarAccess>(left)) {
+                    if (imported_modules.count(va->name)) {
+                        expr = std::make_shared<ModuleAccess>(std::vector<std::string>{va->name}, field_name);
+                    } else {
+                        expr = std::make_shared<FieldAccess>(left, field_name);
+                    }
+                } else if (auto ma = std::dynamic_pointer_cast<ModuleAccess>(left)) {
+                    auto module_path = ma->module_path;
+                    module_path.push_back(ma->member_name);
+                    expr = std::make_shared<ModuleAccess>(module_path, field_name);
+                } else {
+                    expr = std::make_shared<FieldAccess>(left, field_name);
+                }
                 expr->line = t.line;
                 expr->col = t.column;
+                if (peek().type == TokenType::LBRACE) { // Allow struct initialization syntax after field access, e.g. MyStruct { field: value }
+                    consume(TokenType::LBRACE);
+                    std::map<std::string, std::shared_ptr<Expression>> field_values;
+                    while (peek().type != TokenType::RBRACE) {
+                        std::string fname = consume(TokenType::ID).value;
+                        consume(TokenType::COLON);
+                        field_values[fname] = parse_expression();
+                        if (peek().type == TokenType::COMMA)
+                            consume(TokenType::COMMA);
+                    }
+                    consume(TokenType::RBRACE);
+                    expr = std::make_shared<StructInitializer>(expr, field_values);
+                    expr->line = t.line;
+                    expr->col = t.column;
+                }
                 return expr;
             }
             // case TokenType::DOUBLE_COLON: {

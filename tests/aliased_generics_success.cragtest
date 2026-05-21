@@ -1,9 +1,8 @@
-
-//NAME: Aliased Generics !THIS TEST IS MEANT TO FAIL, THE FEATURE IS UNIMPLEMENTED AS OF RIGHT NOW!
-//DESC:
+//NAME: Aliased Generics Success
+//DESC: Generic type alias instantiation should behave like template instantiation
 //BEGIN CODE
 
-import "stdlib" as std;
+extern fn printf(fmt: *u8, ...) -> i32;
 
 struct Point<T> {
     x: T,
@@ -19,11 +18,11 @@ using Palias<T> = Point::<T>;
 fn main() -> i32 {
     let p1 = Palias::<i32>{x: 1, y: 2};
     let k = identity::<bool>(true);
-    std.cstdio.printf("%d\n", k as i32);
+    printf("%d\n", p1.x + p1.y + (k as i32));
     return 0;
 }
 
 //END CODE
 //BEGIN EXPECT
-//1\n
+//4
 //END EXPECT

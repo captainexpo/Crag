@@ -1,0 +1,97 @@
+import "../libc/stdio.crag" as cstdio;
+import "../libc/stdlib.crag" as cstdlib;
+import "../string.crag" as string;
+
+pub enum FsError(i32) {
+	OPEN_ERROR = 1,
+	READ_ERROR,
+	WRITE_ERROR,
+	SEEK_ERROR,
+	ALLOC_ERROR,
+}
+
+pub struct File {
+	handle: *void,
+}
+
+pub fn open(path: *const u8, mode: *const u8) -> File!FsError {
+	let handle: *void = cstdio.fopen(path, mode);
+	if (handle == null) {
+		return! FsError:OPEN_ERROR;
+	}
+	return File{handle: handle};
+}
+
+pub fn close(file: *File) -> void {
+	if (file.handle != null) {
+		cstdio.fclose(file.handle);
+		file.handle = null;
+	}
+}
+
+pub fn exists(path: *const u8) -> bool {
+	let handle: *void = cstdio.fopen(path, "rb");
+	if (handle == null) {
+		return false;
+	}
+	cstdio.fclose(handle);
+	return true;
+}
+
+pub fn read_all(path: *const u8) -> string.Str!FsError {
+	let handle: *void = cstdio.fopen(path, "rb");
+	if (handle == null) {
+		return! FsError:OPEN_ERROR;
+	}
+
+	if (cstdio.fseek(handle, 0, 2) != 0) {
+		cstdio.fclose(handle);
+		return! FsError:SEEK_ERROR;
+	}
+
+	let size_i64: i64 = cstdio.ftell(handle);
+	if (size_i64 < 0) {
+		cstdio.fclose(handle);
+		return! FsError:SEEK_ERROR;
+	}
+
+	cstdio.rewind(handle);
+	let size: usize = size_i64 as usize;
+	let buffer: *u8 = cstdlib.malloc(size + 1) as *u8;
+	if (buffer == null) {
+		cstdio.fclose(handle);
+		return! FsError:ALLOC_ERROR;
+	}
+
+	let read_count: usize = cstdio.fread(buffer as *void, 1, size, handle);
+	cstdio.fclose(handle);
+
+	if (read_count != size) {
+		cstdlib.free(buffer as *void);
+		return! FsError:READ_ERROR;
+	}
+
+	buffer[size] = 0;
+	return string.Str{value: buffer, length: size, is_heap: true};
+}
+
+pub fn write_all(path: *const u8, data: *const u8, len: usize) -> void!FsError {
+	let handle: *void = cstdio.fopen(path, "wb");
+	if (handle == null) {
+		return! FsError:OPEN_ERROR;
+	}
+
+	let written: usize = cstdio.fwrite(data as *const void, 1, len, handle);
+	cstdio.fclose(handle);
+
+	if (written != len) {
+		return! FsError:WRITE_ERROR;
+	}
+}
+
+pub fn write_str(path: *const u8, data: string.Str) -> void!FsError {
+	let res = write_all(path, data.value as *const u8, data.length);
+    if (res.is_err) {
+        return! res.err;
+    }
+}

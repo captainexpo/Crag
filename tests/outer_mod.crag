@@ -1,0 +1,3 @@
+import "inner_mod.crag" as inner;
+
+pub let X: i32 = 7;

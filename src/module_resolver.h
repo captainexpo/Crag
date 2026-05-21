@@ -4,7 +4,8 @@
 #define MODULE_RESOLVER_H
 
 #include "ast/ast.h"
-#include "parser.h" // assume you have a Parser class that can parse source text
+#include "typechecking/tables.h"
+#include "parser.h"
 #include "utils.h"
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,8 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+
+class TypeChecker;
 
 struct Module {
   public:
@@ -25,6 +28,11 @@ struct Module {
     std::string source_code;
 
     std::unordered_set<std::string> externLinkage; // Probably an inaccurate name, but who cares
+
+    SymbolTable symbols;
+    std::shared_ptr<TypeChecker> type_checker;
+    bool typechecking = false;
+    bool typechecked = false;
 
     std::string canonicalizeName(const std::string &s) const {
         return canon_name + "." + s;

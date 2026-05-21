@@ -5,7 +5,6 @@
 
 #include "../ast/ast.h"
 #include "../backend.h"
-#include "../lexer.h"
 #include "../module_resolver.h"
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/IRBuilder.h"
@@ -13,6 +12,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_ostream.h"
+#include <functional>
 #include <memory>
 #include <unordered_map>
 
@@ -23,21 +23,22 @@ class DIScope;
 class DIType;
 }
 
-class CodeGenError : public std::exception {
-  public:
-    CodeGenError(ASTNodePtr node, const std::string &msg)
-        : m_node(node), m_msg(msg) {}
-    const char *what() const noexcept override { return m_msg.c_str(); }
-    ASTNodePtr node() const { return m_node; }
-
-  private:
-    ASTNodePtr m_node;
-    std::string m_msg;
-};
-
 struct LoopInfo {
     llvm::BasicBlock *breakBB;
     llvm::BasicBlock *continueBB;
+};
+
+// Map operator string to function
+struct OpInfo {
+    std::function<llvm::Value *(llvm::Value *, llvm::Value *)> intOp;
+    std::function<llvm::Value *(llvm::Value *, llvm::Value *)> floatOp;
+};
+
+enum RuntimePanicType {
+    OutOfBounds,
+    DivisionByZero,
+    NullPointerDereference,
+    // Add others as needed
 };
 
 class Scope {
@@ -81,18 +82,6 @@ class Scope {
     std::shared_ptr<Scope> m_parent;
 };
 
-// Map operator string to function
-struct OpInfo {
-    std::function<llvm::Value *(llvm::Value *, llvm::Value *)> intOp;
-    std::function<llvm::Value *(llvm::Value *, llvm::Value *)> floatOp;
-};
-
-enum RuntimePanicType {
-    OutOfBounds,
-    DivisionByZero,
-    NullPointerDereference,
-    // Add others as needed
-};
 
 class LLVMCodegen : public Backend {
   public:
@@ -266,6 +255,31 @@ class LLVMCodegen : public Backend {
     llvm::Value* generateExpressionStatement(const std::shared_ptr<ExpressionStatement> &exprStmt);
 
     llvm::Value* materializeAggregate(llvm::Value* abiValue, llvm::StructType* structType);
+    llvm::Value* buildErrorUnionValue(const std::shared_ptr<ErrorUnionType> &euType,
+                                      llvm::Value *okVal,
+                                      llvm::Value *errVal,
+                                      bool isErr,
+                                      const ASTNodePtr &node);
+    struct ErrorUnionLayout {
+        bool okIsVoid;
+        unsigned okIndex;
+        unsigned errIndex;
+        unsigned isErrIndex;
+    };
+    ErrorUnionLayout getErrorUnionLayout(const std::shared_ptr<ErrorUnionType> &euType) const;
+    llvm::Value* createStructFieldAccess(llvm::StructType *structType,
+                                         llvm::Value *basePtr,
+                                         unsigned fieldIndex,
+                                         llvm::Type *fieldType,
+                                         const std::string &name,
+                                         bool loadValue);
+    void emitDefaultReturn(const std::shared_ptr<FunctionDeclaration> &funcDecl);
+    void emitLoop(const std::function<void()> &emitInit,
+                  const std::function<llvm::Value*()> &emitCondition,
+                  const std::function<void()> &emitBody,
+                  const std::function<void()> &emitIncrement,
+                  bool hasIncrement,
+                  const std::string &labelPrefix);
 
     bool isLValue(const std::shared_ptr<Expression> &expr);
 

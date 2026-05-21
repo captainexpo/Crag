@@ -1,0 +1,10 @@
+pub let C: i32 = 1;
+
+pub struct Vec2 {
+    x: i32,
+    y: i32,
+}
+
+pub fn add(v: Vec2) -> i32 {
+    return v.x + v.y;
+}

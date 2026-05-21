@@ -1,0 +1,19 @@
+//NAME: Module Dot Access
+//DESC: Dot-style module access for values and types
+//REQUIRES:mod_math.crag
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+import "mod_math.crag" as math;
+
+fn main() -> i32 {
+    let v: math.Vec2 = math.Vec2{x: 2, y: 4};
+    printf("%d\n", math.C + math.add(v));
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//7
+//END EXPECT

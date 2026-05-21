@@ -1,6 +1,11 @@
 #include "compiler.h"
 #include "backend.h"
+
+// #define NO_LLVM
+#ifndef NO_LLVM
 #include "backends/llvmcodegen.h"
+#endif
+
 #include "module_resolver.h"
 #include "typechecking/typecheck.h"
 #include "utils.h"
@@ -63,22 +68,27 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     }
 #endif
 
-    auto typeChecker = TypeChecker();
+    if (!mod->type_checker) {
+        mod->type_checker = std::make_shared<TypeChecker>();
+    }
 
-    typeChecker.check(mod);
+    auto typeChecker = mod->type_checker;
+    typeChecker->check(mod);
 
-    if (!typeChecker.ok()) {
-        std::cout << typeChecker.errors().size() << " errors during type checking:\n";
-        for (const auto &err : typeChecker.errors()) {
-            std::cerr << err.second << "\n"
-                      << err.first->line << " " << err.first->col << "\n";
+    if (!typeChecker->ok()) {
+        std::cout << typeChecker->errors().size() << " errors during type checking:\n";
+        for (const auto &err : typeChecker->errors()) {
+            std::cerr << err.second << "\n";
+            if (err.first) {
+                std::cerr << err.first->line << " " << err.first->col << "\n";
+            }
             prettyError(err.first ? err.first->line : -1,
                         err.first ? err.first->col : -1, err.second, mod->source_code);
         }
         return nullptr;
     }
 
-#ifdef DBG_PRINT_AST
+#if defined(DBG_PRINT_AST) || defined(NO_LLVM)
     std::cout << "after type checking:\n";
     std::cout << mod->ast->toString();
 #endif
@@ -88,7 +98,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
         std::cerr << "Error: Cyclic dependencies detected among modules.\n";
         return nullptr;
     }
-
+#ifndef NO_LLVM
     // Call llvm codegen directly here, should probably make it more modular later
     auto codegen = std::make_shared<LLVMCodegen>("mainmod", context, moduleResolver, options);
     bool has_errors = false;
@@ -119,6 +129,9 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
         return nullptr;
     }
     std::cout << "Compilation succeeded.\n";
-
     return codegen;
+#else
+    std::cout << "Compilation succeeded (no code generated due to NO_LLVM flag).\n";
+    return nullptr;
+#endif
 }

@@ -4,11 +4,11 @@
 
 import "stdlib" as std;
 
-using S = std::string::Str;
+using S = std.string.Str;
 
 fn main() -> i32 {
-    let str: S = std::string::str("Hello World!\n");
-    std::cstdio::printf("%s", str.c_str());
+    let str: S = std.string.str("Hello World!\n");
+    std.cstdio.printf("%s", str.c_str());
     return 0;
 }
 

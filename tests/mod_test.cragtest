@@ -8,7 +8,7 @@ import "mod_test_r1.crag" as mt1;
 extern fn printf(fmt: *u8, ...) -> i32;
 
 fn main() -> i32 {
-    const a = mt1::func();
+    const a = mt1.func();
     printf("%d", a);
     return 0;
 }

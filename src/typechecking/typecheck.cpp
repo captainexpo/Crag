@@ -1,4 +1,3 @@
-
 #include "typecheck.h"
 #include "../ast/ast.h"
 #include "../const_eval.h"
@@ -10,22 +9,50 @@
 #include <optional>
 
 TypeChecker::TypeChecker() : m_const_eval(*new ConstEvaluator(this)) {
-
     m_const_eval.addIntrinsic("@target_ptr_width", std::make_shared<Literal>(static_cast<int64_t>(64), std::make_shared<I64>()));
     pushScope();
 
     m_expected_return_type = nullptr;
     m_errors.clear();
     m_scopes.clear();
-    m_structs.clear();
-    m_unions.clear();
-    m_enums.clear();
-    m_type_aliases.clear();
     m_templates.clear();
     m_current_generic_types.clear();
     m_struct_methods.clear();
-    m_functions.clear();
-    imported_module_checkers.clear();
+    imported_modules.clear();
+}
+
+SymbolTable &TypeChecker::symbolTable() {
+    return current_module->symbols;
+}
+
+const SymbolTable &TypeChecker::symbolTable() const {
+    return current_module->symbols;
+}
+
+std::shared_ptr<Type> TypeChecker::lookupNamedType(const std::string &name) const {
+    if (m_scopes.empty())
+        return nullptr;
+    SymbolId id = m_scopes.front().find(name);
+    if (id == INVALID_SYMBOL_ID)
+        return nullptr;
+    auto entry = symbolTable().get(id);
+    return entry ? entry->type : nullptr;
+}
+
+std::shared_ptr<StructType> TypeChecker::lookupStructType(const std::string &name) const {
+    return std::dynamic_pointer_cast<StructType>(lookupNamedType(name));
+}
+
+std::shared_ptr<UnionType> TypeChecker::lookupUnionType(const std::string &name) const {
+    return std::dynamic_pointer_cast<UnionType>(lookupNamedType(name));
+}
+
+std::shared_ptr<EnumType> TypeChecker::lookupEnumType(const std::string &name) const {
+    return std::dynamic_pointer_cast<EnumType>(lookupNamedType(name));
+}
+
+std::shared_ptr<FunctionType> TypeChecker::lookupFunctionType(const std::string &name) const {
+    return std::dynamic_pointer_cast<FunctionType>(lookupNamedType(name));
 }
 
 void TypeChecker::pushScope() { m_scopes.emplace_back(); }
@@ -40,19 +67,47 @@ bool TypeChecker::insertSymbol(const std::string &name,
     if (m_scopes.empty())
         pushScope();
     auto &top = m_scopes.back();
-    if (top.find(name) != nullptr)
+    if (top.find(name) != INVALID_SYMBOL_ID)
         return false;
-    top.symbols[name] = t;
+
+    SymbolId id = symbolTable().insert({name, t, decl});
+
+    top.symbols[name] = id;
     return true;
 }
 
-std::optional<std::shared_ptr<Type>> TypeChecker::lookupSymbol(const std::string &name) const {
-    if (m_type_aliases.find(name) != m_type_aliases.end())
-        return m_type_aliases.at(name);
+bool TypeChecker::insertGlobalSymbol(const std::string &name,
+                                     std::shared_ptr<Type> t, ASTNodePtr decl) {
+    if (m_scopes.empty())
+        pushScope();
+    auto &global = m_scopes.front();
+    if (global.find(name) != INVALID_SYMBOL_ID)
+        return false;
+
+    SymbolId id = symbolTable().insert({name, t, decl});
+    global.symbols[name] = id;
+    return true;
+}
+
+SymbolId TypeChecker::insertTemplateSymbol(const std::string &name,
+                                           const std::shared_ptr<Declaration> &decl) {
+    if (m_scopes.empty())
+        pushScope();
+    auto &global = m_scopes.front();
+    if (global.find(name) != INVALID_SYMBOL_ID)
+        return global.find(name);
+
+    SymbolId id = symbolTable().insert({name, nullptr, decl});
+    global.symbols[name] = id;
+    return id;
+}
+
+std::optional<SymbolId> TypeChecker::lookupSymbolInScope(const std::string &name) const {
     for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
-        auto found = it->find(name);
-        if (found != nullptr)
-            return found;
+        SymbolId id = it->find(name);
+
+        if (id != INVALID_SYMBOL_ID)
+            return id;
     }
     return std::nullopt;
 }
@@ -196,6 +251,90 @@ std::string TypeChecker::typeName(const std::shared_ptr<Type> &t) const {
     return t ? t->str() : "<no_type>";
 }
 
+static bool containsGenericType(const std::shared_ptr<Type> &t) {
+    if (!t)
+        return false;
+    if (std::dynamic_pointer_cast<GenericType>(t))
+        return true;
+    if (auto ti = std::dynamic_pointer_cast<TemplateInstanceType>(t)) {
+        if (containsGenericType(ti->base))
+            return true;
+        for (const auto &arg : ti->type_args) {
+            if (containsGenericType(arg))
+                return true;
+        }
+        return false;
+    }
+    if (auto pt = std::dynamic_pointer_cast<PointerType>(t))
+        return containsGenericType(pt->base);
+    if (auto at = std::dynamic_pointer_cast<ArrayType>(t))
+        return containsGenericType(at->element_type);
+    if (auto ft = std::dynamic_pointer_cast<FunctionType>(t)) {
+        if (containsGenericType(ft->ret))
+            return true;
+        for (const auto &param : ft->params) {
+            if (containsGenericType(param))
+                return true;
+        }
+        return false;
+    }
+    if (auto eu = std::dynamic_pointer_cast<ErrorUnionType>(t)) {
+        return containsGenericType(eu->valueType) || containsGenericType(eu->errorType);
+    }
+    return false;
+}
+
+static void substituteGenericTypes(std::shared_ptr<Type> &type,
+                                   const std::unordered_map<std::string, std::shared_ptr<Type>> &generic_map) {
+    if (!type)
+        return;
+    if (auto gt = std::dynamic_pointer_cast<GenericType>(type)) {
+        auto it = generic_map.find(gt->name);
+        if (it != generic_map.end())
+            type = it->second;
+        return;
+    }
+    if (auto eut = std::dynamic_pointer_cast<ErrorUnionType>(type)) {
+        substituteGenericTypes(eut->valueType, generic_map);
+        substituteGenericTypes(eut->errorType, generic_map);
+        return;
+    }
+    if (auto ti = std::dynamic_pointer_cast<TemplateInstanceType>(type)) {
+        substituteGenericTypes(ti->base, generic_map);
+        for (auto &arg : ti->type_args) {
+            substituteGenericTypes(arg, generic_map);
+        }
+        return;
+    }
+    if (auto pt = std::dynamic_pointer_cast<PointerType>(type)) {
+        substituteGenericTypes(pt->base, generic_map);
+        return;
+    }
+    if (auto at = std::dynamic_pointer_cast<ArrayType>(type)) {
+        substituteGenericTypes(at->element_type, generic_map);
+        return;
+    }
+    if (auto ft = std::dynamic_pointer_cast<FunctionType>(type)) {
+        substituteGenericTypes(ft->ret, generic_map);
+        for (auto &param : ft->params) {
+            substituteGenericTypes(param, generic_map);
+        }
+        return;
+    }
+    if (auto st = std::dynamic_pointer_cast<StructType>(type)) {
+        for (auto &field : st->fields) {
+            substituteGenericTypes(field.second, generic_map);
+        }
+        return;
+    }
+    if (auto ut = std::dynamic_pointer_cast<UnionType>(type)) {
+        for (auto &variant : ut->fields) {
+            substituteGenericTypes(variant.second, generic_map);
+        }
+        return;
+    }
+}
+
 std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t) {
     if (!t)
         throw TypeCheckError(node, "Internal type-checker error: attempted to resolve a null type");
@@ -211,9 +350,9 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
         return std::make_shared<ErrorUnionType>(vt, et);
     }
     if (auto st = std::dynamic_pointer_cast<StructType>(t)) {
-        auto it = m_structs.find(st->name);
-        if (it != m_structs.end()) {
-            return it->second;
+        auto resolved = lookupStructType(st->name);
+        if (resolved) {
+            return resolved;
         }
         // throw TypeCheckError(node, "resolveType: unknown struct type: " + st->name);
         return st; // unknown struct type
@@ -248,23 +387,22 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
     }
     if (auto qt = std::dynamic_pointer_cast<QualifiedType>(t)) {
         if (qt->module_path.empty()) {
-            auto sym = lookupSymbol(qt->type_name);
-            if (sym)
-                return *sym;
+            auto resolved = lookupNamedType(qt->type_name);
+            if (resolved)
+                return resolved;
             return qt; // unknown type
         } else {
             // look in imported modules
             auto mod_name = qt->module_path[0];
-            auto it = imported_module_checkers.find(mod_name);
-            if (it != imported_module_checkers.end()) {
-                auto imported_checker = it->second;
+            auto it = imported_modules.find(mod_name);
+            if (it != imported_modules.end()) {
+                auto imported_checker = it->second->type_checker;
                 // Recursively resolve the rest of the module path
                 return imported_checker->resolveType(node,
                                                      std::make_shared<QualifiedType>(
                                                          std::vector<std::string>(qt->module_path.begin() + 1, qt->module_path.end()),
                                                          qt->type_name));
             }
-
             return qt; // unknown qualified type
         }
     }
@@ -276,17 +414,21 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
             resolved_args.push_back(rat);
         }
 
+        bool has_generic_arg = false;
+        for (const auto &arg : resolved_args) {
+            if (containsGenericType(arg)) {
+                has_generic_arg = true;
+                break;
+            }
+        }
+        if (has_generic_arg) {
+            auto base_type = resolveType(node, tut->base);
+            return std::make_shared<TemplateInstanceType>(base_type, resolved_args);
+        }
+
         // Check if base is a qualified type (module-qualified template)
         if (auto qt = std::dynamic_pointer_cast<QualifiedType>(tut->base)) {
-            // Build the qualified template name
-            std::string qualified_name;
-            for (const auto &part : qt->module_path) {
-                qualified_name += part + "::";
-            }
-            qualified_name += qt->type_name;
-
-            // Create template instantiation with qualified name
-            auto ti = std::make_shared<TemplateInstantiation>(qualified_name, resolved_args);
+            auto ti = std::make_shared<TemplateInstantiation>(qt->module_path, qt->type_name, resolved_args);
             auto pair = inferTemplateInstantiation(ti);
             auto instantiated_type = pair.first;
             if (!instantiated_type) {
@@ -309,11 +451,41 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                     "Failed to resolve template instantiation type for: " + tut->str());
             }
             return instantiated_type;
-        } else {
-            throw TypeCheckError(
-                nullptr,
-                "Template instantiation base type is not a struct: " + base_type->str());
         }
+        if (auto base_template = std::dynamic_pointer_cast<TemplateInstanceType>(base_type)) {
+            bool all_generic_params = base_template->type_args.size() == resolved_args.size();
+            std::unordered_map<std::string, std::shared_ptr<Type>> generic_map;
+            if (all_generic_params) {
+                for (size_t i = 0; i < base_template->type_args.size(); ++i) {
+                    auto gt = std::dynamic_pointer_cast<GenericType>(base_template->type_args[i]);
+                    if (!gt) {
+                        all_generic_params = false;
+                        break;
+                    }
+                    generic_map[gt->name] = resolved_args[i];
+                }
+            }
+            if (all_generic_params) {
+                auto base_copy = base_template->copy();
+                substituteGenericTypes(base_copy, generic_map);
+                auto collapsed = resolveType(node, base_copy);
+                if (auto collapsed_struct = std::dynamic_pointer_cast<StructType>(collapsed)) {
+                    auto ti = std::make_shared<TemplateInstantiation>(collapsed_struct->name, resolved_args);
+                    auto pair = inferTemplateInstantiation(ti);
+                    if (!pair.first) {
+                        throw TypeCheckError(
+                            nullptr,
+                            "Failed to resolve template instantiation type for: " + tut->str());
+                    }
+                    return pair.first;
+                }
+                return collapsed;
+            }
+            return std::make_shared<TemplateInstanceType>(base_template, resolved_args);
+        }
+        throw TypeCheckError(
+            nullptr,
+            "Template instantiation base type is not a struct: " + base_type->str());
     }
     // primitive types are already resolved
     return t;
@@ -321,10 +493,19 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
 
 // Entry point
 void TypeChecker::check(std::shared_ptr<Module> module) {
-
-    current_module = module;
     if (!module || !module->ast)
         return;
+
+    if (module->typechecked) {
+        current_module = module;
+        return;
+    }
+    if (module->typechecking) {
+        return;
+    }
+
+    module->typechecking = true;
+    current_module = module;
 
     std::vector<std::shared_ptr<StructDeclaration>> struct_decls;
     std::vector<std::shared_ptr<UnionDeclaration>> union_decls;
@@ -336,12 +517,12 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
                 // Check if this is a generic struct
                 if (sd->generic_params.size() > 0) {
-                    m_templates[sd->name] = sd;
+                    SymbolId tid = insertTemplateSymbol(sd->name, sd);
+                    m_templates[tid] = sd;
                 } else {
                     // Build a StructType and register
                     auto st = std::make_shared<StructType>(sd->name);
                     st->complete = false;
-                    m_structs[sd->name] = st;
                     insertSymbol(sd->name, st, sd);
                     struct_decls.push_back(sd);
                 }
@@ -349,16 +530,14 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 // Build a UnionType and register
                 auto ut = std::make_shared<UnionType>(ud->name);
                 ut->complete = false;
-                m_unions[ud->name] = ut;
                 insertSymbol(ud->name, ut, ud);
                 union_decls.push_back(ud);
             } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
                 if (fd->generic_params.size() > 0) {
-                    // Function has generic type parameters, don't immediately add to symbol table
-                    m_templates[fd->name] = fd;
+                    SymbolId tid = insertTemplateSymbol(fd->name, fd);
+                    m_templates[tid] = fd;
                 } else {
                     auto ty = std::dynamic_pointer_cast<FunctionType>(resolveType(fd, fd->type));
-                    m_functions[fd->name] = ty;
                     insertSymbol(fd->name, ty, fd);
                 }
             } else if (auto en = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
@@ -381,49 +560,53 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     }
                 }
 
-                m_enums[en->name] = et;
                 en->inferred_type = et;
                 insertSymbol(en->name, et, en);
             } else if (auto im = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
-                auto import_checker = std::make_shared<TypeChecker>();
-                import_checker->check(module->imports[im->alias]);
-                if (!import_checker->ok()) {
-                    for (const auto &e : import_checker->errors()) {
+                auto imported_module = module->imports[im->alias];
+                if (!imported_module->type_checker) {
+                    imported_module->type_checker = std::make_shared<TypeChecker>();
+                }
+                imported_module->type_checker->check(imported_module);
+                if (!imported_module->type_checker->ok()) {
+                    for (const auto &e : imported_module->type_checker->errors()) {
                         throw TypeCheckError(e.first, "In imported module '" + im->alias + "': " + e.second);
                     }
                 }
-                imported_module_checkers[im->alias] = import_checker;
+                imported_modules[im->alias] = std::make_shared<ModuleType>(im->alias, imported_module->type_checker);
             } else if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
-                auto condition = ta->condition;
-                bool do_continue = true;
-                if (condition) {
-                    auto cond_lit_opt = m_const_eval.evaluateExpression(condition);
-                    if (!cond_lit_opt) {
-                        for (const auto &err : m_const_eval.errors()) {
-                            m_errors.emplace_back(err.first, err.second);
-                        }
-                        throw TypeCheckError(ta, "Failed to evaluate condition for type alias: " + ta->name);
-                    }
-                    auto cond_lit = *cond_lit_opt;
-
-                    if (auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit)) {
-                        if (bool_lit->lit_type->kind() != TypeKind::Bool) {
-                            throw TypeCheckError(ta, "Type alias condition is not a boolean");
-                        }
-                        do_continue = std::get<bool>(bool_lit->value);
-                    } else {
-                        throw TypeCheckError(ta, "Type alias condition is not a literal");
-                    }
+                // auto condition = ta->condition;
+                // bool do_continue = true;
+                // if (condition) {
+                //     auto cond_lit_opt = m_const_eval.evaluateExpression(condition);
+                //     if (!cond_lit_opt) {
+                //         for (const auto &err : m_const_eval.errors()) {
+                //             m_errors.emplace_back(err.first, err.second);
+                //         }
+                //         throw TypeCheckError(ta, "Failed to evaluate condition for type alias: " + ta->name);
+                //     }
+                //     auto cond_lit = *cond_lit_opt;
+                //
+                //     if (auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit)) {
+                //         if (bool_lit->lit_type->kind() != TypeKind::Bool) {
+                //             throw TypeCheckError(ta, "Type alias condition is not a boolean");
+                //         }
+                //         do_continue = std::get<bool>(bool_lit->value);
+                //     } else {
+                //         throw TypeCheckError(ta, "Type alias condition is not a literal");
+                //     }
+                // }
+                // if (do_continue) {
+                std::shared_ptr<Type> alias_type = ta->aliased_type;
+                if (ta->generic_params.empty()) {
+                    alias_type = resolveType(ta, ta->aliased_type);
                 }
-                if (do_continue) {
-                    auto alias_type = resolveType(ta, ta->aliased_type);
-                    if (!alias_type) {
-                        throw TypeCheckError(ta, "Type alias " + ta->name + " has unknown aliased type");
-                        return;
-                    }
-                    m_type_aliases[ta->name] = alias_type;
-                    insertSymbol(ta->name, alias_type, ta);
+                if (!alias_type) {
+                    throw TypeCheckError(ta, "Type alias " + ta->name + " has unknown aliased type");
+                    return;
                 }
+                insertSymbol(ta->name, alias_type, ta);
+                // }
             }
         }
 
@@ -459,6 +642,9 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
     } catch (const TypeCheckError &e) {
         m_errors.emplace_back(e.node, e.what());
     }
+
+    module->typechecking = false;
+    module->typechecked = true;
 }
 
 void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
@@ -503,11 +689,11 @@ void TypeChecker::checkStructDeclaration(
         sd->fields[i].second = resolveType(sd, f.second);
         fields.emplace_back(f.first, resolveType(sd, f.second));
     }
-    auto it = m_structs.find(sd->name);
-    if (it != m_structs.end()) {
-        it->second->fields = std::move(fields);
-        it->second->methods = sd->methods;
-        it->second->complete = true;
+    auto st = lookupStructType(sd->name);
+    if (st) {
+        st->fields = std::move(fields);
+        st->methods = sd->methods;
+        st->complete = true;
     } else {
         throw TypeCheckError(sd, "Internal error: struct " + sd->name + " not found in map");
     }
@@ -524,10 +710,10 @@ void TypeChecker::checkUnionDeclaration(
     for (const auto &f : ud->fields) {
         fields.emplace_back(f.first, resolveType(ud, f.second));
     }
-    auto it = m_unions.find(ud->name);
-    if (it != m_unions.end()) {
-        it->second->fields = std::move(fields);
-        it->second->complete = true;
+    auto ut = lookupUnionType(ud->name);
+    if (ut) {
+        ut->fields = std::move(fields);
+        ut->complete = true;
     } else {
         throw TypeCheckError(ud, "Internal error: union " + ud->name + " not found in map");
     }
@@ -782,6 +968,17 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
             }
         } else {
             if (!ret->value) {
+                if (ret->is_error) {
+                    throw TypeCheckError(ret, "Return type mismatch: error return requires a value");
+                }
+                if (auto expected_error = std::dynamic_pointer_cast<ErrorUnionType>(m_expected_return_type)) {
+                    if (!dynamic_cast<Void *>(expected_error->valueType.get())) {
+                        throw TypeCheckError(ret, "Return type mismatch: expected " +
+                                                      typeName(m_expected_return_type) +
+                                                      " but got void return");
+                    }
+                    return;
+                }
                 if (!dynamic_cast<Void *>(m_expected_return_type.get())) {
                     throw TypeCheckError(ret, "Return type mismatch: expected " +
                                                   typeName(m_expected_return_type) +
@@ -958,13 +1155,18 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
             res = enum_type;
         } else {
             enum_name = va->name;
-            res = std::dynamic_pointer_cast<EnumType>(resolveType(ea, m_enums[enum_name]));
+            auto enum_type = lookupEnumType(enum_name);
+            if (!enum_type) {
+                throw TypeCheckError(ea, "Unknown enum: " + enum_name);
+            }
+            res = std::dynamic_pointer_cast<EnumType>(resolveType(ea, enum_type));
         }
         ea->inferred_type = res;
         return res;
     }
     if (auto ta = std::dynamic_pointer_cast<TemplateInstantiation>(expr)) {
         std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> pair = inferTemplateInstantiation(ta);
+        std::cout << "Inferred template instantiation type: " << (pair.first ? pair.first->str() : "null") << std::endl;
         expr = pair.second;
         return pair.first;
     }
@@ -982,18 +1184,18 @@ std::shared_ptr<Type> TypeChecker::inferModuleAccess(const std::shared_ptr<Modul
         if (ma->member_name == "") {
             throw TypeCheckError(ma, "Invalid module access with empty member name");
         }
-        if (lookupSymbol(ma->member_name) == std::nullopt) {
+        if (lookupSymbolInScope(ma->member_name) == std::nullopt) {
             throw TypeCheckError(ma, "Unknown symbol in imported module: " + ma->member_name);
         }
         return inferVarAccess(std::make_shared<VarAccess>(ma->member_name));
     }
     auto next_module_name = ma->module_path[0];
-    auto maybe_mod = imported_module_checkers.find(next_module_name);
-    if (maybe_mod == imported_module_checkers.end()) {
+    auto maybe_mod = imported_modules.find(next_module_name);
+    if (maybe_mod == imported_modules.end()) {
         throw TypeCheckError(ma, "Unknown module: " + next_module_name);
     }
 
-    std::shared_ptr<TypeChecker> mod_checker = maybe_mod->second;
+    std::shared_ptr<TypeChecker> mod_checker = maybe_mod->second->type_checker;
     // Recurse into sub-module access
 
     auto sub_ma = std::make_shared<ModuleAccess>(
@@ -1025,12 +1227,16 @@ TypeChecker::inferTypeCast(const std::shared_ptr<TypeCast> &tc) {
 
 std::shared_ptr<Type>
 TypeChecker::inferVarAccess(const std::shared_ptr<VarAccess> &v) {
-    auto maybe = lookupSymbol(v->name);
+    auto maybe = lookupSymbolInScope(v->name);
     if (!maybe) {
         throw TypeCheckError(v, "Unknown variable: " + v->name);
     }
-    v->inferred_type = resolveType(v, *maybe);
-    return *maybe;
+    auto entry = symbolTable().get(*maybe);
+    if (entry && !entry->type) {
+        throw TypeCheckError(v, "Template symbol used as a value: " + v->name);
+    }
+    v->inferred_type = resolveType(v, entry ? entry->type : nullptr);
+    return v->inferred_type;
 }
 
 std::shared_ptr<Type>
@@ -1287,6 +1493,7 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
         auto pt = std::dynamic_pointer_cast<PointerType>(bt);
         if (pt)
             st = std::dynamic_pointer_cast<StructType>(resolveType(mc, pt->base));
+
         if (!pt) {
             throw TypeCheckError(mc, "Method call on non-struct type: " + typeName(bt));
         }
@@ -1470,6 +1677,18 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
             fa->inferred_type = resolveType(fa, ft);
             return ft;
         }
+        auto mt = std::dynamic_pointer_cast<ModuleType>(bt);
+        if (mt) {
+            auto im_type_checker = mt->type_checker;
+            auto maybe = im_type_checker->lookupSymbolInScope(fa->field);
+            if (!maybe) {
+                throw TypeCheckError(fa, "Unknown symbol in module " + mt->name + ": " + fa->field);
+            }
+            auto entry = im_type_checker->symbolTable().get(*maybe);
+            auto entry_type = entry ? entry->type : nullptr;
+            fa->inferred_type = resolveType(fa, entry_type);
+            return entry_type;
+        }
         throw TypeCheckError(fa, "Field access on disallowed type: " + typeName(bt));
     }
     throw TypeCheckError(fa->base, "FieldAccess base is not an expression: " + fa->base->str());
@@ -1550,22 +1769,23 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
 ASTNodePtr TypeChecker::lookupConstVariableInModulePath(const std::vector<std::string> &module_path, const std::string &var_name) {
     if (module_path.size() == 0) {
         // lookup in current module's global scope
-        auto maybe = lookupSymbol(var_name);
+        auto maybe = lookupSymbolInScope(var_name);
         if (current_module->exports.find(var_name) == current_module->exports.end()) {
             throw TypeCheckError(nullptr, "Variable " + var_name + " is not exported from module " + current_module->path);
         }
         if (!maybe) {
             throw TypeCheckError(nullptr, "Unknown variable in current module: " + var_name);
         }
-        return m_scopes.front().symbol_declarations[var_name];
+        auto entry = symbolTable().get(*maybe);
+        return entry ? entry->decl : nullptr;
     }
     auto next_module_name = module_path[0];
-    auto maybe_mod = imported_module_checkers.find(next_module_name);
-    if (maybe_mod == imported_module_checkers.end()) {
+    auto maybe_mod = imported_modules.find(next_module_name);
+    if (maybe_mod == imported_modules.end()) {
         throw TypeCheckError(nullptr, "Unknown module: " + next_module_name);
     }
 
-    std::shared_ptr<TypeChecker> mod_checker = maybe_mod->second;
+    std::shared_ptr<TypeChecker> mod_checker = maybe_mod->second->type_checker;
     // Recurse into sub-module access
 
     auto sub_module_path = std::vector<std::string>(module_path.begin() + 1, module_path.end());

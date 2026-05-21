@@ -5,6 +5,7 @@
 #include "../ast/ast.h"
 #include "../const_eval.h"
 #include "../module_resolver.h"
+#include "tables.h"
 #include <memory>
 #include <optional>
 #include <string>
@@ -23,29 +24,16 @@
                 std::cerr << "    " << sym.first << ": " << sym.second->str() << "\n";               \
             }                                                                                        \
         }                                                                                            \
-        std::cerr << "Structs:\n";                                                                   \
-        for (const auto &st : m_structs) {                                                           \
-            std::cerr << "  " << st.first << ": " << st.second->str() << "\n";                       \
-        }                                                                                            \
-        std::cerr << "Unions:\n";                                                                    \
-        for (const auto &ud : m_unions) {                                                            \
-            std::cerr << "  " << ud.first << ": " << ud.second->str() << "\n";                       \
-        }                                                                                            \
-        std::cerr << "Enums:\n";                                                                     \
-        for (const auto &en : m_enums) {                                                             \
-            std::cerr << "  " << en.first << ": " << en.second->str() << "\n";                       \
-        }                                                                                            \
-        std::cerr << "Type aliases:\n";                                                              \
-        for (const auto &ta : m_type_aliases) {                                                      \
-            std::cerr << "  " << ta.first << ": " << ta.second->str() << "\n";                       \
+        std::cerr << "Symbols:\n";                                                                   \
+        for (const auto &sym : symbolTable().entries()) {                                            \
+            std::cerr << "  " << sym.name << ": " << (sym.type ? sym.type->str() : "<no_type>") << "\n"; \
         }                                                                                            \
         std::cerr << "Templates:\n";                                                                 \
         for (const auto &t : m_templates) {                                                          \
-            std::cerr << "  " << t.first << ": " << t.second->str() << "\n";                         \
-        }                                                                                            \
-        std::cerr << "Functions:\n";                                                                 \
-        for (const auto &f : m_functions) {                                                          \
-            std::cerr << "  " << f.first << ": " << f.second->str() << "\n";                         \
+            auto entry = symbolTable().get(t.first);                                                  \
+            std::string name = entry ? entry->name : "<unknown>";                                   \
+            std::cerr << "  " << name << " (#" << t.first << "): "                                \
+                      << (t.second ? t.second->str() : "<null>") << "\n";                          \
         }                                                                                            \
     } while (0);
 
@@ -69,15 +57,13 @@ std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
                                   const std::shared_ptr<Type> &to);
 
 typedef struct TypeScope {
-    std::unordered_map<std::string, std::shared_ptr<Type>> symbols;
-    std::unordered_map<std::string, ASTNodePtr> symbol_declarations;
+    std::unordered_map<std::string, SymbolId> symbols;
 
-    std::shared_ptr<Type> find(const std::string &name) const {
+    SymbolId find(const std::string &name) const {
         auto it = symbols.find(name);
-        if (it != symbols.end()) {
-            return it->second;
-        }
-        return nullptr;
+        if (it == symbols.end())
+            return INVALID_SYMBOL_ID;
+        return it->second;
     }
 } TypeScope;
 
@@ -96,9 +82,11 @@ class TypeChecker {
     }
     bool ok() const { return m_errors.empty(); }
 
-    std::unordered_map<std::string, std::shared_ptr<TypeChecker>> imported_module_checkers;
+    std::unordered_map<std::string, std::shared_ptr<ModuleType>> imported_modules;
 
   private:
+    friend class ModuleType; // For module-level type checking and access
+
     std::shared_ptr<Module> current_module;
 
     std::vector<std::pair<ASTNodePtr, std::string>> m_errors; // Collected errors
@@ -108,14 +96,7 @@ class TypeChecker {
     // Scope / symbol table: stack of name -> Type
     std::vector<TypeScope> m_scopes;
 
-    // Struct/type registry for named structs and functions TODO: replace them all with aliases
-    std::unordered_map<std::string, std::shared_ptr<StructType>> m_structs;
-    std::unordered_map<std::string, std::shared_ptr<UnionType>> m_unions;
-    std::unordered_map<std::string, std::shared_ptr<EnumType>> m_enums;
-
-    std::unordered_map<std::string, std::shared_ptr<Type>> m_type_aliases;
-
-    std::unordered_map<std::string, std::shared_ptr<Declaration>> m_templates;
+    std::unordered_map<SymbolId, std::shared_ptr<Declaration>> m_templates;
 
     std::unordered_map<std::string, std::shared_ptr<Type>> m_current_generic_types;
 
@@ -123,18 +104,27 @@ class TypeChecker {
         std::string,
         std::vector<std::pair<std::string, std::shared_ptr<FunctionDeclaration>>>>
         m_struct_methods;
-    std::unordered_map<std::string, std::shared_ptr<FunctionType>> m_functions;
 
     std::shared_ptr<Type> m_expected_return_type; // Current function return type
+
+    SymbolTable &symbolTable();
+    const SymbolTable &symbolTable() const;
+
+    std::shared_ptr<Type> lookupNamedType(const std::string &name) const;
+    std::shared_ptr<StructType> lookupStructType(const std::string &name) const;
+    std::shared_ptr<UnionType> lookupUnionType(const std::string &name) const;
+    std::shared_ptr<EnumType> lookupEnumType(const std::string &name) const;
+    std::shared_ptr<FunctionType> lookupFunctionType(const std::string &name) const;
 
     // Scope helpers
     void pushScope();
     void popScope();
     bool insertSymbol(const std::string &name, std::shared_ptr<Type> t, ASTNodePtr decl);
-    std::optional<std::shared_ptr<Type>> lookupSymbol(const std::string &name) const;
+    bool insertGlobalSymbol(const std::string &name, std::shared_ptr<Type> t, ASTNodePtr decl);
+    SymbolId insertTemplateSymbol(const std::string &name, const std::shared_ptr<Declaration> &decl);
+    std::optional<SymbolId> lookupSymbolInScope(const std::string &name) const;
 
     // Type helpers
-
     std::string typeName(const std::shared_ptr<Type> &t) const;
     std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t);
 

@@ -1,0 +1,25 @@
+//NAME: Aliased Generic Chain
+//DESC: Nested generic aliases and concrete alias resolution
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+struct Pair<T> {
+    a: T,
+    b: T,
+}
+
+using PairAlias<T> = Pair::<T>;
+using PairAlias2<T> = PairAlias::<T>;
+using PairI32 = PairAlias2::<i32>;
+
+fn main() -> i32 {
+    let p = PairI32 {a: 2, b: 5};
+    printf("%d\n", p.a + p.b);
+    return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//7
+//END EXPECT

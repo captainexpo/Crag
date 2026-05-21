@@ -1,5 +1,7 @@
 #pragma once
 
+// #include "src/module_resolver.h"
+// #include "src/typechecking/typecheck.h"
 #ifndef AST_H
 #define AST_H
 
@@ -86,7 +88,6 @@ struct ASTVisitor {
 };
 
 struct Type {
-
     bool nullable = false;
     bool is_const = false;
 
@@ -441,6 +442,34 @@ struct QualifiedType : Type {
     }
     std::shared_ptr<Type> copy() const override {
         return std::make_shared<QualifiedType>(module_path, type_name);
+    }
+};
+
+struct ModuleType : Type {
+    TypeKind kind() const override { return TypeKind::Unknown; }
+    std::string name;
+    std::shared_ptr<struct TypeChecker> type_checker;
+
+    ModuleType(std::string name, std::shared_ptr<struct TypeChecker> tc) : name(std::move(name)), type_checker(tc) {}
+
+    std::string str() const override {
+        return "Module<" + name + ">";
+    }
+
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        auto o = dynamic_cast<ModuleType *>(other.get());
+        if (!o)
+            return false;
+        return name == o->name;
+    }
+
+    std::shared_ptr<Type> lookup(){
+        return nullptr;
+        //return type_checker->lookup(
+    }
+
+    std::shared_ptr<Type> copy() const override {
+        return std::make_shared<ModuleType>(name, type_checker);
     }
 };
 
@@ -833,13 +862,28 @@ struct FieldAccess : public Access {
 };
 
 struct TemplateInstantiation : public Expression {
-    std::string base;
+    std::vector<std::string> module_path;
+    std::string template_name;
+    uint32_t template_id = UINT32_MAX;
     std::vector<std::shared_ptr<Type>> type_args;
-    TemplateInstantiation(std::string b,
+
+    TemplateInstantiation(std::string name,
                           std::vector<std::shared_ptr<Type>> ta)
-        : base(std::move(b)), type_args(std::move(ta)) {}
+        : template_name(std::move(name)), type_args(std::move(ta)) {}
+
+    TemplateInstantiation(std::vector<std::string> mp,
+                          std::string name,
+                          std::vector<std::shared_ptr<Type>> ta)
+        : module_path(std::move(mp)), template_name(std::move(name)), type_args(std::move(ta)) {}
+
     std::string str() const override {
-        std::string result = "TemplateInstantiation(" + base + ", ";
+        std::string qualified;
+        for (const auto &part : module_path) {
+            qualified += part + "::";
+        }
+        qualified += template_name;
+
+        std::string result = "TemplateInstantiation(" + qualified + ", ";
         for (size_t i = 0; i < type_args.size(); ++i) {
             if (i > 0)
                 result += ", ";

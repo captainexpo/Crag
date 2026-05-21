@@ -3,10 +3,8 @@
 #define COMPILER_H
 
 #include "backend.h"
-#include "backends/llvmcodegen.h"
 #include <llvm/IR/Module.h>
 #include <memory>
-#include <unordered_map>
 
 
 void initializeLLVM();

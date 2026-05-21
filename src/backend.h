@@ -35,4 +35,16 @@ class Backend {
                                                bool no_runtime, std::optional<std::vector<std::string>> backend_args = std::nullopt) = 0;
 };
 
+class CodeGenError : public std::exception {
+  public:
+    CodeGenError(ASTNodePtr node, const std::string &msg)
+        : m_node(node), m_msg(msg) {}
+    const char *what() const noexcept override { return m_msg.c_str(); }
+    ASTNodePtr node() const { return m_node; }
+
+  private:
+    ASTNodePtr m_node;
+    std::string m_msg;
+};
+
 #endif
