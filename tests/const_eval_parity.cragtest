@@ -1,0 +1,42 @@
+//NAME: Const Eval Parity
+//DESC: Ensure const-eval matches runtime evaluation for basic ops
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+  const a: i32 = 7;
+  const b: u64 = 2;
+  const c: i32 = a + b;
+  const d: i32 = a - b;
+  const e: i32 = a * b;
+  const f: i32 = a / b;
+  const g: i32 = (12 & 5) | 2;
+  const h: i32 = (1 << 3) ^ 2;
+  const i: bool = (a > b);
+  const j: bool = (a == b);
+
+  let ra: i32 = 7;
+  let rb: u64 = 2;
+  let rc: i32 = ra + rb;
+  let rd: i32 = ra - rb;
+  let r_mul: i32 = ra * rb;
+  let rf: i32 = ra / rb;
+  let rg: i32 = (12 & 5) | 2;
+  let rh: i32 = (1 << 3) ^ 2;
+  let ri: bool = (ra > rb);
+  let rj: bool = (ra == rb);
+
+  printf("%d %d %d %d %d %d %d %d %d %d\n",
+    c, d, e, f, g, h, i as i32, j as i32,
+    rc, rd);
+  printf("%d %d %d %d %d %d %d %d\n",
+    r_mul, rf, rg, rh, ri as i32, rj as i32, a as i32, b as i32);
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//9 5 14 3 6 10 1 0 9 5
+//14 3 6 10 1 0 7 2
+//END EXPECT

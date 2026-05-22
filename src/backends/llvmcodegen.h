@@ -222,7 +222,7 @@ class LLVMCodegen : public Backend {
     llvm::Value *generateLogicalOp(std::shared_ptr<Expression> left, std::shared_ptr<Expression> right, std::string op);
 
     llvm::Value *generateLiteral(const std::shared_ptr<Literal> &lit,
-                                 bool loadValue = true);
+                                 bool loadValue = true); // Can't be llvm::Constant* because of arrays
 
     llvm::Value *generateArrayLiteral(const std::shared_ptr<ArrayLiteral> &arrayLit, bool loadValue);
     llvm::Value *generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
@@ -247,6 +247,7 @@ class LLVMCodegen : public Backend {
     llvm::Value *generateStructInitializer(
         const std::shared_ptr<StructInitializer> &structInit,
         bool loadValue = true);
+    llvm::Value *generateUnionInitializer(std::shared_ptr<StructInitializer> unionInit, bool loadValue);
     llvm::Value *generateBlock(const std::shared_ptr<Block> &blockNode);
     llvm::Value* generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt);
     llvm::Value* generateWhileStatement(const std::shared_ptr<WhileStatement> &whileStmt);
@@ -280,6 +281,8 @@ class LLVMCodegen : public Backend {
                   const std::function<void()> &emitIncrement,
                   bool hasIncrement,
                   const std::string &labelPrefix);
+
+    llvm::Constant *getConstantLiteralValue(const std::shared_ptr<ASTNode> &literal);
 
     bool isLValue(const std::shared_ptr<Expression> &expr);
 

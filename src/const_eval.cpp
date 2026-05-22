@@ -52,6 +52,14 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
     }
 
     if (auto uop = std::dynamic_pointer_cast<UnaryOperation>(expr)) {
+        if (uop->op == "&") {
+            if (std::dynamic_pointer_cast<VarAccess>(uop->operand) ||
+                std::dynamic_pointer_cast<ModuleAccess>(uop->operand)) {
+                return uop;
+            }
+            return std::nullopt;
+        }
+
         auto val = evaluateExpression(uop->operand);
         if (!val)
             return std::nullopt;
@@ -307,19 +315,27 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
     }
 
     if (auto arrayLit = std::dynamic_pointer_cast<ArrayLiteral>(expr)) {
+        std::cout << "Evaluating array literal with " << arrayLit->elements.size() << " elements\n";
         std::vector<ExprPtr> constElements;
         for (const auto &elem : arrayLit->elements) {
             std::optional<ExprPtr> valOpt = evaluateExpression(elem);
-            if (!valOpt)
-                return std::nullopt;
-            auto lit = std::dynamic_pointer_cast<Literal>(*valOpt);
-            if (!lit) {
-                error(elem, "Array element is not a constant literal");
+            if (!valOpt) {
+                std::cout << "Failed to evaluate array element: " << elem->toString() << "\n";
                 return std::nullopt;
             }
-            constElements.push_back(lit);
+            auto constExpr = std::dynamic_pointer_cast<Expression>(*valOpt);
+            if (!constExpr) {
+                std::cout << "Array element is not a constant expression: " << elem->toString() << "\n";
+                error(elem, "Array element is not a constant expression");
+                return std::nullopt;
+            }
+            constExpr->constant_evaluated = true;
+            constElements.push_back(constExpr);
         }
-        return std::make_shared<ArrayLiteral>(constElements);
+        std::cout << "Successfully evaluated array literal with " << constElements.size() << " constant elements\n";
+        auto evaluated = std::make_shared<ArrayLiteral>(constElements);
+        evaluated->constant_evaluated = true;
+        return evaluated;
     }
 
     if (auto moduleAccess = std::dynamic_pointer_cast<ModuleAccess>(expr)) {
@@ -347,6 +363,7 @@ std::optional<std::shared_ptr<VariableDeclaration>> ConstEvaluator::evaluateVari
 
     m_const_vars[var->name] = val.value();
     var->initializer = val.value();
+    var->initializer->inferred_type = var->var_type;
     return var;
 }
 
@@ -379,51 +396,6 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
         throw std::runtime_error("Not an integer value");
     };
 
-    // helper: decide promoted type between two numeric types
-    auto promoteNumericType = [&](const std::shared_ptr<Type> &a,
-                                  const std::shared_ptr<Type> &b)
-        -> std::shared_ptr<Type> {
-        if (!a)
-            return b;
-        if (!b)
-            return a;
-
-        // If either is floating, choose the wider floating
-        if (a->isFloating() || b->isFloating()) {
-            // pick the one with larger numericRank (F64 > F32)
-            auto pick = (a->numericRank() >= b->numericRank()) ? a : b;
-            if (pick->kind() == TypeKind::F64)
-                return std::make_shared<F64>();
-            return std::make_shared<F32>();
-        }
-
-        // Neither is floating -> integer promotion
-        // pick the operand with the larger numericRank
-        auto pick = (a->numericRank() >= b->numericRank()) ? a : b;
-
-        // If picked type is unsigned -> return corresponding unsigned type
-        if (pick->isUnsigned()) {
-            if (pick->kind() == TypeKind::U8)
-                return std::make_shared<U8>();
-            if (pick->kind() == TypeKind::U32)
-                return std::make_shared<U32>();
-            if (pick->kind() == TypeKind::U64)
-                return std::make_shared<U64>();
-            if (pick->kind() == TypeKind::USize)
-                return std::make_shared<USize>();
-            // fallback
-            return std::make_shared<U64>();
-        } else {
-            // signed
-            if (pick->kind() == TypeKind::I32)
-                return std::make_shared<I32>();
-            if (pick->kind() == TypeKind::I64)
-                return std::make_shared<I64>();
-            // fallback
-            return std::make_shared<I64>();
-        }
-    };
-
     // Are both numeric?
     auto isNumericConst = [](const ConstValue &v) {
         return std::holds_alternative<int64_t>(v) ||
@@ -432,16 +404,20 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
     };
 
     if (isNumericConst(lhs->value) && isNumericConst(rhs->value)) {
-        // compute promoted result type based on operand types
-        auto resultType = promoteNumericType(lhs->lit_type, rhs->lit_type);
+        if (!lhs->lit_type || !rhs->lit_type || !lhs->lit_type->equals(rhs->lit_type)) {
+            error(nullptr, "Constant binary operands must have the same type");
+            return std::nullopt;
+        }
+
+        auto resultType = lhs->lit_type;
 
         if (resultType->isFloating()) {
             // float arithmetic: convert both to double, compute, store as double
-            double l;
-            double r;
+            double l = 0.0;
+            double r = 0.0;
             try {
-                double l = toDouble(lhs->value);
-                double r = toDouble(rhs->value);
+                l = toDouble(lhs->value);
+                r = toDouble(rhs->value);
             } catch (const std::runtime_error &e) {
                 error(nullptr, "Floating point operation on non-numeric value");
                 return std::nullopt;
@@ -481,11 +457,11 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
             // integer arithmetic: decide signedness from resultType
             bool resultUnsigned = resultType->isUnsigned();
             if (resultUnsigned) {
-                uint64_t l;
-                uint64_t r;
+                uint64_t l = 0;
+                uint64_t r = 0;
                 try {
-                    uint64_t l = toUInt64(lhs->value);
-                    uint64_t r = toUInt64(rhs->value);
+                    l = toUInt64(lhs->value);
+                    r = toUInt64(rhs->value);
                 } catch (const std::runtime_error &e) {
                     error(nullptr, "Integer operation on non-integer value");
                     return std::nullopt;
@@ -509,7 +485,17 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
                         return std::nullopt;
                     }
                     res_u = l % r;
-                } else if (op == "==")
+                } else if (op == "|")
+                    res_u = l | r;
+                else if (op == "&")
+                    res_u = l & r;
+                else if (op == "^")
+                    res_u = l ^ r;
+                else if (op == "<<")
+                    res_u = l << static_cast<uint64_t>(r);
+                else if (op == ">>")
+                    res_u = l >> static_cast<uint64_t>(r);
+                else if (op == "==")
                     return std::make_shared<Literal>(l == r, std::make_shared<Boolean>());
                 else if (op == "!=")
                     return std::make_shared<Literal>(l != r, std::make_shared<Boolean>());
@@ -526,8 +512,8 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
 
                 return std::make_shared<Literal>(res_u, resultType);
             } else {
-                int64_t l;
-                int64_t r;
+                int64_t l = 0;
+                int64_t r = 0;
                 try {
                     l = toInt64(lhs->value);
                     r = toInt64(rhs->value);
@@ -554,7 +540,17 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
                         return std::nullopt;
                     }
                     res_s = l % r;
-                } else if (op == "==")
+                } else if (op == "|")
+                    res_s = l | r;
+                else if (op == "&")
+                    res_s = l & r;
+                else if (op == "^")
+                    res_s = l ^ r;
+                else if (op == "<<")
+                    res_s = l << static_cast<int64_t>(r);
+                else if (op == ">>")
+                    res_s = l >> static_cast<int64_t>(r);
+                else if (op == "==")
                     return std::make_shared<Literal>(l == r, std::make_shared<Boolean>());
                 else if (op == "!=")
                     return std::make_shared<Literal>(l != r, std::make_shared<Boolean>());

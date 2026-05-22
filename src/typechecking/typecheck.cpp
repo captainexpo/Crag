@@ -9,7 +9,7 @@
 #include <optional>
 
 TypeChecker::TypeChecker() : m_const_eval(*new ConstEvaluator(this)) {
-    m_const_eval.addIntrinsic("@target_ptr_width", std::make_shared<Literal>(static_cast<int64_t>(64), std::make_shared<I64>()));
+    m_const_eval.addIntrinsic("@target_ptr_width", std::make_shared<Literal>(static_cast<int64_t>(sizeof(size_t)*8), std::make_shared<I64>()));
     pushScope();
 
     m_expected_return_type = nullptr;
@@ -179,10 +179,14 @@ bool canExplicitCast(const std::shared_ptr<Type> &from,
     if (from->isNumeric() && to->isNumeric())
         return true;
     TypeKind from_tk = from->kind();
-    TypeKind to_tk = from->kind();
+    TypeKind to_tk = to->kind();
     if (from_tk == to_tk)
         return true; // TODO: Figure out if this is bad
     if (from_tk == TypeKind::Enum && to->isNumeric())
+        return true;
+    if (from_tk == TypeKind::Bool && to->isNumeric())
+        return true;
+    if (from->isNumeric() && to_tk == TypeKind::Bool)
         return true;
     if (from_tk == TypeKind::Null && to_tk == TypeKind::Pointer)
         return true;
@@ -191,9 +195,9 @@ bool canExplicitCast(const std::shared_ptr<Type> &from,
 
     // Numeric -> Ptr, Ptr -> Numeric
 
-    if (from_tk == TypeKind::Pointer && to_tk == TypeKind::USize)
+    if (from_tk == TypeKind::Pointer && to->isInteger())
         return true;
-    if (from_tk == TypeKind::USize && to_tk == TypeKind::Pointer)
+    if (from->isInteger() && to_tk == TypeKind::Pointer)
         return true;
 
     return false;
@@ -814,6 +818,21 @@ void TypeChecker::checkVariableDeclaration(
                             " but got " + typeName(init_type));
                 }
             }
+
+            if (var->is_const) {
+                m_const_eval.clearErrors();
+                auto evaluated = m_const_eval.evaluateVariableDeclaration(var);
+                if (!m_const_eval.ok()) {
+                    warn("Failed to evaluate initializer for const variable " + name +
+                         ": " + m_const_eval.errors().front().second);
+                    // for (const auto &e : m_const_eval.errors()) {
+                    //     throw TypeCheckError(e.first, e.second);
+                    // }
+                }
+                else{
+                   var->initializer->constant_evaluated = true;
+                }
+            }
         } else if (auto si =
                        std::dynamic_pointer_cast<StructInitializer>(init)) {
 
@@ -854,6 +873,7 @@ void TypeChecker::handleArrayLiteralAssignment(
     if (arr_type->unsized) {
         final_len = static_cast<int64_t>(arr_lit->elements.size());
     } else {
+        m_const_eval.clearErrors();
         auto evaluated = m_const_eval.evaluateExpression(arr_type->length_expr);
 
         if (!m_const_eval.ok()) {
@@ -867,6 +887,8 @@ void TypeChecker::handleArrayLiteralAssignment(
                 arr_type->length_expr,
                 "Failed to evaluate array length expression");
         }
+
+        (*evaluated)->constant_evaluated = true;
 
         auto lit =
             std::dynamic_pointer_cast<Literal>(*std::move(evaluated));
@@ -1722,6 +1744,7 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
     }
 }
 
+
 std::shared_ptr<Type>
 TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
                              const std::shared_ptr<Type> &expected) {
@@ -1738,16 +1761,14 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
         throw TypeCheckError(init, "Struct initializer with non-struct type: " + typeName(_st));
     }
 
+    bool all_are_const = true;
     for (auto &p : init->field_values) {
-        auto fieldType = resolveType(p.second, st->getFieldType(p.first));
-        if (fieldType == nullptr) {
-            std::cerr << "DEBUG: struct fields:\n";
-            for (const auto &f : st->fields) {
-                std::cerr << "  " << f.first << ": " << f.second->str() << "\n";
-            }
-            std::cerr << "Struct " + st->name + " has no field " + p.first << "\n";
-            throw TypeCheckError(init, "Struct " + st->name + " has no field " + p.first);
+        auto res = m_const_eval.evaluateExpression(p.second);
+        if (!m_const_eval.ok() || !res) {
+            all_are_const = false;
+            m_const_eval.clearErrors();
         }
+        auto fieldType = resolveType(p.second, st->getFieldType(p.first));
         auto typeActual = inferExpression(p.second);
         if (!typeActual)
             throw TypeCheckError(init, "Failed to infer type of struct " + st->name +
@@ -1761,6 +1782,9 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
                                                typeName(typeActual));
             }
         }
+    }
+    if (all_are_const) {
+        init->constant_evaluated = true;
     }
     init->inferred_type = st; // HACK: Fix error when struct type is module access
     return st;

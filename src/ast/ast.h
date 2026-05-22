@@ -154,6 +154,8 @@ struct ASTNode : std::enable_shared_from_this<ASTNode> {
     int col = 0;
     std::shared_ptr<Type> inferred_type = nullptr;
 
+    bool constant_evaluated = false;
+
     ASTNode() = default;
     ASTNode(int l, int c) : line(l), col(c) {}
 
