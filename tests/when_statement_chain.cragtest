@@ -1,0 +1,27 @@
+//NAME: When Statement Chain
+//DESC: Test several adjacent when statements so removals and insertions do not skip siblings.
+//BEGIN CODE
+
+extern fn printf(_s: *u8, ...) -> i32;
+
+fn main() -> i32 {
+  when true printf("chain-1\n");
+  when false printf("chain-skip-1\n");
+  when true {
+    printf("chain-2a\n");
+  }
+  when false {
+    printf("chain-skip-2\n");
+  }
+  when true printf("chain-3\n");
+  printf("chain-end\n");
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//chain-1
+//chain-2a
+//chain-3
+//chain-end
+//END EXPECT

@@ -1,0 +1,21 @@
+//NAME: Arrays Edge Cases
+//DESC: Test array initialization and indexing
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+  let arr: [3]i32 = {1,2,3};
+  printf("%d%d%d\n", arr[0], arr[1], arr[2]);
+  for (let i: i32 = 0; i < 3; i = i + 1) {
+    arr[i] = arr[i] * 2;
+  }
+  printf("%d%d%d\n", arr[0], arr[1], arr[2]);
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//123
+//246
+//END EXPECT

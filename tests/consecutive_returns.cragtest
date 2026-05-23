@@ -1,0 +1,17 @@
+//NAME: When Return and Loop Control
+//DESC: Tests return inside when and continue/break inside loops with when
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+  printf("1\n");
+  return 0;
+  printf("2\n");
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//1
+//END EXPECT

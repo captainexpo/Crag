@@ -1,0 +1,27 @@
+//NAME: When Statement Braced
+//DESC: Test braced when statements in function bodies, including nested and removed branches.
+//BEGIN CODE
+
+extern fn printf(_s: *u8, ...) -> i32;
+
+fn main() -> i32 {
+  when true {
+    printf("braced-true-a\n");
+    when false {
+      printf("braced-false-skip\n");
+    }
+    when true printf("braced-true-b\n");
+  }
+  when false {
+    printf("braced-false-removed\n");
+  }
+  printf("after-braced\n");
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//braced-true-a
+//braced-true-b
+//after-braced
+//END EXPECT

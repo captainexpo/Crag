@@ -568,7 +568,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
     try {
         for (int i = 0; i < module->ast->declarations.size(); ++i) {
-            std::cout << "Processing declaration " << module->ast->declarations[i]->str() << "\n\n";
+            // std::cout << "Processing declaration " << module->ast->declarations[i]->str() << "\n\n";
             auto decl = module->ast->declarations[i];
             if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
 
@@ -1376,7 +1376,7 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
     }
     if (auto ta = std::dynamic_pointer_cast<TemplateInstantiation>(expr)) {
         std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> pair = inferTemplateInstantiation(ta);
-        std::cout << "Inferred template instantiation type: " << (pair.first ? pair.first->str() : "null") << std::endl;
+        // std::cout << "Inferred template instantiation type: " << (pair.first ? pair.first->str() : "null") << std::endl;
         expr = pair.second;
         return pair.first;
     }

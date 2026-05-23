@@ -1,0 +1,20 @@
+//NAME: When Statement Single
+//DESC: Test single-statement when syntax in function bodies.
+//BEGIN CODE
+
+extern fn printf(_s: *u8, ...) -> i32;
+
+fn main() -> i32 {
+  when false printf("single-false-skip\n");
+  when true printf("single-true-a\n");
+  when true printf("single-true-b\n");
+  printf("after-single\n");
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//single-true-a
+//single-true-b
+//after-single
+//END EXPECT

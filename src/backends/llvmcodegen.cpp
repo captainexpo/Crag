@@ -2585,6 +2585,11 @@ LLVMCodegen::generateBlock(const std::shared_ptr<Block> &blockNode) {
     m_scopeStack.push_back(*parent_scope);
     llvm::Value *lastValue = nullptr;
     for (const auto &stmt : blockNode->statements) {
+        if (std::dynamic_pointer_cast<ReturnStatement>(stmt)) {
+            // If it's a return statement, we generate it and then break out of the block
+            lastValue = generateStatement(stmt);
+            break;
+        }
         lastValue = generateStatement(stmt);
     }
     m_scopeStack.pop_back();

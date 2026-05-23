@@ -1,0 +1,26 @@
+//NAME: When Statement Nested
+//DESC: Test nested when statements and nested block lowering.
+//BEGIN CODE
+
+extern fn printf(_s: *u8, ...) -> i32;
+
+fn main() -> i32 {
+  when true {
+    printf("outer-a\n");
+    when true {
+      printf("inner-a\n");
+      when false printf("inner-skip\n");
+      when true printf("inner-b\n");
+    }
+    printf("outer-b\n");
+  }
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//outer-a
+//inner-a
+//inner-b
+//outer-b
+//END EXPECT

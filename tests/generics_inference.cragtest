@@ -1,0 +1,23 @@
+//NAME: Generics Inference
+//DESC: Test generic function inference and type mixing
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn id<T>(x: T) -> T {
+  return x;
+}
+
+fn main() -> i32 {
+  let a: i32 = id::<i32>(5);
+  let b = id::<f64>(3.5);
+  printf("%d\n", a);
+  printf("%f\n", b);
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//5
+//3.500000
+//END EXPECT
