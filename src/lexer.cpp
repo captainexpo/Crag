@@ -57,6 +57,10 @@ std::string tokenTypeName(TokenType type) {
             return "USING";
         case TokenType::WHEN:
             return "WHEN";
+        case TokenType::ASM:
+            return "ASM";
+        case TokenType::VOLATILE:
+            return "VOLATILE";
         case TokenType::TYPE:
             return "TYPE";
         case TokenType::QUESTION:
@@ -193,6 +197,8 @@ Lexer::Lexer(const std::string &src) : code(src) {
         {"using", TokenType::USING},
         {"when", TokenType::WHEN},
         {"type", TokenType::TYPE},
+        {"asm", TokenType::ASM},
+        {"volatile", TokenType::VOLATILE},
     };
 }
 

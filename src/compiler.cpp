@@ -69,6 +69,11 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     auto typeChecker = mod->type_checker;
     typeChecker->check(mod);
 
+    if (options.dump_ast_bsa) {
+        std::cout << "Dumping AST and exiting as requested by --dump-ast:\n";
+        std::cout << mod->ast->toString();
+        return nullptr;
+    }
     if (!typeChecker->ok()) {
         std::cout << typeChecker->errors().size() << " errors during type checking:\n";
         for (const auto &err : typeChecker->errors()) {
@@ -86,7 +91,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     std::cout << "after type checking:\n";
     std::cout << mod->ast->toString();
 #else
-    if (options.dump_ast) {
+    if (options.dump_ast_asa) {
         std::cout << "Dumping AST and exiting as requested by --dump-ast:\n";
         std::cout << mod->ast->toString();
         return nullptr;

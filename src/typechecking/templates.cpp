@@ -164,8 +164,6 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         ti_copy->template_id = template_id;
 
         auto result = target_checker->inferTemplateInstantiation(ti_copy);
-        std::cout << "Instantiated module-qualified template: " << ti->str()
-                  << " to type " << result.first->str() << "\n";
 
         if (auto fn_type = std::dynamic_pointer_cast<FunctionType>(result.first)) {
             if (auto st = std::dynamic_pointer_cast<StructType>(fn_type->ret)) {
@@ -238,7 +236,6 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         auto existing = lookupStructType(new_name);
         if (existing) {
             ti->inferred_type = existing;
-            std::cout << new_name << " (already instantiated)\n";
             return std::make_pair(
                 ti->inferred_type,
                 std::make_shared<TypeExpression>(ti->inferred_type));
@@ -246,8 +243,6 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
 
         std::shared_ptr<StructDeclaration> declCopy = std::dynamic_pointer_cast<StructDeclaration>(sd->copy());
         if (sd->generic_params.size() != params.size()) {
-            std::cout << "Parameter count mismatch: expected " << sd->generic_params.size()
-                      << ", got " << params.size() << "\n";
             throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + sd->name +
                                          ": expected " + std::to_string(sd->generic_params.size()) +
                                          ", got " + std::to_string(params.size()));

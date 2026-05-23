@@ -46,24 +46,25 @@ struct Arguments {
     bool emit_ir;
     bool unsafe;
     bool no_runtime;
-    bool dump_ast;
+    bool dump_ast_bsa;
+    bool dump_ast_asa;
 };
 
 void printHelp(int argc, char** argv) {
     std::cout << "Usage: " << argv[0] << "[options] <input_file>\n";
     std::cout << "Options:\n";
-    std::cout << "  -o, --output <file>       Specify output filename (default: main)\n";
-    std::cout << "  --emit-ir                 Emit LLVM IR instead of object code\n";
-    std::cout << "  --runtime-path <path>     Path to runtime library (default: relative to executable)\n";
-    std::cout << "  --stdlib-path <path>      Manually specify path to standard library\n";
-    std::cout << "  --backend <backend>       Specify backend (currently only 'llvm' is supported)\n";
-    std::cout << "  -ODebug                   Set optimization level to Debug\n";
-    std::cout << "  -ORelease                 Set optimization level to Release\n";
-    std::cout << "  --unsafe                  Disable safety checks (bounds checking, null pointer checks)\n";
-    std::cout << "  --no-runtime              Do not link against the runtime library\n";
-    std::cout << "  --dump-ast               Dump the AST and exit\n";
-    std::cout << "  -l<arg>, -L<arg>, -W<arg> Pass <arg> to the backend as a linker or compiler flag\n";
-    std::cout << "  --help or -h              Show this help message\n";
+    std::cout << "  -o, --output <file>          Specify output filename (default: main)\n";
+    std::cout << "  --emit-ir                    Emit LLVM IR instead of object code\n";
+    std::cout << "  --runtime-path <path>        Path to runtime library (default: relative to executable)\n";
+    std::cout << "  --stdlib-path <path>         Manually specify path to standard library\n";
+    std::cout << "  --backend <backend>          Specify backend (currently only 'llvm' is supported)\n";
+    std::cout << "  -ODebug                      Set optimization level to Debug\n";
+    std::cout << "  -ORelease                    Set optimization level to Release\n";
+    std::cout << "  --unsafe                     Disable safety checks (bounds checking, null pointer checks)\n";
+    std::cout << "  --no-runtime                 Do not link against the runtime library\n";
+    std::cout << "  --dump-ast [bsa],[asa]       Dump the AST and exit. Provide 'bsa' to dump before semantic analysis and 'asa' to dump after semantic analysis\n";
+    std::cout << "  -l<arg>, -L<arg>, -W<arg>    Pass <arg> to the backend as a linker or compiler flag\n";
+    std::cout << "  --help or -h                 Show this help message\n";
 }
 
 Arguments parseArguments(int argc, char** argv) {
@@ -76,7 +77,8 @@ Arguments parseArguments(int argc, char** argv) {
     args.opt = Debug;
     args.unsafe = false;
     args.no_runtime = false;
-    args.dump_ast = false;
+    args.dump_ast_asa = false;
+    args.dump_ast_bsa = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -128,7 +130,22 @@ Arguments parseArguments(int argc, char** argv) {
         } else if (arg == "--no-runtime") {
             args.no_runtime = true;
         } else if (arg == "--dump-ast") {
-            args.dump_ast = true;
+            if (i + 1 < argc) {
+                std::string dump_arg = argv[++i];
+                if (dump_arg == "bsa") {
+                    args.dump_ast_bsa = true;
+                } else if (dump_arg == "asa") {
+                    args.dump_ast_asa = true;
+                } else {
+                    std::cerr << "Error: Invalid value for --dump-ast. Expected 'bsa' or 'asa'.\n";
+                    printHelp(argc, argv);
+                    exit(1);
+                }
+            } else {
+                std::cerr << "Error: Missing value for " << arg << "\n";
+                printHelp(argc, argv);
+                exit(1);
+            }
         } else if (arg[0] == '-') {
             if (arg[1] == 'l' || arg[1] == 'L' || arg[1] == 'W') {
                 args.backend_args.push_back(arg);
@@ -160,7 +177,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    options.dump_ast = args.dump_ast;
+    options.dump_ast_bsa = args.dump_ast_bsa;
+    options.dump_ast_asa = args.dump_ast_asa;
     options.opt_level = args.opt;
     options.do_runtime_safety = !args.unsafe;
 

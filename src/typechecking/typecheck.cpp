@@ -9,7 +9,7 @@
 #include <optional>
 
 TypeChecker::TypeChecker() : m_const_eval(*new ConstEvaluator(this)) {
-    m_const_eval.addIntrinsic("@target_ptr_width", std::make_shared<Literal>(static_cast<int64_t>(sizeof(size_t)*8), std::make_shared<I64>()));
+    m_const_eval.addIntrinsic("@target_ptr_width", std::make_shared<Literal>(static_cast<int64_t>(sizeof(size_t) * 8), std::make_shared<I64>()));
     pushScope();
 
     m_expected_return_type = nullptr;
@@ -828,9 +828,8 @@ void TypeChecker::checkVariableDeclaration(
                     // for (const auto &e : m_const_eval.errors()) {
                     //     throw TypeCheckError(e.first, e.second);
                     // }
-                }
-                else{
-                   var->initializer->constant_evaluated = true;
+                } else {
+                    var->initializer->constant_evaluated = true;
                 }
             }
         } else if (auto si =
@@ -1105,6 +1104,13 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
     if (stmt->kind() == NodeKind::BreakStatement ||
         stmt->kind() == NodeKind::ContinueStatement) {
         return; // nothing to check
+    }
+    if (stmt->kind() == NodeKind::AsmStmt) {
+        auto asm_stmt = std::dynamic_pointer_cast<AsmStmt>(stmt);
+        for (auto &op : asm_stmt->operands) {
+            inferExpression(op.expr);
+        }
+        return;
     }
 
     throw TypeCheckError(stmt, "Unsupported statement type");
@@ -1743,7 +1749,6 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
         throw TypeCheckError(oa->base, "OffsetAccess base is not an expression: " + oa->base->str());
     }
 }
-
 
 std::shared_ptr<Type>
 TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,

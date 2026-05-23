@@ -374,3 +374,12 @@ std::shared_ptr<ASTNode> UnionDeclaration::copy() const {
     c->is_extern = is_extern;
     return c;
 }
+
+std::shared_ptr<ASTNode> AsmStmt::copy() const {
+    auto c = std::make_shared<AsmStmt>(is_volatile, template_str, operands, options);
+    c->line = line;
+    c->col = col;
+    c->inferred_type = inferred_type;
+    return c;
+}
+

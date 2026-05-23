@@ -20,7 +20,8 @@ typedef struct {
     BackendType backend;
     OptLevel opt_level;
     bool do_runtime_safety;
-    bool dump_ast;
+    bool dump_ast_bsa;
+    bool dump_ast_asa;
 } CompilerOptions;
 
 class Backend {

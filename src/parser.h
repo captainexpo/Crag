@@ -86,6 +86,7 @@ class Parser {
     std::shared_ptr<ForStatement> parse_for_statement();
     std::shared_ptr<ReturnStatement> parse_return_statement();
     std::shared_ptr<ExpressionStatement> parse_expression_statement();
+    std::shared_ptr<AsmStmt> parse_asm_statement();
 
     std::shared_ptr<Expression> parse_expression(int min_prec = 0);
     std::shared_ptr<Expression> parse_nud();

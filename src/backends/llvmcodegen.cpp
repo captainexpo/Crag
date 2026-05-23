@@ -13,6 +13,7 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/InlineAsm.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -765,6 +766,8 @@ LLVMCodegen::generateStatement(const std::shared_ptr<Statement> &stmt) {
         llvm::Value *val = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
         m_builder.CreateBr(m_loop_stack.back().continueBB);
         return val;
+    } else if (IS_INSTANCE(stmt, AsmStmt)) {
+        return generateAsmStatement(std::dynamic_pointer_cast<AsmStmt>(stmt));
     }
 
     throw CodeGenError(stmt, "Unknown statement type: " + stmt->str());
@@ -1157,7 +1160,6 @@ llvm::Constant *LLVMCodegen::getConstantLiteralValue(const std::shared_ptr<ASTNo
         }
     }
     if (IS_INSTANCE(literal, ArrayLiteral)) {
-        std::cout << "Evaluating array literal constant initializer: " << literal->str() << std::endl;
         auto arrayLit = std::dynamic_pointer_cast<ArrayLiteral>(literal);
         std::vector<llvm::Constant *> elementValues;
         for (const auto &elem : arrayLit->elements) {
@@ -1225,7 +1227,6 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
             gVar->addDebugInfo(expr);
         }
         if (varDecl->initializer && !has_const_init) {
-            std::cout << "Adding global variable initializer for: " << varDecl->name << std::endl;
             if (auto expr = std::dynamic_pointer_cast<Expression>(varDecl->initializer)) {
                 addGlobalVarInitializer(gVar, expr);
             } else {
@@ -2037,7 +2038,6 @@ llvm::Value *LLVMCodegen::generateArrayAccess(
         throw CodeGenError(nullptr, "Invalid array access: missing base or index expression");
     }
     llvm::Value *basePtr = generateAddress(std::static_pointer_cast<Expression>(arrayAccess->base));
-    // std::cout << "Base ptr for array access: " << basePtr << "\n";
     if (!basePtr) {
         throw CodeGenError(arrayAccess, "Failed to generate base address for array access");
     }
@@ -2953,4 +2953,184 @@ llvm::Value *LLVMCodegen::coerceFromABI(llvm::Value *abiValue, llvm::Type *struc
     llvm::Value *structValue = m_builder.CreateLoad(structType, structPtr, "struct.val");
 
     return structValue;
+}
+static std::shared_ptr<AsmStmt> lowerTemplateString(std::shared_ptr<AsmStmt> stmt) {
+    // Replace template string placeholders like {0}, {1} with $0, $1
+    std::string output;
+    for (size_t i = 0; i < stmt->template_str.size(); ++i) {
+        if (stmt->template_str[i] == '{' && i + 1 < stmt->template_str.size()) {
+            size_t end = stmt->template_str.find('}', i);
+            if (end != std::string::npos) {
+                output += "$" + stmt->template_str.substr(i + 1, end - i - 1);
+                i = end;
+            } else {
+                output += stmt->template_str[i];
+            }
+        } else {
+            output += stmt->template_str[i];
+        }
+    }
+    stmt->template_str = output;
+    return stmt;
+}
+
+static bool isConcreteRegisterConstraint(const std::string &constraint) {
+    static const std::vector<std::string> exact_registers = {
+        "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
+        "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp",
+        "ax", "bx", "cx", "dx", "si", "di", "bp", "sp",
+        "al", "bl", "cl", "dl", "ah", "bh", "ch", "dh",
+        "rip", "eip"
+    };
+
+    for (const auto &name : exact_registers) {
+        if (constraint == name) {
+            return true;
+        }
+    }
+
+    if (constraint.size() >= 2 && constraint[0] == 'r') {
+        size_t index = 1;
+        while (index < constraint.size() && constraint[index] >= '0' && constraint[index] <= '9') {
+            ++index;
+        }
+        if (index > 1 && index == constraint.size()) {
+            int register_number = std::stoi(constraint.substr(1));
+            return register_number >= 8 && register_number <= 15;
+        }
+    }
+
+    auto isDigitSuffix = [](const std::string &name, const std::string &prefix) {
+        if (name.rfind(prefix, 0) != 0 || name.size() <= prefix.size())
+            return false;
+        for (size_t i = prefix.size(); i < name.size(); ++i) {
+            if (name[i] < '0' || name[i] > '9')
+                return false;
+        }
+        return true;
+    };
+
+    if (isDigitSuffix(constraint, "xmm") || isDigitSuffix(constraint, "ymm") ||
+        isDigitSuffix(constraint, "zmm")) {
+        return true;
+    }
+
+    return false;
+}
+
+
+
+llvm::Value *LLVMCodegen::generateAsmStatement(
+    const std::shared_ptr<AsmStmt> &_stmt) {
+
+    auto stmt = lowerTemplateString(_stmt);
+
+    std::vector<llvm::Type *> outputTypes;
+    std::vector<llvm::Value *> args;
+    std::vector<llvm::Type *> argTypes;
+
+    // First pass: collect outputs and their types
+    for (auto &op : stmt->operands) {
+        if (op.type == AsmOperandType::Out || op.type == AsmOperandType::InOut ||
+            op.type == AsmOperandType::LateOut || op.type == AsmOperandType::InLateOut) {
+            outputTypes.push_back(getLLVMType(op.expr->inferred_type, op.expr));
+        }
+    }
+
+    // Second pass: generate input values and collect args
+    for (auto &op : stmt->operands) {
+        llvm::Value *v = generateExpression(op.expr);
+        if (op.type == AsmOperandType::In || op.type == AsmOperandType::InLateOut ||
+            op.type == AsmOperandType::Const || op.type == AsmOperandType::Sym) {
+            args.push_back(v);
+            argTypes.push_back(v->getType());
+        }
+    }
+
+    llvm::Type *retTy;
+    if (outputTypes.empty())
+        retTy = llvm::Type::getVoidTy(context);
+    else if (outputTypes.size() == 1)
+        retTy = outputTypes[0];
+    else
+        retTy = llvm::StructType::get(context, outputTypes);
+
+    auto *fnTy = llvm::FunctionType::get(retTy, argTypes, false);
+
+    auto formatRegisterConstraint = [](const std::optional<std::string> &constraint) {
+        if (!constraint)
+            return std::string("r");
+        if (isConcreteRegisterConstraint(*constraint))
+            return std::string("{") + *constraint + "}";
+        return *constraint;
+    };
+
+    std::vector<std::string> parts;
+    for (auto &op : stmt->operands) {
+        std::string constraint;
+        switch (op.type) {
+            case AsmOperandType::In:
+                constraint = formatRegisterConstraint(op.constraint);
+                break;
+            case AsmOperandType::Out:
+                constraint = "=" + formatRegisterConstraint(op.constraint);
+                break;
+            case AsmOperandType::InOut:
+                constraint = "+";
+                constraint += formatRegisterConstraint(op.constraint);
+                break;
+            case AsmOperandType::LateOut:
+                constraint = "=&" + formatRegisterConstraint(op.constraint);
+                break;
+            case AsmOperandType::InLateOut:
+                constraint = "+&";
+                constraint += formatRegisterConstraint(op.constraint);
+                break;
+            case AsmOperandType::Const:
+                constraint = "i";
+                break;
+            case AsmOperandType::Sym:
+                constraint = "s";
+                break;
+            case AsmOperandType::Clobber:
+                constraint = "~{" + op.constraint.value_or("") + "}";
+                break;
+            case AsmOperandType::ClobberAbi:
+                constraint = "~{abi-" + op.constraint.value_or("") + "}";
+                break;
+        }
+        parts.push_back(constraint);
+    }
+
+    std::string constraints = "";
+    for (size_t i = 0; i < parts.size(); ++i) {
+        constraints += parts[i];
+        if (i != parts.size() - 1) {
+            constraints += ",";
+        }
+    }
+
+    auto *ia = llvm::InlineAsm::get(fnTy, stmt->template_str, constraints, stmt->is_volatile);
+
+    llvm::Value *result = m_builder.CreateCall(ia, args);
+
+    // Store outputs back to memory
+    size_t outputIndex = 0;
+    for (auto &op : stmt->operands) {
+        if (op.type == AsmOperandType::Out || op.type == AsmOperandType::LateOut) {
+            llvm::Value *v = (outputTypes.size() == 1) ? result :
+                m_builder.CreateExtractValue(result, outputIndex);
+            llvm::Value *outputPtr = generateAddress(op.expr);
+            m_builder.CreateStore(v, outputPtr);
+            outputIndex++;
+        } else if (op.type == AsmOperandType::InOut || op.type == AsmOperandType::InLateOut) {
+            llvm::Value *v = (outputTypes.size() == 1) ? result :
+                m_builder.CreateExtractValue(result, outputIndex);
+            llvm::Value *outputPtr = generateAddress(op.expr);
+            m_builder.CreateStore(v, outputPtr);
+            outputIndex++;
+        }
+    }
+
+    return outputTypes.empty() ? nullptr : result;
 }

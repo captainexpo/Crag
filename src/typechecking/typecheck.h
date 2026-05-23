@@ -132,6 +132,7 @@ class TypeChecker {
 
     void checkNode(const std::shared_ptr<ASTNode> &node);
     void checkStatement(const std::shared_ptr<Statement> &stmt);
+    void checkAsmStatement(const std::shared_ptr<AsmStmt> &asm_stmt);
     std::shared_ptr<Type> inferExpression(std::shared_ptr<Expression> &expr,
                                           const std::shared_ptr<Type> &expected = nullptr);
 

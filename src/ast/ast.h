@@ -2,6 +2,7 @@
 
 // #include "src/module_resolver.h"
 // #include "src/typechecking/typecheck.h"
+#include <optional>
 #ifndef AST_H
 #define AST_H
 
@@ -85,6 +86,7 @@ struct ASTVisitor {
     virtual void visit(struct ContinueStatement &) {}
     virtual void visit(struct UnknownNode &) {}
     virtual void visit(struct TypeExpression &) {}
+    virtual void visit(struct AsmStmt &) {}
 };
 
 struct Type {
@@ -128,6 +130,7 @@ enum class NodeKind {
     ReturnStmt,
     Block,
     TypeCast,
+    AsmStmt,
 
     FieldAccess,
     ModuleAccess,
@@ -465,9 +468,9 @@ struct ModuleType : Type {
         return name == o->name;
     }
 
-    std::shared_ptr<Type> lookup(){
+    std::shared_ptr<Type> lookup() {
         return nullptr;
-        //return type_checker->lookup(
+        // return type_checker->lookup(
     }
 
     std::shared_ptr<Type> copy() const override {
@@ -1381,6 +1384,53 @@ struct TypeAliasDeclaration : public TypeDecl {
     std::shared_ptr<ASTNode> copy() const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
+};
+enum class AsmOperandType {
+    In,
+    Out,
+    InOut,
+    LateOut,
+    InLateOut,
+    Const,
+    Sym,
+    Clobber,
+    ClobberAbi
+};
+
+struct AsmOperand {
+    AsmOperandType type;
+    std::optional<std::string> constraint; // e.g. "reg", "rax", or empty for clobber
+    std::shared_ptr<Expression> expr;
+    std::optional<std::string> symbolic_name; // For named template placeholders
+
+    AsmOperand(AsmOperandType t, std::shared_ptr<Expression> e, std::optional<std::string> c = std::nullopt, std::optional<std::string> n = std::nullopt)
+        : type(t), expr(std::move(e)), constraint(std::move(c)), symbolic_name(std::move(n)) {}
+};
+
+struct AsmStmt : public Statement {
+    bool is_volatile;
+    std::string template_str;
+    std::vector<AsmOperand> operands;
+    std::vector<std::string> options; // e.g. "pure", "nomem", "att_syntax"
+
+    AsmStmt(bool vol, std::string tmpl, std::vector<AsmOperand> ops, std::vector<std::string> opts)
+        : is_volatile(vol), template_str(std::move(tmpl)), operands(std::move(ops)), options(std::move(opts)) {}
+
+    NodeKind kind() const override { return NodeKind::AsmStmt; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::string str() const override {
+        std::string result = "AsmStmt(volatile: " + std::string(is_volatile ? "true" : "false") + ", template: \"" + template_str + "\", operands: [";
+        for (const auto &op : operands) {
+            result += "{type: " + std::to_string(static_cast<int>(op.type)) + ", constraint: " + (op.constraint ? *op.constraint : "none") + ", expr: " + op.expr->toString() + "}, ";
+        }
+        result += "], options: [";
+        for (const auto &opt : options) {
+            result += opt + ", ";
+        }
+        result += "])";
+        return result;
+    }
+    std::shared_ptr<ASTNode> copy() const override;
 };
 
 uint64_t getLitValue(const std::shared_ptr<Literal> &lit);

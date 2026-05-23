@@ -93,6 +93,8 @@ void Parser::synchronize() {
             // case TokenType::CONTINUE:
             case TokenType::PUB:
                 return;
+            default:
+                break;
         }
         advance();
     }
@@ -604,6 +606,9 @@ std::shared_ptr<Statement> Parser::parse_statement(bool req_semi) {
         case TokenType::CONTINUE:
             node = std::make_shared<ContinueStatement>();
             consume(TokenType::CONTINUE);
+            break;
+        case TokenType::ASM:
+            node = parse_asm_statement();
             break;
         default:
             node = parse_expression_statement();
@@ -1252,7 +1257,74 @@ Parser::parse_parameter_def() {
     }
     return params;
 }
+std::shared_ptr<AsmStmt> Parser::parse_asm_statement() {
+    consume(TokenType::ASM);
+    bool is_volatile = match({TokenType::VOLATILE});
 
+    std::vector<AsmOperand> operands;
+    std::vector<std::string> options;
+    std::string template_str = "";
+
+    consume(TokenType::LPAREN);
+    template_str = consume(TokenType::STRING).value;
+
+    while (match({TokenType::COMMA})) {
+        if (peek().type == TokenType::ID) {
+            std::string keyword = consume(TokenType::ID).value;
+            consume(TokenType::LPAREN);
+
+            std::optional<std::string> constraint;
+            if (peek().type == TokenType::STRING) {
+                constraint = consume(TokenType::STRING).value;
+            }
+
+            consume(TokenType::RPAREN);
+
+            std::shared_ptr<Expression> expr = nullptr;
+            bool needs_expression = keyword != "clobber" && keyword != "clobber_abi";
+            if (needs_expression) {
+                expr = parse_expression();
+            } else {
+                if (!constraint) {
+                    throw ParseError("Expected string constraint for asm clobber operand", peek().line,
+                                     peek().column);
+                }
+                expr = std::make_shared<Literal>(
+                    *constraint, std::make_shared<PointerType>(std::make_shared<U8>(), false));
+            }
+
+            AsmOperandType type;
+            if (keyword == "in") {
+                type = AsmOperandType::In;
+            } else if (keyword == "out") {
+                type = AsmOperandType::Out;
+            } else if (keyword == "inout") {
+                type = AsmOperandType::InOut;
+            } else if (keyword == "lateout") {
+                type = AsmOperandType::LateOut;
+            } else if (keyword == "const") {
+                type = AsmOperandType::Const;
+            } else if (keyword == "sym") {
+                type = AsmOperandType::Sym;
+            } else if (keyword == "clobber") {
+                type = AsmOperandType::Clobber;
+            } else if (keyword == "clobber_abi") {
+                type = AsmOperandType::ClobberAbi;
+            } else {
+                throw std::runtime_error("Unknown asm keyword: " + keyword);
+            }
+
+            operands.push_back(AsmOperand(type, expr, constraint));
+        }
+        // TODO: Implement options to allow things like "pure", "nomem", etc.
+        else {
+            break;
+        }
+    }
+
+    consume(TokenType::RPAREN);
+    return std::make_shared<AsmStmt>(is_volatile, template_str, operands, options);
+}
 std::shared_ptr<Program> Parser::parse() {
     auto program = std::make_shared<Program>();
     // Set line and col to 1,1 as it's the root of the AST

@@ -34,6 +34,8 @@ enum class TokenType {
     USING,
     WHEN,
     TYPE,
+    ASM, // (Inline assembly)
+    VOLATILE,
 
     // Operators
     EQ,
