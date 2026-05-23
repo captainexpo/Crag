@@ -6,7 +6,6 @@
 #include <llvm/IR/Module.h>
 #include <memory>
 
-
 void initializeLLVM();
 std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LLVMContext &context, CompilerOptions options);
 

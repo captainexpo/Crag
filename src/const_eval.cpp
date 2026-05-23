@@ -20,7 +20,7 @@ static unsigned getIntegerBitWidth(const std::shared_ptr<Type> &t) {
         case TypeKind::U64:
             return 64;
         case TypeKind::USize:
-            return 64; // or target pointer size
+            return sizeof(size_t) * 8;
         case TypeKind::I32:
             return 32;
         case TypeKind::I64:
@@ -42,6 +42,7 @@ static unsigned getFloatBitWidth(const std::shared_ptr<Type> &t) {
             return 0;
     }
 }
+
 
 std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
     if (!expr)
@@ -304,6 +305,9 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
         if (it != m_const_vars.end()) {
             return it->second;
         } else {
+            if (m_intrinsics.find(va->name) != m_intrinsics.end()) {
+                return m_intrinsics[va->name];
+            }
             error(va, "Variable is not compile-time known: " + va->name);
             return std::nullopt;
         }
@@ -368,8 +372,8 @@ std::optional<std::shared_ptr<VariableDeclaration>> ConstEvaluator::evaluateVari
 }
 
 std::optional<LiteralPtr>
-ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
-                                       const LiteralPtr &rhs,
+ConstEvaluator::evaluateBinaryLiterals(LiteralPtr lhs,
+                                       LiteralPtr rhs,
                                        const std::string &op) {
     // Helpers to map ConstValue -> numeric primitives
     auto toDouble = [](const ConstValue &v) -> double {
@@ -405,8 +409,28 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
 
     if (isNumericConst(lhs->value) && isNumericConst(rhs->value)) {
         if (!lhs->lit_type || !rhs->lit_type || !lhs->lit_type->equals(rhs->lit_type)) {
-            error(nullptr, "Constant binary operands must have the same type");
-            return std::nullopt;
+            // Try to cast to a common type for mixed-type operations (e.g. int + float)
+            if (m_type_checker->canImplicitCast(lhs->lit_type, rhs->lit_type)){
+                auto casted = castLiteral(lhs, rhs->lit_type);
+                if (casted) {
+                    lhs = casted;
+                } else {
+                    error(nullptr, "Failed to cast left operand to common type for binary operation");
+                    return std::nullopt;
+                }
+            } else if (m_type_checker->canImplicitCast(rhs->lit_type, lhs->lit_type)) {
+                auto casted = castLiteral(rhs, lhs->lit_type);
+                if (casted) {
+                    rhs = casted;
+                } else {
+                    error(nullptr, "Failed to cast right operand to common type for binary operation");
+                    return std::nullopt;
+                }
+            } else {
+                error(nullptr, "Type mismatch between operands in binary operation and no implicit cast available");
+                return std::nullopt;
+            }
+
         }
 
         auto resultType = lhs->lit_type;
@@ -588,6 +612,16 @@ ConstEvaluator::evaluateBinaryLiterals(const LiteralPtr &lhs,
         }
     }
 
+    if (auto l = std::get_if<std::string>(&lhs->value)) {
+        if (auto r = std::get_if<std::string>(&rhs->value)) {
+            if (op == "==")
+                return std::make_shared<Literal>(*l == *r, std::make_shared<Boolean>());
+            if (op == "!=")
+                return std::make_shared<Literal>(*l != *r, std::make_shared<Boolean>());
+            return std::nullopt;
+        }
+    }
+
     // TODO: string concatenation, pointer arithmetic, etc.
 
     return std::nullopt;
@@ -615,3 +649,5 @@ std::shared_ptr<Literal> ConstEvaluator::castLiteral(const LiteralPtr &lit, cons
     }
     return castedLiteral;
 }
+
+

@@ -7,7 +7,7 @@
 #include <memory>
 
 #ifdef __APPLE__
-    #include <mach-o/dyld.h>
+#include <mach-o/dyld.h>
 #endif
 
 #define PRGM_NAME "Crag Compiler"
@@ -48,9 +48,11 @@ struct Arguments {
     bool no_runtime;
     bool dump_ast_bsa;
     bool dump_ast_asa;
+    OSTarget os;
+    ArchTarget arch;
 };
 
-void printHelp(int argc, char** argv) {
+void printHelp(int argc, char **argv) {
     std::cout << "Usage: " << argv[0] << "[options] <input_file>\n";
     std::cout << "Options:\n";
     std::cout << "  -o, --output <file>          Specify output filename (default: main)\n";
@@ -63,11 +65,13 @@ void printHelp(int argc, char** argv) {
     std::cout << "  --unsafe                     Disable safety checks (bounds checking, null pointer checks)\n";
     std::cout << "  --no-runtime                 Do not link against the runtime library\n";
     std::cout << "  --dump-ast [bsa],[asa]       Dump the AST and exit. Provide 'bsa' to dump before semantic analysis and 'asa' to dump after semantic analysis\n";
+    std::cout << "  --target-os <os>              Target operating system (linux, macos, windows)\n";
+    std::cout << "  --target-arch <arch>          Target architecture (x86_64, x86, arm64)\n";
     std::cout << "  -l<arg>, -L<arg>, -W<arg>    Pass <arg> to the backend as a linker or compiler flag\n";
     std::cout << "  --help or -h                 Show this help message\n";
 }
 
-Arguments parseArguments(int argc, char** argv) {
+Arguments parseArguments(int argc, char **argv) {
     Arguments args;
     args.output = "main";
     args.emit_ir = false;
@@ -79,14 +83,15 @@ Arguments parseArguments(int argc, char** argv) {
     args.no_runtime = false;
     args.dump_ast_asa = false;
     args.dump_ast_bsa = false;
+    args.os = defaultOS();
+    args.arch = defaultArch();
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
             printHelp(argc, argv);
             exit(0);
-        }
-        else if (arg == "-o" || arg == "--output") {
+        } else if (arg == "-o" || arg == "--output") {
             if (i + 1 < argc) {
                 args.output = argv[++i];
             } else {
@@ -96,8 +101,7 @@ Arguments parseArguments(int argc, char** argv) {
             }
         } else if (arg == "--emit-ir") {
             args.emit_ir = true;
-        }
-        else if (arg == "--runtime-path") {
+        } else if (arg == "--runtime-path") {
             if (i + 1 < argc) {
                 args.runtime_path = argv[++i];
             } else {
@@ -146,6 +150,44 @@ Arguments parseArguments(int argc, char** argv) {
                 printHelp(argc, argv);
                 exit(1);
             }
+        } else if (arg == "--target-os") {
+            if (i + 1 < argc) {
+                std::string os_arg = argv[++i];
+                if (os_arg == "linux") {
+                    args.os = Linux;
+                } else if (os_arg == "macos") {
+                    args.os = MacOS;
+                } else if (os_arg == "windows") {
+                    args.os = Windows;
+                } else {
+                    std::cerr << "Error: Invalid value for --target-os. Expected 'linux', 'macos', or 'windows'.\n";
+                    printHelp(argc, argv);
+                    exit(1);
+                }
+            } else {
+                std::cerr << "Error: Missing value for " << arg << "\n";
+                printHelp(argc, argv);
+                exit(1);
+            }
+        } else if (arg == "--target-arch") {
+            if (i + 1 < argc) {
+                std::string arch_arg = argv[++i];
+                if (arch_arg == "x86_64") {
+                    args.arch = X86_64;
+                } else if (arch_arg == "x86") {
+                    args.arch = X86;
+                } else if (arch_arg == "arm64") {
+                    args.arch = ARM64;
+                } else {
+                    std::cerr << "Error: Invalid value for --target-arch. Expected 'x86_64', 'x86', or 'arm64'.\n";
+                    printHelp(argc, argv);
+                    exit(1);
+                }
+            } else {
+                std::cerr << "Error: Missing value for " << arg << "\n";
+                printHelp(argc, argv);
+                exit(1);
+            }
         } else if (arg[0] == '-') {
             if (arg[1] == 'l' || arg[1] == 'L' || arg[1] == 'W') {
                 args.backend_args.push_back(arg);
@@ -181,6 +223,7 @@ int main(int argc, char **argv) {
     options.dump_ast_asa = args.dump_ast_asa;
     options.opt_level = args.opt;
     options.do_runtime_safety = !args.unsafe;
+    options.target = Target(args.os, args.arch);
 
     auto inputFilepath = args.input;
     auto outputFilepath = args.output;

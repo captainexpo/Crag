@@ -1,4 +1,5 @@
 #pragma once
+#include "src/backend.h"
 #ifndef TYPECHECK_H
 #define TYPECHECK_H
 
@@ -69,7 +70,7 @@ typedef struct TypeScope {
 
 class TypeChecker {
   public:
-    TypeChecker();
+    TypeChecker(CompilerOptions options);
 
     // Entry point
     void check(std::shared_ptr<Module> module);
@@ -84,8 +85,12 @@ class TypeChecker {
 
     std::unordered_map<std::string, std::shared_ptr<ModuleType>> imported_modules;
 
+    CompilerOptions compilerOptions;
+
   private:
     friend class ModuleType; // For module-level type checking and access
+    friend class ConstEvaluator; // For constant evaluation
+
 
     std::shared_ptr<Module> current_module;
 
@@ -131,7 +136,7 @@ class TypeChecker {
     bool canImplicitCast(const std::shared_ptr<Type> &from, const std::shared_ptr<Type> &to);
 
     void checkNode(const std::shared_ptr<ASTNode> &node);
-    void checkStatement(const std::shared_ptr<Statement> &stmt);
+    void checkStatement(std::shared_ptr<Statement> &stmt);
     void checkAsmStatement(const std::shared_ptr<AsmStmt> &asm_stmt);
     std::shared_ptr<Type> inferExpression(std::shared_ptr<Expression> &expr,
                                           const std::shared_ptr<Type> &expected = nullptr);

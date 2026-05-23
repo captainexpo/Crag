@@ -63,7 +63,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
 #endif
 
     if (!mod->type_checker) {
-        mod->type_checker = std::make_shared<TypeChecker>();
+        mod->type_checker = std::make_shared<TypeChecker>(options);
     }
 
     auto typeChecker = mod->type_checker;

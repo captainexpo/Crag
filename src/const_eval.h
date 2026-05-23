@@ -18,8 +18,8 @@ class ConstEvaluator {
 
 
 
-    void addIntrinsic(const std::string &name, const ExprPtr &expr) {
-        m_const_vars[name] = expr;
+    void addIntrinsic(const std::string &name, const std::shared_ptr<Literal> &lit) {
+        m_intrinsics[name] = lit;
     }
     void addGlobalVariable(const std::string &name, const ExprPtr &expr) {
         m_const_vars[name] = expr;
@@ -34,10 +34,11 @@ class ConstEvaluator {
   private:
     TypeChecker *m_type_checker;
     std::map<std::string, ExprPtr> m_const_vars;
+    std::map<std::string, LiteralPtr> m_intrinsics;
     std::vector<std::pair<ASTNodePtr, std::string>> m_errors;
     std::optional<LiteralPtr>
-    evaluateBinaryLiterals(const LiteralPtr &lhs,
-                           const LiteralPtr &rhs,
+    evaluateBinaryLiterals(LiteralPtr lhs,
+                           LiteralPtr rhs,
                            const std::string &op);
     void error(const ASTNodePtr &node, const std::string &msg);
 };

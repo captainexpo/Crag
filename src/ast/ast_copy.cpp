@@ -1,4 +1,5 @@
 #include "ast.h"
+#include <memory>
 
 void ASTNode::accept(ASTVisitor &v) {}
 
@@ -300,7 +301,7 @@ std::shared_ptr<ASTNode> VariableDeclaration::copy() const {
 }
 
 std::shared_ptr<ASTNode> TypeAliasDeclaration::copy() const {
-    auto c = std::make_shared<TypeAliasDeclaration>(name, aliased_type, condition);
+    auto c = std::make_shared<TypeAliasDeclaration>(name, aliased_type);
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type;
@@ -381,5 +382,14 @@ std::shared_ptr<ASTNode> AsmStmt::copy() const {
     c->col = col;
     c->inferred_type = inferred_type;
     return c;
+}
+
+
+std::shared_ptr<ASTNode> WhenBlock::copy() const {
+    std::vector<ASTNodePtr> containees;
+    for (const auto &containee : containees) {
+        containees.push_back(containee->copy());
+    }
+    return std::make_shared<WhenBlock>(std::dynamic_pointer_cast<Expression>(condition->copy()), std::move(containees));
 }
 

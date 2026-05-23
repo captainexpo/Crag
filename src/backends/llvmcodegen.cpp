@@ -39,6 +39,28 @@ int globalVals = 0;
 #define IS_INSTANCE(obj, type) (std::dynamic_pointer_cast<type>(obj) != nullptr)
 #define CUR_SCOPE m_scopeStack.back()
 
+static Scope::Symbol *lookupSymbolInScopes(std::vector<Scope> &scopes, const std::string &name) {
+    for (auto scopeIt = scopes.rbegin(); scopeIt != scopes.rend(); ++scopeIt) {
+        auto entryIt = scopeIt->table.find(name);
+        if (entryIt != scopeIt->table.end()) {
+            return &entryIt->second;
+        }
+    }
+    return nullptr;
+}
+
+static Scope::Symbol *lookupSymbolInScopes(std::vector<Scope> &scopes,
+                                           const std::string &canonicalName,
+                                           const std::string &rawName) {
+    if (auto *sym = lookupSymbolInScopes(scopes, canonicalName)) {
+        return sym;
+    }
+    if (rawName != canonicalName) {
+        return lookupSymbolInScopes(scopes, rawName);
+    }
+    return nullptr;
+}
+
 std::string runtimePanicTypeToString(RuntimePanicType type) {
     switch (type) {
         case OutOfBounds:
@@ -561,7 +583,8 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const AS
 llvm::Value *LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &expr) {
     if (IS_INSTANCE(expr, VarAccess)) {
         auto var = std::dynamic_pointer_cast<VarAccess>(expr);
-        return CUR_SCOPE.get(canonicalizeNonexternName(var->name))->value;
+        auto *sym = lookupSymbolInScopes(m_scopeStack, canonicalizeNonexternName(var->name), var->name);
+        return sym ? sym->value : nullptr;
     } else if (IS_INSTANCE(expr, OffsetAccess)) {
         return generateOffsetAccess(std::dynamic_pointer_cast<OffsetAccess>(expr),
                                     false);
@@ -824,6 +847,14 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
     }
 
     m_scopeStack.push_back(Scope(CUR_SCOPE));
+    struct ScopePopper {
+        std::vector<Scope> &stack;
+        ~ScopePopper() {
+            if (stack.size() > 1) {
+                stack.pop_back();
+            }
+        }
+    } scopePopper{m_scopeStack};
 
     llvm::BasicBlock *entry =
         llvm::BasicBlock::Create(context, "entry", function);
@@ -1037,7 +1068,7 @@ llvm::Constant *LLVMCodegen::getConstantLiteralValue(const std::shared_ptr<ASTNo
             full_name = m_current_module->canonicalizeName(name);
         }
 
-        auto *sym = CUR_SCOPE.get(full_name);
+        auto *sym = lookupSymbolInScopes(m_scopeStack, full_name, name);
         if (!sym || !sym->value) {
             return nullptr;
         }
@@ -1813,7 +1844,8 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
 llvm::Value *
 LLVMCodegen::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
                                bool loadValue) {
-    auto *sym = CUR_SCOPE.get(canonicalizeNonexternName(varAccess->name));
+    auto lookupName = canonicalizeNonexternName(varAccess->name);
+    auto *sym = lookupSymbolInScopes(m_scopeStack, lookupName, varAccess->name);
     if (!sym) {
         throw CodeGenError(varAccess, "Unknown variable name: " + varAccess->name);
     }
@@ -2417,7 +2449,7 @@ llvm::Value *LLVMCodegen::generateModuleAccess(const std::shared_ptr<ModuleAcces
         full_name = mod->canonicalizeName(var_name);
     }
 
-    auto *sym = CUR_SCOPE.get(full_name);
+    auto *sym = lookupSymbolInScopes(m_scopeStack, full_name, var_name);
     if (!sym) {
         throw CodeGenError(moduleAccess, "Unknown variable name: " + full_name);
     }

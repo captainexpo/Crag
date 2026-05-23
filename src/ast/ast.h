@@ -87,6 +87,7 @@ struct ASTVisitor {
     virtual void visit(struct UnknownNode &) {}
     virtual void visit(struct TypeExpression &) {}
     virtual void visit(struct AsmStmt &) {}
+    virtual void visit(struct WhenBlock &) {}
 };
 
 struct Type {
@@ -131,6 +132,8 @@ enum class NodeKind {
     Block,
     TypeCast,
     AsmStmt,
+
+    WhenBlock,
 
     FieldAccess,
     ModuleAccess,
@@ -1369,16 +1372,15 @@ struct UnionDeclaration : public TypeDecl {
 
 struct TypeAliasDeclaration : public TypeDecl {
     std::shared_ptr<Type> aliased_type;
-    ExprPtr condition; // Optional condition for conditional type aliases
 
-    TypeAliasDeclaration(std::string n, std::shared_ptr<Type> t, ExprPtr c = nullptr)
-        : aliased_type(std::move(t)), condition(std::move(c)) {
+    TypeAliasDeclaration(std::string n, std::shared_ptr<Type> t)
+        : aliased_type(std::move(t)){
         name = std::move(n);
     }
     std::string str() const override {
-        return "TypeAliasDeclaration(" + name + " = " + aliased_type->str() +
-               (condition ? " if " + condition->toString() : "") + ")";
+        return "TypeAliasDeclaration(" + name + " = " + aliased_type->str();
     }
+
     NodeKind kind() const override { return NodeKind::TypeAliasDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
     std::shared_ptr<ASTNode> copy() const override;
@@ -1431,6 +1433,29 @@ struct AsmStmt : public Statement {
         return result;
     }
     std::shared_ptr<ASTNode> copy() const override;
+};
+
+
+struct WhenBlock: public Declaration, public Statement { // Conditional compilation
+
+    ExprPtr condition; // e.g. "windows", "debug", "feature=\"foo\""
+    std::vector<ASTNodePtr> body;
+
+    WhenBlock(ExprPtr cond, std::vector<ASTNodePtr> b) : condition(std::move(cond)), body(std::move(b)) {}
+
+    NodeKind kind() const override { return NodeKind::WhenBlock; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::string str() const override {
+        std::string result = "WhenBlock(condition: \"" + condition->str() + "\") {\n";
+        for (const auto &node : body) {
+            result += "  " + node->toString() + "\n";
+        }
+        result += "}";
+        return result;
+    }
+    std::shared_ptr<ASTNode> copy() const override;
+
+
 };
 
 uint64_t getLitValue(const std::shared_ptr<Literal> &lit);

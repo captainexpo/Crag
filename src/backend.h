@@ -16,13 +16,86 @@ enum OptLevel {
     Release,
 };
 
+enum OSTarget {
+    Linux,
+    MacOS,
+    Windows,
+    UnknownOS
+};
+
+enum ArchTarget {
+    X86_64,
+    X86,
+    ARM64,
+    UnknownArch
+};
+
+inline ArchTarget defaultArch() {
+    // Current arch detection
+#if defined(__x86_64__) || defined(_M_X64)
+    return X86_64;
+#elif defined(__i386__) || defined(_M_IX86)
+    return X86;
+#elif defined(__aarch64__)
+    return ARM64;
+#else
+    return UnknownArch;
+#endif
+}
+
+inline OSTarget defaultOS() {
+    // Current OS detection
+#if defined(_WIN32) || defined(_WIN64)
+    return Windows;
+#elif defined(__APPLE__) || defined(__MACH__)
+    return MacOS;
+#elif defined(__linux__)
+    return Linux;
+#else
+    return UnknownOS;
+#endif
+}
+
+struct Target {
+    OSTarget os;
+    ArchTarget arch;
+
+    Target() : os(UnknownOS), arch(UnknownArch) {}
+    Target(OSTarget os, ArchTarget arch) : os(os), arch(arch) {}
+
+    static Target defaultTarget() {
+        return Target(defaultOS(), defaultArch());
+    }
+
+    std::string osToString() {
+        switch (os) {
+            case Linux: return "linux";
+            case MacOS: return "macos";
+            case Windows: return "windows";
+            default: return "unknown";
+        }
+    }
+
+    std::string archToString() {
+        switch (arch) {
+            case X86_64: return "x86_64";
+            case X86: return "x86";
+            case ARM64: return "arm64";
+            default: return "unknown";
+        }
+    }
+};
+
 typedef struct {
     BackendType backend;
     OptLevel opt_level;
     bool do_runtime_safety;
     bool dump_ast_bsa;
     bool dump_ast_asa;
+    Target target;
 } CompilerOptions;
+
+
 
 class Backend {
   public:

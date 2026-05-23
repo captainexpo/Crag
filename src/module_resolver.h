@@ -141,6 +141,9 @@ class ModuleResolver {
         if (!parser.ok()) {
             for (const auto &err : parser.errors()) {
                 prettyError(err.line, err.col, err.message, source);
+                // cout source file
+                std::cerr << "Error parsing module " << abs_path << ": "
+                          << err.message << "\n";
             }
             exit(1);
         }
@@ -157,15 +160,12 @@ class ModuleResolver {
         auto module_dir = abs_path.parent_path();
 
         for (const auto &decl : ast->declarations) {
-            if (auto importDecl =
-                    std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
+            if (auto importDecl = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
 
-                auto imported =
-                    loadModule(importDecl->path, module_dir);
+                auto imported = loadModule(importDecl->path, module_dir);
 
                 module->imports[importDecl->alias] = imported;
-                dependencyGraph[module->canon_name]
-                    .push_back(imported->canon_name);
+                dependencyGraph[module->canon_name] .push_back(imported->canon_name);
                 continue;
             }
 

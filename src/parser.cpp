@@ -328,11 +328,8 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
             auto alias_type = parse_type();
 
             std::shared_ptr<Expression> condition = nullptr;
-            if (match({TokenType::WHEN})) {
-                condition = parse_expression();
-            }
             consume(TokenType::SEMICOLON);
-            auto type_alias = std::make_shared<TypeAliasDeclaration>(alias_name, alias_type, condition);
+            auto type_alias = std::make_shared<TypeAliasDeclaration>(alias_name, alias_type);
             type_alias->is_pub = is_pub;
             type_alias->generic_params = generic_params;
             declared_type_aliases[alias_name] = alias_type;
@@ -363,10 +360,39 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
             ed->is_pub = is_pub;
             return ed;
         }
+        case TokenType::WHEN: {
+            return parse_when_statement(true);
+        }
         default:
             throw ParseError("Unexpected token in declaration: " + describeToken(t), t.line,
                              t.column);
     }
+}
+
+std::shared_ptr<ASTNode> Parser::parse_when_statement(bool is_decl) {
+    auto w = consume(TokenType::WHEN);
+    auto condition = parse_expression();
+    std::shared_ptr<WhenBlock> when_decl;
+    if (match({TokenType::LBRACE})) {
+        std::vector<std::shared_ptr<ASTNode>> containees;
+        while (peek().type != TokenType::RBRACE) {
+            if (peek().type == TokenType::EOF_T) {
+                throw ParseError("Unterminated when block, expected '}'", peek().line, peek().column);
+                break;
+            }
+            containees.push_back(is_decl ? parse_declaration() : parse_statement());
+        }
+        consume(TokenType::RBRACE);
+        when_decl = std::make_shared<WhenBlock>(condition, containees);
+    } else {
+        auto decl = is_decl ? parse_declaration() : parse_statement();
+        std::vector<std::shared_ptr<ASTNode>> containees;
+        containees.push_back(decl);
+        when_decl = std::make_shared<WhenBlock>(condition, containees);
+    }
+    when_decl->line = w.line;
+    when_decl->col = w.column;
+    return when_decl;
 }
 
 std::shared_ptr<Declaration> Parser::parse_extern_declaration() {
@@ -609,6 +635,10 @@ std::shared_ptr<Statement> Parser::parse_statement(bool req_semi) {
             break;
         case TokenType::ASM:
             node = parse_asm_statement();
+            break;
+        case TokenType::WHEN:
+            node = std::dynamic_pointer_cast<Statement>(parse_when_statement(false));
+            req_semi = false;
             break;
         default:
             node = parse_expression_statement();

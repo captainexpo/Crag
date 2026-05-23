@@ -1,6 +1,7 @@
 #include "typecheck.h"
 #include "../ast/ast.h"
 #include "../const_eval.h"
+#include "src/backend.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -8,8 +9,58 @@
 #include <memory>
 #include <optional>
 
-TypeChecker::TypeChecker() : m_const_eval(*new ConstEvaluator(this)) {
-    m_const_eval.addIntrinsic("@target_ptr_width", std::make_shared<Literal>(static_cast<int64_t>(sizeof(size_t) * 8), std::make_shared<I64>()));
+namespace {
+// TODO: FFS don't do this, but it's the easiest way to solve the conflict between the when blocks and the module resolver.
+void rebuildModuleMetadata(const std::shared_ptr<Module> &module) {
+    if (!module || !module->ast) {
+        return;
+    }
+
+    module->exports.clear();
+    module->externLinkage.clear();
+
+    for (const auto &decl : module->ast->declarations) {
+        if (auto f = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
+            if (f->is_pub) {
+                module->exports[f->name] = f;
+            }
+            if (f->is_extern || f->attributes.count("noprefix")) {
+                module->externLinkage.insert(f->name);
+            }
+        } else if (auto s = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
+            if (s->is_pub) {
+                module->exports[s->name] = s;
+            }
+        } else if (auto e = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
+            if (e->is_pub) {
+                module->exports[e->name] = e;
+            }
+        } else if (auto v = std::dynamic_pointer_cast<VariableDeclaration>(decl)) {
+            if (v->is_pub) {
+                module->exports[v->name] = v;
+            }
+            if (v->is_extern) {
+                module->externLinkage.insert(v->name);
+            }
+        }
+    }
+}
+} // namespace
+
+TypeChecker::TypeChecker(CompilerOptions options) : m_const_eval(*new ConstEvaluator(this)) {
+    m_const_eval.addIntrinsic(
+        "@target_ptr_width",
+        std::make_shared<Literal>(options.target.arch == X86 ? 32 : 64,
+                                  std::make_shared<USize>()));
+    m_const_eval.addIntrinsic(
+        "@target_arch",
+        std::make_shared<Literal>(std::string(options.target.archToString()),
+                                  std::make_shared<PointerType>(std::make_shared<U8>(), true)));
+    m_const_eval.addIntrinsic(
+        "@target_os",
+        std::make_shared<Literal>(std::string(options.target.osToString()),
+                                  std::make_shared<PointerType>(std::make_shared<U8>(), true)));
+
     pushScope();
 
     m_expected_return_type = nullptr;
@@ -19,6 +70,7 @@ TypeChecker::TypeChecker() : m_const_eval(*new ConstEvaluator(this)) {
     m_current_generic_types.clear();
     m_struct_methods.clear();
     imported_modules.clear();
+    compilerOptions = options;
 }
 
 SymbolTable &TypeChecker::symbolTable() {
@@ -516,6 +568,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
     try {
         for (int i = 0; i < module->ast->declarations.size(); ++i) {
+            std::cout << "Processing declaration " << module->ast->declarations[i]->str() << "\n\n";
             auto decl = module->ast->declarations[i];
             if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
 
@@ -569,7 +622,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
             } else if (auto im = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
                 auto imported_module = module->imports[im->alias];
                 if (!imported_module->type_checker) {
-                    imported_module->type_checker = std::make_shared<TypeChecker>();
+                    imported_module->type_checker = std::make_shared<TypeChecker>(compilerOptions);
                 }
                 imported_module->type_checker->check(imported_module);
                 if (!imported_module->type_checker->ok()) {
@@ -611,9 +664,41 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 }
                 insertSymbol(ta->name, alias_type, ta);
                 // }
+            } else if (auto wb = std::dynamic_pointer_cast<WhenBlock>(decl)) {
+                auto cond_lit_opt = m_const_eval.evaluateExpression(wb->condition);
+                if (!m_const_eval.ok()) {
+                    for (const auto &err : m_const_eval.errors()) {
+                        m_errors.emplace_back(err.first, err.second);
+                    }
+                    throw TypeCheckError(wb, "Failed to evaluate condition for when block");
+                }
+                if (!cond_lit_opt) {
+                    for (const auto &err : m_const_eval.errors()) {
+                        m_errors.emplace_back(err.first, err.second);
+                    }
+                    throw TypeCheckError(wb, "Failed to evaluate condition for when block");
+                }
+                auto cond_lit = *cond_lit_opt;
+
+                if (auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit)) {
+                    if (bool_lit->lit_type->kind() != TypeKind::Bool) {
+                        throw TypeCheckError(wb, "When block condition is not a boolean");
+                    }
+                    bool condition_true = std::get<bool>(bool_lit->value);
+                    if (condition_true) {
+                        module->ast->declarations.insert(
+                            module->ast->declarations.begin() + i + 1, wb->body.begin(), wb->body.end());
+                        module->ast->declarations.erase(module->ast->declarations.begin() + i);
+                        i -= 1;
+                    } else {
+                        module->ast->declarations.erase(module->ast->declarations.begin() + i);
+                        i -= 1;
+                    }
+                } else {
+                    throw TypeCheckError(wb, "When block condition is not a literal");
+                }
             }
         }
-
         // Remove templates from AST
         module->ast->declarations.erase(
             std::remove_if(
@@ -643,6 +728,8 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 m_errors.emplace_back(e.node, e.what());
             }
         }
+
+        rebuildModuleMetadata(module);
     } catch (const TypeCheckError &e) {
         m_errors.emplace_back(e.node, e.what());
     }
@@ -679,6 +766,10 @@ void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
         return;
     }
     if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(node)) {
+        // Already handled in check()
+        return;
+    }
+    if (auto wb = std::dynamic_pointer_cast<WhenBlock>(node)) {
         // Already handled in check()
         return;
     }
@@ -951,17 +1042,64 @@ void TypeChecker::handleArrayLiteralAssignment(
     arr_lit->len = final_len;
 }
 
-void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
+void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
     if (!stmt)
         return;
     if (auto block = std::dynamic_pointer_cast<Block>(stmt)) {
         pushScope();
-        for (auto &s : block->statements) {
+        for (size_t i = 0; i < block->statements.size();) {
             try {
+                auto &s = block->statements[i];
+                if (auto when_block = std::dynamic_pointer_cast<WhenBlock>(s)) {
+                    auto cond_lit_opt = m_const_eval.evaluateExpression(when_block->condition);
+                    if (!m_const_eval.ok()) {
+                        for (const auto &e : m_const_eval.errors()) {
+                            throw TypeCheckError(e.first, e.second);
+                        }
+                    }
+                    if (!cond_lit_opt) {
+                        throw TypeCheckError(when_block->condition,
+                                             "Failed to evaluate condition for when block");
+                    }
+
+                    auto cond_lit = *cond_lit_opt;
+                    auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit);
+                    if (!bool_lit || bool_lit->lit_type->kind() != TypeKind::Bool) {
+                        throw TypeCheckError(when_block->condition,
+                                             "When block condition is not a boolean");
+                    }
+
+                    if (std::get<bool>(bool_lit->value)) {
+                        std::vector<std::shared_ptr<Statement>> replacement;
+                        replacement.reserve(when_block->body.size());
+                        for (auto &node : when_block->body) {
+                            auto body_stmt = std::dynamic_pointer_cast<Statement>(node);
+                            if (!body_stmt) {
+                                throw TypeCheckError(
+                                    node,
+                                    "When block body contains non-statement node: " + node->str());
+                            }
+                            replacement.push_back(body_stmt);
+                        }
+
+                        block->statements.erase(block->statements.begin() + i);
+                        block->statements.insert(
+                            block->statements.begin() + i,
+                            replacement.begin(),
+                            replacement.end());
+                    } else {
+                        block->statements.erase(block->statements.begin() + i);
+                    }
+
+                    continue;
+                }
+
                 checkStatement(s);
             } catch (const TypeCheckError &e) {
                 m_errors.emplace_back(e.node, e.what());
             }
+
+            ++i;
         }
         popScope();
         return;
@@ -1112,8 +1250,52 @@ void TypeChecker::checkStatement(const std::shared_ptr<Statement> &stmt) {
         }
         return;
     }
+    if (auto when_block = std::dynamic_pointer_cast<WhenBlock>(stmt)) {
+        auto cond_lit_opt = m_const_eval.evaluateExpression(when_block->condition);
+        if (!m_const_eval.ok()) {
+            for (const auto &e : m_const_eval.errors()) {
+                throw TypeCheckError(e.first, e.second);
+            }
+        }
+        if (!cond_lit_opt) {
+            throw TypeCheckError(when_block->condition, "Failed to evaluate condition for when block");
+        }
+        auto cond_lit = *cond_lit_opt;
 
-    throw TypeCheckError(stmt, "Unsupported statement type");
+        if (auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit)) {
+            if (bool_lit->lit_type->kind() != TypeKind::Bool) {
+                throw TypeCheckError(when_block->condition, "When block condition is not a boolean");
+            }
+            bool condition_true = std::get<bool>(bool_lit->value);
+            if (condition_true) {
+                auto replacement_block = std::make_shared<Block>();
+                replacement_block->line = when_block->line;
+                replacement_block->col = when_block->col;
+
+                for (auto &node : when_block->body) {
+                    auto body_stmt = std::dynamic_pointer_cast<Statement>(node);
+                    if (!body_stmt) {
+                        throw TypeCheckError(
+                            node,
+                            "When block body contains non-statement node: " + node->str());
+                    }
+                    replacement_block->statements.push_back(body_stmt);
+                }
+
+                stmt = replacement_block;
+                checkStatement(stmt);
+            } else {
+                auto empty_block = std::make_shared<Block>();
+                empty_block->line = when_block->line;
+                empty_block->col = when_block->col;
+                stmt = empty_block;
+            }
+        } else {
+            throw TypeCheckError(when_block->condition, "When block condition is not a literal");
+        }
+
+        return;
+    }
 }
 
 std::shared_ptr<Type>
