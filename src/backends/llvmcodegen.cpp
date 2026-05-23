@@ -2958,12 +2958,32 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
     }
 
     llvm::Type *abiType = getABICoercionType(structType);
+    // If the structValue originates from a load of a global variable,
+    // avoid materializing a temporary and instead load the ABI-shaped
+    // value directly from the global by bitcasting the global pointer.
+    if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(structValue)) {
+        llvm::Value *ptrOp = LI->getPointerOperand();
+        if (ptrOp) {
+            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(ptrOp->stripPointerCasts())) {
+                llvm::PointerType *abiPtrTy = llvm::PointerType::getUnqual(abiType);
+                llvm::Value *abiPtr = m_builder.CreateBitCast(ptrOp, abiPtrTy, "abi.ptr");
+                return m_builder.CreateLoad(abiType, abiPtr, "abi.val");
+            }
+        }
+    }
 
-    // Allocate temporary for struct
+    // If it's a constant aggregate (e.g., global constant initializer),
+    // try to produce a constant ABI value via bitcast of the constant.
+    if (auto *C = llvm::dyn_cast<llvm::Constant>(structValue)) {
+        if (auto *CE = llvm::ConstantExpr::getBitCast(C, abiType)) {
+            return CE;
+        }
+    }
+
+    // Fallback: allocate temporary for struct and perform the usual ABI coercion.
     llvm::AllocaInst *structAlloca = m_builder.CreateAlloca(structType, nullptr, "struct.tmp");
     m_builder.CreateStore(structValue, structAlloca);
 
-    // Bitcast to ABI type pointer and load
     llvm::Value *abiPtr = m_builder.CreateBitCast(structAlloca,
                                                   llvm::PointerType::getUnqual(context),
                                                   "abi.ptr");
