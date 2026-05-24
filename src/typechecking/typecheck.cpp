@@ -1190,6 +1190,52 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
         }
         return;
     }
+    if (auto switch_stmt = std::dynamic_pointer_cast<SwitchStmt>(stmt)) {
+        auto cond_type = inferExpression(switch_stmt->condition);
+        if (!cond_type) {
+            throw TypeCheckError(switch_stmt->condition, "Failed to infer type of switch condition");
+        }
+        size_t idx = 0;
+        for (auto &case_block : switch_stmt->cases) {
+            size_t jdx = 0;
+            for (auto &case_expr : case_block.first) {
+                auto case_type = inferExpression(case_expr);
+                if (!case_type) {
+                    throw TypeCheckError(case_expr, "Failed to infer type of switch case expression");
+                }
+                if (!case_type->equals(cond_type)) {
+                    if (canImplicitCast(case_type, cond_type)) {
+                        case_expr = std::make_shared<TypeCast>(case_expr, cond_type, CastType::Normal);
+                    } else {
+                        throw TypeCheckError(case_expr,
+                                             "Switch case type mismatch: expected " + typeName(cond_type) +
+                                                 " but got " + typeName(case_type));
+                    }
+                }
+                // Const eval
+                m_const_eval.clearErrors();
+                auto case_lit_opt = m_const_eval.evaluateExpression(case_expr);
+                if (!m_const_eval.ok()) {
+                    for (const auto &e : m_const_eval.errors()) {
+                        throw TypeCheckError(e.first, e.second);
+                    }
+                }
+                if (!case_lit_opt) {
+                    throw TypeCheckError(case_expr, "Failed to evaluate switch case expression");
+                }
+                (*case_lit_opt)->constant_evaluated = true;
+                case_block.first[jdx] = *case_lit_opt;
+                case_block.first[jdx]->inferred_type = std::dynamic_pointer_cast<Literal>(*case_lit_opt)->lit_type;
+                jdx++;
+            }
+            checkStatement(case_block.second);
+            idx++;
+        }
+        if (switch_stmt->default_case) {
+            checkStatement(switch_stmt->default_case);
+        }
+        return;
+    }
     if (auto exprs = std::dynamic_pointer_cast<ExpressionStatement>(stmt)) {
         inferExpression(exprs->expression);
         return;

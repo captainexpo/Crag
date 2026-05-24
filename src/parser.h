@@ -77,6 +77,7 @@ class Parser {
     std::shared_ptr<VariableDeclaration> parse_variable_declaration();
     std::shared_ptr<ImportDeclaration> parse_import_declaration();
     std::shared_ptr<ASTNode> parse_when_statement(bool is_decl);
+    std::shared_ptr<SwitchStmt> parse_switch_statement();
 
     std::shared_ptr<Declaration> parse_extern_declaration();
 

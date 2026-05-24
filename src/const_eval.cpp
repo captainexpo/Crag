@@ -15,12 +15,20 @@ static unsigned getIntegerBitWidth(const std::shared_ptr<Type> &t) {
     switch (t->kind()) {
         case TypeKind::U8:
             return 8;
+        case TypeKind::U16:
+            return 16;
         case TypeKind::U32:
             return 32;
         case TypeKind::U64:
             return 64;
         case TypeKind::USize:
             return sizeof(size_t) * 8;
+        case TypeKind::ISize:
+            return sizeof(size_t) * 8;
+        case TypeKind::I8:
+            return 8;
+        case TypeKind::I16:
+            return 16;
         case TypeKind::I32:
             return 32;
         case TypeKind::I64:

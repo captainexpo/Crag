@@ -1,0 +1,39 @@
+//NAME: Switch Statement Coverage
+//DESC: Tests grouped cases and default handling in switch statements
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn dispatch(x: i32) -> i32 {
+  switch (x) {
+    0 => {
+      printf("zero\n");
+      return 10;
+    },
+    1, 2 => {
+      printf("one-two\n");
+      return 20;
+    },
+    _ => {
+      printf("default\n");
+      return 30;
+    },
+  }
+  return 0;
+}
+
+fn main() -> i32 {
+  let a = dispatch(0);
+  let b = dispatch(2);
+  let c = dispatch(7);
+  printf("sum=%d\n", a + b + c);
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//zero
+//one-two
+//default
+//sum=60
+//END EXPECT

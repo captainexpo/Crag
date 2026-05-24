@@ -24,11 +24,15 @@
 enum class TypeKind {
     Bool,
     I32,
+    I16,
+    I8,
     I64,
     U8,
+    U16,
     U32,
     U64,
     USize,
+    ISize,
     F32,
     F64,
     Pointer,
@@ -88,6 +92,7 @@ struct ASTVisitor {
     virtual void visit(struct TypeExpression &) {}
     virtual void visit(struct AsmStmt &) {}
     virtual void visit(struct WhenBlock &) {}
+    virtual void visit(struct SwitchStmt&) {}
 };
 
 struct Type {
@@ -132,6 +137,7 @@ enum class NodeKind {
     Block,
     TypeCast,
     AsmStmt,
+    SwitchStmt,
 
     WhenBlock,
 
@@ -214,6 +220,21 @@ struct U8 : Type {
     }
 };
 
+struct U16 : Type {
+    TypeKind kind() const override { return TypeKind::U16; }
+    std::string str() const override { return "U16"; }
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        return other->kind() == TypeKind::U16;
+    }
+    bool isNumeric() const override { return true; }
+    bool isInteger() const override { return true; }
+    bool isUnsigned() const override { return true; }
+    int numericRank() const override { return 1; }
+    std::shared_ptr<Type> copy() const override {
+        return std::make_shared<U16>(*this);
+    }
+};
+
 struct U32 : Type {
     TypeKind kind() const override { return TypeKind::U32; }
     std::string str() const override { return "U32"; }
@@ -256,6 +277,51 @@ struct USize : Type {
     int numericRank() const override { return 2; } // usually same as U64
     std::shared_ptr<Type> copy() const override {
         return std::make_shared<USize>(*this);
+    }
+};
+
+struct ISize : Type {
+    TypeKind kind() const override { return TypeKind::ISize; }
+    std::string str() const override { return "ISize"; }
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        return other->kind() == TypeKind::ISize;
+    }
+    bool isNumeric() const override { return true; }
+    bool isInteger() const override { return true; }
+    bool isSigned() const override { return true; }
+    int numericRank() const override { return 2; }
+    std::shared_ptr<Type> copy() const override {
+        return std::make_shared<ISize>(*this);
+    }
+};
+
+struct I16 : Type {
+    TypeKind kind() const override { return TypeKind::I16; }
+    std::string str() const override { return "I16"; }
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        return other->kind() == TypeKind::I16;
+    }
+    bool isNumeric() const override { return true; }
+    bool isInteger() const override { return true; }
+    bool isSigned() const override { return true; }
+    int numericRank() const override { return 1; }
+    std::shared_ptr<Type> copy() const override {
+        return std::make_shared<I16>(*this);
+    }
+};
+
+struct I8 : Type {
+    TypeKind kind() const override { return TypeKind::I8; }
+    std::string str() const override { return "I8"; }
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        return other->kind() == TypeKind::I8;
+    }
+    bool isNumeric() const override { return true; }
+    bool isInteger() const override { return true; }
+    bool isSigned() const override { return true; }
+    int numericRank() const override { return 0; }
+    std::shared_ptr<Type> copy() const override {
+        return std::make_shared<I8>(*this);
     }
 };
 
@@ -1456,6 +1522,43 @@ struct WhenBlock: public Declaration, public Statement { // Conditional compilat
     std::shared_ptr<ASTNode> copy() const override;
 
 
+};
+
+struct SwitchStmt : public Statement {
+    ExprPtr condition;
+
+    // Unholy type, someone call the exorcist.
+    std::vector<std::pair<std::vector<std::shared_ptr<Expression>>, std::shared_ptr<Statement>>> cases;
+
+    std::shared_ptr<Statement> default_case;
+
+    SwitchStmt(ExprPtr cond,
+               std::vector<std::pair<std::vector<std::shared_ptr<Expression>>, std::shared_ptr<Statement>>> cs,
+               std::shared_ptr<Statement> dc = nullptr)
+        : condition(std::move(cond)), cases(std::move(cs)), default_case(std::move(dc)) {}
+
+    NodeKind kind() const override { return NodeKind::SwitchStmt; }
+
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+
+    std::string str() const override {
+        std::string result = "SwitchStmt(" + condition->toString() + ") {\n";
+        for (const auto &[case_expr, case_stmt] : cases) {
+            result += "  Case ";
+            for (size_t i = 0; i < case_expr.size(); ++i) {
+                if (i > 0)
+                    result += ", ";
+                result += case_expr[i]->toString();
+            }
+            result += " => " + case_stmt->toString() + "\n";
+        }
+        if (default_case) {
+            result += "  Default: " + default_case->toString() + "\n";
+        }
+        result += "}";
+        return result;
+    }
+    std::shared_ptr<ASTNode> copy() const override;
 };
 
 uint64_t getLitValue(const std::shared_ptr<Literal> &lit);

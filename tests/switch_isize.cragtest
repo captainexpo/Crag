@@ -1,0 +1,33 @@
+//NAME: Switch On Isize
+//DESC: Tests switch conditions using the new isize type
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn classify(x: isize) -> i32 {
+  switch (x) {
+    -1 => {
+      return 1;
+    },
+    0 => {
+      return 2;
+    },
+    _ => {
+      return 3;
+    },
+  }
+  return 0;
+}
+
+fn main() -> i32 {
+  let a = classify(-1);
+  let b = classify(0);
+  let c = classify(9);
+  printf("%d %d %d\n", a, b, c);
+  return 0;
+}
+
+//END CODE
+//BEGIN EXPECT
+//1 2 3
+//END EXPECT

@@ -216,6 +216,8 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
     std::string val = consume(TokenType::ID).value;
     if (val == "u8")
         return std::make_shared<U8>();
+    if (val == "u16")
+        return std::make_shared<U16>();
     if (val == "u32")
         return std::make_shared<U32>();
     if (val == "u64")
@@ -224,8 +226,14 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
         return std::make_shared<USize>();
     if (val == "i32")
         return std::make_shared<I32>();
+    if (val == "i16")
+        return std::make_shared<I16>();
     if (val == "i64")
         return std::make_shared<I64>();
+    if (val == "i8")
+        return std::make_shared<I8>();
+    if (val == "isize")
+        return std::make_shared<ISize>();
     if (val == "f32")
         return std::make_shared<F32>();
     if (val == "f64")
@@ -616,6 +624,10 @@ std::shared_ptr<Statement> Parser::parse_statement(bool req_semi) {
             break;
         case TokenType::RETURN:
             node = parse_return_statement();
+            break;
+        case TokenType::SWITCH:
+            node = parse_switch_statement();
+            req_semi = false;
             break;
         case TokenType::LBRACE:
             node = parse_block();
@@ -1163,6 +1175,52 @@ std::shared_ptr<ForStatement> Parser::parse_for_statement() {
     return for_stmt;
 }
 
+std::shared_ptr<SwitchStmt> Parser::parse_switch_statement() {
+    auto t =consume(TokenType::SWITCH);
+    consume(TokenType::LPAREN);
+    auto condition = parse_expression();
+    consume(TokenType::RPAREN);
+    consume(TokenType::LBRACE);
+    std::vector<
+        std::pair<
+            std::vector<
+                std::shared_ptr<Expression>
+            >,
+        std::shared_ptr<Statement>
+        >
+    > cases;
+
+    std::shared_ptr<Statement> default_case = nullptr;
+    while (peek().type != TokenType::RBRACE && peek().type != TokenType::EOF_T) {
+        // Syntax = <expression> ',' <expression> ',' ... '=>' <statement> ','
+        std::vector<ExprPtr> case_values;
+        while (true) {
+            if (match({TokenType::UNDERSCORE})) {
+                if (default_case) {
+                    throw ParseError("Multiple default cases in switch statement", peek());
+                }
+                consume(TokenType::EQ_ARROW);
+                default_case = parse_statement(false);
+                consume(TokenType::COMMA);
+                break;
+            }
+            case_values.push_back(parse_expression());
+            if (match({TokenType::COMMA}))
+                continue;
+            consume(TokenType::EQ_ARROW);
+            auto case_stmt = parse_statement(false);
+            consume(TokenType::COMMA);
+            cases.push_back({case_values, case_stmt});
+            break;
+        }
+    }
+    consume(TokenType::RBRACE);
+    auto switch_stmt = std::make_shared<SwitchStmt>(condition, cases, default_case);
+    switch_stmt->line = t.line;
+    switch_stmt->col = t.column;
+    return switch_stmt;
+}
+
 std::shared_ptr<ReturnStatement> Parser::parse_return_statement() {
     Token start_token = peek(); // Store the start token for line and col
     consume(TokenType::RETURN);
@@ -1287,6 +1345,7 @@ Parser::parse_parameter_def() {
     }
     return params;
 }
+
 std::shared_ptr<AsmStmt> Parser::parse_asm_statement() {
     consume(TokenType::ASM);
     bool is_volatile = match({TokenType::VOLATILE});
@@ -1355,6 +1414,7 @@ std::shared_ptr<AsmStmt> Parser::parse_asm_statement() {
     consume(TokenType::RPAREN);
     return std::make_shared<AsmStmt>(is_volatile, template_str, operands, options);
 }
+
 std::shared_ptr<Program> Parser::parse() {
     auto program = std::make_shared<Program>();
     // Set line and col to 1,1 as it's the root of the AST

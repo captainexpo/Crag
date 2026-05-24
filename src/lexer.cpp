@@ -61,6 +61,8 @@ std::string tokenTypeName(TokenType type) {
             return "ASM";
         case TokenType::VOLATILE:
             return "VOLATILE";
+        case TokenType::SWITCH:
+            return "SWITCH";
         case TokenType::TYPE:
             return "TYPE";
         case TokenType::QUESTION:
@@ -167,6 +169,8 @@ std::string tokenTypeName(TokenType type) {
             return "AS";
         case TokenType::RE:
             return "RE";
+        case TokenType::EQ_ARROW:
+            return "EQ_ARROW";
         default:
             return "UNKNOWN";
     }
@@ -199,6 +203,7 @@ Lexer::Lexer(const std::string &src) : code(src) {
         {"type", TokenType::TYPE},
         {"asm", TokenType::ASM},
         {"volatile", TokenType::VOLATILE},
+        {"switch", TokenType::SWITCH},
     };
 }
 
@@ -316,6 +321,12 @@ std::vector<Token> Lexer::tokenize() {
             std::string val;
             while (isalnum(peek()) || peek() == '_')
                 val += get();
+
+            if (val == "_"){
+                tokens.push_back({TokenType::UNDERSCORE, val, token_line, token_col});
+                continue;
+            }
+
             TokenType type = keywords.count(val) ? keywords[val] : TokenType::ID;
 
             tokens.push_back({type, val, token_line, token_col});
@@ -421,6 +432,8 @@ std::vector<Token> Lexer::tokenize() {
             tokens.push_back({TokenType::SHR, ">>", token_line, token_col});
         else if (match("->"))
             tokens.push_back({TokenType::ARROW, "->", token_line, token_col});
+        else if (match("=>"))
+            tokens.push_back({TokenType::EQ_ARROW, "=>", token_line, token_col});
         else if (match("..."))
             tokens.push_back({TokenType::TRIPLE_DOT, "...", token_line, token_col});
         else if (match("::"))

@@ -393,3 +393,25 @@ std::shared_ptr<ASTNode> WhenBlock::copy() const {
     return std::make_shared<WhenBlock>(std::dynamic_pointer_cast<Expression>(condition->copy()), std::move(containees));
 }
 
+std::shared_ptr<ASTNode> SwitchStmt::copy() const {
+    std::vector<std::pair<std::vector<std::shared_ptr<Expression>>, std::shared_ptr<Statement>>> cases_copy;
+
+    for (const auto &[case_exprs, case_stmt] : cases) {
+        std::vector<std::shared_ptr<Expression>> case_exprs_copy;
+        for (const auto &expr : case_exprs) {
+            case_exprs_copy.push_back(std::dynamic_pointer_cast<Expression>(expr->copy()));
+        }
+        cases_copy.emplace_back(std::move(case_exprs_copy), std::dynamic_pointer_cast<Statement>(case_stmt->copy()));
+    }
+
+    auto c = std::make_shared<SwitchStmt>(
+        std::dynamic_pointer_cast<Expression>(condition->copy()),
+        std::move(cases_copy),
+        default_case ? std::dynamic_pointer_cast<Statement>(default_case->copy()) : nullptr);
+
+    c->line = line;
+    c->col = col;
+    c->inferred_type = inferred_type;
+    return c;
+}
+

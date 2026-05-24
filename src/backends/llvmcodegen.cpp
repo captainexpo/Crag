@@ -201,12 +201,18 @@ llvm::DIType *LLVMCodegen::getDIType(const std::shared_ptr<Type> &type, const AS
         diType = nullptr;
     } else if (IS_INSTANCE(type, I32)) {
         diType = m_di_builder->createBasicType("i32", 32, llvm::dwarf::DW_ATE_signed);
+    } else if (IS_INSTANCE(type, I16)) {
+        diType = m_di_builder->createBasicType("i16", 16, llvm::dwarf::DW_ATE_signed);
+    } else if (IS_INSTANCE(type, I8)) {
+        diType = m_di_builder->createBasicType("i8", 8, llvm::dwarf::DW_ATE_signed);
     } else if (IS_INSTANCE(type, I64)) {
         diType = m_di_builder->createBasicType("i64", 64, llvm::dwarf::DW_ATE_signed);
     } else if (IS_INSTANCE(type, U8)) {
         diType = m_di_builder->createBasicType("u8", 8, llvm::dwarf::DW_ATE_unsigned);
     } else if (IS_INSTANCE(type, U32)) {
         diType = m_di_builder->createBasicType("u32", 32, llvm::dwarf::DW_ATE_unsigned);
+    } else if (IS_INSTANCE(type, U16)) {
+        diType = m_di_builder->createBasicType("u16", 16, llvm::dwarf::DW_ATE_unsigned);
     } else if (IS_INSTANCE(type, U64)) {
         diType = m_di_builder->createBasicType("u64", 64, llvm::dwarf::DW_ATE_unsigned);
     } else if (IS_INSTANCE(type, F32)) {
@@ -218,6 +224,9 @@ llvm::DIType *LLVMCodegen::getDIType(const std::shared_ptr<Type> &type, const AS
     } else if (IS_INSTANCE(type, USize)) {
         unsigned bits = m_llvm_module->getDataLayout().getPointerSizeInBits();
         diType = m_di_builder->createBasicType("usize", bits, llvm::dwarf::DW_ATE_unsigned);
+    } else if (IS_INSTANCE(type, ISize)) {
+        unsigned bits = m_llvm_module->getDataLayout().getPointerSizeInBits();
+        diType = m_di_builder->createBasicType("isize", bits, llvm::dwarf::DW_ATE_signed);
     } else if (IS_INSTANCE(type, PointerType)) {
         auto ptrType = std::dynamic_pointer_cast<PointerType>(type);
         llvm::DIType *pointee = getDIType(ptrType->base, node);
@@ -486,10 +495,16 @@ void LLVMCodegen::compileObjectFileToExecutable(
 llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const ASTNodePtr &node) {
     if (IS_INSTANCE(type, I32))
         return llvm::Type::getInt32Ty(context);
+    if (IS_INSTANCE(type, I16))
+        return llvm::Type::getInt16Ty(context);
+    if (IS_INSTANCE(type, I8))
+        return llvm::Type::getInt8Ty(context);
     if (IS_INSTANCE(type, I64))
         return llvm::Type::getInt64Ty(context);
     if (IS_INSTANCE(type, U8))
         return llvm::Type::getInt8Ty(context);
+    if (IS_INSTANCE(type, U16))
+        return llvm::Type::getInt16Ty(context);
     if (IS_INSTANCE(type, U32))
         return llvm::Type::getInt32Ty(context);
     if (IS_INSTANCE(type, U64))
@@ -503,6 +518,15 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const AS
     if (IS_INSTANCE(type, Void))
         return llvm::Type::getVoidTy(context);
     if (IS_INSTANCE(type, USize)) {
+        if (sizeof(size_t) == 4) {
+            return llvm::Type::getInt32Ty(context);
+        } else if (sizeof(size_t) == 8) {
+            return llvm::Type::getInt64Ty(context);
+        } else {
+            throw CodeGenError(node, "Unsupported platform: size_t is neither 32-bit nor 64-bit");
+        }
+    }
+    if (IS_INSTANCE(type, ISize)) {
         if (sizeof(size_t) == 4) {
             return llvm::Type::getInt32Ty(context);
         } else if (sizeof(size_t) == 8) {
@@ -791,6 +815,8 @@ LLVMCodegen::generateStatement(const std::shared_ptr<Statement> &stmt) {
         return val;
     } else if (IS_INSTANCE(stmt, AsmStmt)) {
         return generateAsmStatement(std::dynamic_pointer_cast<AsmStmt>(stmt));
+    } else if (IS_INSTANCE(stmt, SwitchStmt)) {
+        return generateSwitchStatement(std::dynamic_pointer_cast<SwitchStmt>(stmt));
     }
 
     throw CodeGenError(stmt, "Unknown statement type: " + stmt->str());
@@ -1725,12 +1751,21 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
     if (IS_INSTANCE(lit->inferred_type, I32)) {
         return llvm::ConstantInt::get(context,
                                       llvm::APInt(32, tryGetConstValue<int64_t>(lit)));
+    } else if (IS_INSTANCE(lit->inferred_type, I16)) {
+        return llvm::ConstantInt::get(context,
+                                      llvm::APInt(16, tryGetConstValue<int64_t>(lit)));
+    } else if (IS_INSTANCE(lit->inferred_type, I8)) {
+        return llvm::ConstantInt::get(context,
+                                      llvm::APInt(8, tryGetConstValue<int64_t>(lit)));
     } else if (IS_INSTANCE(lit->inferred_type, I64)) {
         return llvm::ConstantInt::get(context,
                                       llvm::APInt(64, tryGetConstValue<int64_t>(lit)));
     } else if (IS_INSTANCE(lit->inferred_type, U8)) {
         return llvm::ConstantInt::get(context,
                                       llvm::APInt(8, tryGetConstValue<uint64_t>(lit)));
+    } else if (IS_INSTANCE(lit->inferred_type, U16)) {
+        return llvm::ConstantInt::get(context,
+                                      llvm::APInt(16, tryGetConstValue<uint64_t>(lit)));
     } else if (IS_INSTANCE(lit->inferred_type, U32)) {
         return llvm::ConstantInt::get(context,
                                       llvm::APInt(32, tryGetConstValue<uint64_t>(lit)));
@@ -1749,9 +1784,15 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
     } else if (IS_INSTANCE(lit->inferred_type, Void)) {
         throw CodeGenError(lit, "Cannot generate literal for void type");
     } else if (IS_INSTANCE(lit->inferred_type, USize)) {
+        unsigned bits = m_llvm_module->getDataLayout().getPointerSizeInBits();
         return llvm::ConstantInt::get(
             context,
-            llvm::APInt(64, tryGetConstValue<uint64_t>(lit))); // Assuming 64-bit for USize
+            llvm::APInt(bits, tryGetConstValue<uint64_t>(lit)));
+    } else if (IS_INSTANCE(lit->inferred_type, ISize)) {
+        unsigned bits = m_llvm_module->getDataLayout().getPointerSizeInBits();
+        return llvm::ConstantInt::get(
+            context,
+            llvm::APInt(bits, tryGetConstValue<int64_t>(lit)));
     } else if (IS_INSTANCE(lit->inferred_type, PointerType)) {
         if (std::holds_alternative<uint64_t>(lit->value)) {
             int intVal = tryGetConstValue<uint64_t>(lit);
@@ -2965,7 +3006,7 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
         llvm::Value *ptrOp = LI->getPointerOperand();
         if (ptrOp) {
             if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(ptrOp->stripPointerCasts())) {
-                llvm::PointerType *abiPtrTy = llvm::PointerType::getUnqual(abiType);
+                llvm::PointerType *abiPtrTy = llvm::PointerType::getUnqual(context);
                 llvm::Value *abiPtr = m_builder.CreateBitCast(ptrOp, abiPtrTy, "abi.ptr");
                 return m_builder.CreateLoad(abiType, abiPtr, "abi.val");
             }
@@ -3190,4 +3231,55 @@ llvm::Value *LLVMCodegen::generateAsmStatement(
     }
 
     return outputTypes.empty() ? nullptr : result;
+}
+
+llvm::Value* LLVMCodegen::generateSwitchStatement(const std::shared_ptr<SwitchStmt> &switchStmt) {
+    int numCases = 0;
+
+    for (const auto &caseBlock : switchStmt->cases) {
+        numCases += caseBlock.first.size();
+    }
+
+    auto parentBlock = m_builder.GetInsertBlock();
+    auto mergeBlock = llvm::BasicBlock::Create(context, "switch_merge", parentBlock->getParent());
+    auto defaultBlock = llvm::BasicBlock::Create(context, "switch_default", parentBlock->getParent());
+
+
+    auto sStmt =m_builder.CreateSwitch(generateExpression(switchStmt->condition), defaultBlock, numCases);
+
+    for (const auto &caseBlock : switchStmt->cases) {
+        auto exprs = caseBlock.first;
+        numCases += exprs.size();
+
+        auto caseBB = llvm::BasicBlock::Create(context, "switch_case", parentBlock->getParent());
+        m_builder.SetInsertPoint(caseBB);
+        generateStatement(caseBlock.second);
+
+        if (!m_builder.GetInsertBlock()->getTerminator()) {
+            m_builder.CreateBr(mergeBlock);
+        }
+        for (const auto &expr : exprs) {
+            if (!expr->inferred_type) {
+                throw CodeGenError(expr, "Case expression has no inferred type");
+            }
+            if (!IS_INSTANCE(expr, Literal)) {
+                throw CodeGenError(expr, "Only literal expressions are supported in switch cases");
+            }
+            if (!expr->inferred_type->isInteger()){
+                throw CodeGenError(expr, "Only int, bool, and char literals are supported in switch cases");
+            }
+            llvm::Value *caseVal = generateLiteral(std::dynamic_pointer_cast<Literal>(expr));
+            sStmt->addCase(llvm::cast<llvm::ConstantInt>(caseVal), caseBB);
+        }
+    }
+
+    m_builder.SetInsertPoint(defaultBlock);
+    if (switchStmt->default_case) {
+        generateStatement(switchStmt->default_case);
+    }
+    if (!m_builder.GetInsertBlock()->getTerminator()) {
+        m_builder.CreateBr(mergeBlock);
+    }
+    m_builder.SetInsertPoint(mergeBlock);
+    return nullptr;
 }

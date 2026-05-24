@@ -255,6 +255,7 @@ class LLVMCodegen : public Backend {
     llvm::Value* generateReturnStatement(const std::shared_ptr<ReturnStatement> &retStmt);
     llvm::Value* generateExpressionStatement(const std::shared_ptr<ExpressionStatement> &exprStmt);
     llvm::Value* generateAsmStatement(const std::shared_ptr<AsmStmt> &asmStmt);
+    llvm::Value* generateSwitchStatement(const std::shared_ptr<SwitchStmt> &switchStmt);
 
     llvm::Value* materializeAggregate(llvm::Value* abiValue, llvm::StructType* structType);
     llvm::Value* buildErrorUnionValue(const std::shared_ptr<ErrorUnionType> &euType,

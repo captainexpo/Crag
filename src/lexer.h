@@ -36,6 +36,7 @@ enum class TokenType {
     TYPE,
     ASM, // (Inline assembly)
     VOLATILE,
+    SWITCH,
 
     // Operators
     EQ,
@@ -59,7 +60,8 @@ enum class TokenType {
     BXOR,
     SHL,
     SHR,
-    ARROW,
+    ARROW, // ->
+    EQ_ARROW, // =>
     AS,
     RE,
     INC,
@@ -92,6 +94,7 @@ enum class TokenType {
     COLON,
     DOT,
     SEMICOLON,
+    UNDERSCORE,
 
     // Misc
     SKIP,

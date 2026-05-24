@@ -11,6 +11,9 @@ uint64_t getLitValue(const std::shared_ptr<Literal> &lit) {
     if (auto i64 = std::dynamic_pointer_cast<U64>(lit->lit_type)) {
         return std::get<uint64_t>(lit->value);
     }
+    if (auto u16 = std::dynamic_pointer_cast<U16>(lit->lit_type)) {
+        return std::get<uint64_t>(lit->value);
+    }
     if (auto usize = std::dynamic_pointer_cast<USize>(lit->lit_type)) {
         return std::get<uint64_t>(lit->value);
     }
@@ -18,6 +21,12 @@ uint64_t getLitValue(const std::shared_ptr<Literal> &lit) {
         return std::get<int64_t>(lit->value);
     }
     if (auto i64 = std::dynamic_pointer_cast<I64>(lit->lit_type)) {
+        return std::get<int64_t>(lit->value);
+    }
+    if (auto i16 = std::dynamic_pointer_cast<I16>(lit->lit_type)) {
+        return std::get<int64_t>(lit->value);
+    }
+    if (auto i8 = std::dynamic_pointer_cast<I8>(lit->lit_type)) {
         return std::get<int64_t>(lit->value);
     }
     if (auto f32 = std::dynamic_pointer_cast<F32>(lit->lit_type)) {
@@ -52,11 +61,23 @@ void setLitVal(std::shared_ptr<Literal> lit, uint64_t raw_val) {
         lit->value = static_cast<uint64_t>(raw_val);
         return;
     }
+    if (auto u16 = std::dynamic_pointer_cast<U16>(lit->lit_type)) {
+        lit->value = static_cast<uint64_t>(raw_val);
+        return;
+    }
     if (auto i32 = std::dynamic_pointer_cast<I32>(lit->lit_type)) {
         lit->value = static_cast<int64_t>(raw_val);
         return;
     }
     if (auto i64 = std::dynamic_pointer_cast<I64>(lit->lit_type)) {
+        lit->value = static_cast<int64_t>(raw_val);
+        return;
+    }
+    if (auto i16 = std::dynamic_pointer_cast<I16>(lit->lit_type)) {
+        lit->value = static_cast<int64_t>(raw_val);
+        return;
+    }
+    if (auto i8 = std::dynamic_pointer_cast<I8>(lit->lit_type)) {
         lit->value = static_cast<int64_t>(raw_val);
         return;
     }
@@ -81,12 +102,12 @@ void setLitVal(std::shared_ptr<Literal> lit, uint64_t raw_val) {
 
 int getTypeSize(const std::shared_ptr<Type> &type) {
     switch (type->kind()) {
-        // case TypeKind::I8:
+        case TypeKind::I8:
         case TypeKind::U8:
             return 1;
-        // case TypeKind::U16:
-        // case TypeKind::I16:
-        //     return 2;
+        case TypeKind::U16:
+        case TypeKind::I16:
+            return 2;
         case TypeKind::U32:
         case TypeKind::I32:
         case TypeKind::F32:
