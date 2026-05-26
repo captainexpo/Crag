@@ -38,8 +38,8 @@ pub fn exists(path: *const u8) -> bool {
 	return true;
 }
 
-pub fn read_all(path: *const u8) -> string.Str!FsError {
-	let handle: *void = cstdio.fopen(path, "rb");
+pub fn read_all(path: string.Str) -> string.Str!FsError {
+	let handle: *void = cstdio.fopen(path.c_str(), "rb");
 	if (handle == null) {
 		return! FsError:OPEN_ERROR;
 	}
@@ -90,7 +90,7 @@ pub fn write_all(path: *const u8, data: *const u8, len: usize) -> void!FsError {
 }
 
 pub fn write_str(path: *const u8, data: string.Str) -> void!FsError {
-	let res = write_all(path, data.value as *const u8, data.length);
+	let res = write_all(path, data.c_str(), data.length);
     if (res.is_err) {
         return! res.err;
     }

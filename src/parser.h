@@ -63,6 +63,7 @@ class Parser {
 
     // Parsing methods
     std::shared_ptr<Type> parse_type(bool top_level = true);
+    std::shared_ptr<Type> parse_non_error_type(bool top_level);
     std::shared_ptr<Type> parse_primitive_type();
     std::shared_ptr<PointerType> parse_pointer_type();
     std::shared_ptr<ArrayType> parse_array_type();

@@ -61,8 +61,6 @@ TypeChecker::TypeChecker(CompilerOptions options) : m_const_eval(*new ConstEvalu
         std::make_shared<Literal>(std::string(options.target.osToString()),
                                   std::make_shared<PointerType>(std::make_shared<U8>(), true)));
 
-    pushScope();
-
     m_expected_return_type = nullptr;
     m_errors.clear();
     m_scopes.clear();
@@ -71,6 +69,8 @@ TypeChecker::TypeChecker(CompilerOptions options) : m_const_eval(*new ConstEvalu
     m_struct_methods.clear();
     imported_modules.clear();
     compilerOptions = options;
+
+    pushScope();
 }
 
 SymbolTable &TypeChecker::symbolTable() {
@@ -152,6 +152,36 @@ SymbolId TypeChecker::insertTemplateSymbol(const std::string &name,
     SymbolId id = symbolTable().insert({name, nullptr, decl});
     global.symbols[name] = id;
     return id;
+}
+
+void TypeChecker::ensureGlobalVariableVisible(const std::string &name) {
+    if (!current_module || !current_module->ast || m_scopes.empty()) {
+        return;
+    }
+
+    if (m_scopes.front().find(name) != INVALID_SYMBOL_ID) {
+        return;
+    }
+
+    for (const auto &decl : current_module->ast->declarations) {
+        auto vd = std::dynamic_pointer_cast<VariableDeclaration>(decl);
+        if (!vd || vd->name != name) {
+            continue;
+        }
+
+        auto saved_scopes = m_scopes;
+        while (m_scopes.size() > 1) {
+            m_scopes.pop_back();
+        }
+        try {
+            checkVariableDeclaration(vd);
+        } catch (...) {
+            m_scopes = std::move(saved_scopes);
+            throw;
+        }
+        m_scopes = std::move(saved_scopes);
+        return;
+    }
 }
 
 std::optional<SymbolId> TypeChecker::lookupSymbolInScope(const std::string &name) const {
@@ -699,6 +729,20 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 }
             }
         }
+
+        for (const auto &decl : module->ast->declarations) {
+            if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(decl)) {
+                auto global_symbol = m_scopes.front().find(vd->name);
+                if (global_symbol != INVALID_SYMBOL_ID) {
+                    auto entry = symbolTable().get(global_symbol);
+                    if (entry && entry->decl == vd) {
+                        continue;
+                    }
+                }
+                checkVariableDeclaration(vd);
+            }
+        }
+
         // Remove templates from AST
         module->ast->declarations.erase(
             std::remove_if(
@@ -746,6 +790,18 @@ void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
         return;
     }
     if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(node)) {
+        if (!m_scopes.empty()) {
+            auto global_symbol = m_scopes.front().find(vd->name);
+            if (global_symbol != INVALID_SYMBOL_ID) {
+                auto entry = symbolTable().get(global_symbol);
+                if (entry && entry->decl == vd) {
+                    return;
+                }
+            }
+        }
+        if (m_scopes.size() != 1) {
+            return;
+        }
         checkVariableDeclaration(vd);
         return;
     }
@@ -849,7 +905,6 @@ void TypeChecker::checkFunctionDeclaration(
 void TypeChecker::checkVariableDeclaration(
     const std::shared_ptr<VariableDeclaration> &var) {
     const std::string &name = var->name;
-    bool is_global = (m_scopes.size() == 1);
 
     if (var->var_type)
         var->var_type = resolveType(var, var->var_type);
@@ -926,7 +981,7 @@ void TypeChecker::checkVariableDeclaration(
         } else if (auto si =
                        std::dynamic_pointer_cast<StructInitializer>(init)) {
 
-            auto t = inferStructInit(si);
+            auto t = inferStructInit(si, var->var_type);
             if (!t || !t->equals(var->var_type)) {
                 throw TypeCheckError(
                     init,
@@ -955,10 +1010,6 @@ void TypeChecker::handleArrayLiteralAssignment(
     const std::shared_ptr<ArrayLiteral> &arr_lit,
     const std::shared_ptr<ArrayType> &arr_type) {
     int64_t final_len = -1;
-
-    // --------------------------------------------------
-    // Determine final_len
-    // --------------------------------------------------
 
     if (arr_type->unsized) {
         final_len = static_cast<int64_t>(arr_lit->elements.size());
@@ -1001,10 +1052,6 @@ void TypeChecker::handleArrayLiteralAssignment(
             "Array length cannot be negative");
     }
 
-    // --------------------------------------------------
-    // Normalize literal to final_len
-    // --------------------------------------------------
-
     int64_t lit_len = static_cast<int64_t>(arr_lit->elements.size());
 
     if (lit_len > final_len) {
@@ -1015,31 +1062,16 @@ void TypeChecker::handleArrayLiteralAssignment(
                 ", got " + std::to_string(lit_len));
     }
 
-    while (lit_len < final_len) {
-        auto null_lit =
-            std::make_shared<Literal>(
-                0, std::make_shared<NullType>());
-        null_lit->inferred_type =
-            std::make_shared<NullType>();
-
-        arr_lit->elements.push_back(null_lit);
-        ++lit_len;
-    }
-
-    // --------------------------------------------------
-    // Normalize type to final_len
-    // --------------------------------------------------
-
     auto i64 = std::make_shared<I64>();
     auto len_lit =
         std::make_shared<Literal>(final_len, i64);
     len_lit->inferred_type = i64;
 
+    arr_lit->defined_len = final_len;
+
     arr_type->length_expr = len_lit;
     arr_type->actualSize = final_len;
     arr_type->unsized = false;
-
-    arr_lit->len = final_len;
 }
 
 void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
@@ -1485,6 +1517,10 @@ std::shared_ptr<Type>
 TypeChecker::inferVarAccess(const std::shared_ptr<VarAccess> &v) {
     auto maybe = lookupSymbolInScope(v->name);
     if (!maybe) {
+        ensureGlobalVariableVisible(v->name);
+        maybe = lookupSymbolInScope(v->name);
+    }
+    if (!maybe) {
         throw TypeCheckError(v, "Unknown variable: " + v->name);
     }
     auto entry = symbolTable().get(*maybe);
@@ -1521,16 +1557,92 @@ TypeChecker::inferLiteral(const std::shared_ptr<Literal> &lit,
 
 std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
                                                      const std::shared_ptr<Type> &expected) {
-    if (al->elements.empty()) {
+    auto expected_arr = std::dynamic_pointer_cast<ArrayType>(expected);
+    std::shared_ptr<Type> expected_elem = nullptr;
+    int64_t final_len = -1;
+
+    if (expected_arr) {
+        expected_elem = expected_arr->element_type;
+        if (expected_arr->unsized) {
+            final_len = static_cast<int64_t>(al->elements.size());
+        } else {
+            m_const_eval.clearErrors();
+            auto evaluated = m_const_eval.evaluateExpression(expected_arr->length_expr);
+            if (!m_const_eval.ok()) {
+                for (const auto &e : m_const_eval.errors()) {
+                    throw TypeCheckError(e.first, e.second);
+                }
+            }
+            if (!evaluated) {
+                throw TypeCheckError(al, "Failed to evaluate expected array length");
+            }
+
+            auto len_lit = std::dynamic_pointer_cast<Literal>(*evaluated);
+            if (!len_lit) {
+                throw TypeCheckError(al, "Expected array length was not a constant literal");
+            }
+
+            if (auto v = std::get_if<int64_t>(&len_lit->value)) {
+                final_len = *v;
+            } else if (auto v = std::get_if<uint64_t>(&len_lit->value)) {
+                final_len = static_cast<int64_t>(*v);
+            }
+            if (final_len < 0) {
+                throw TypeCheckError(al, "Array length cannot be negative");
+            }
+        }
+    }
+
+    if (final_len < 0 && !al->elements.empty()) {
+        final_len = static_cast<int64_t>(al->elements.size());
+    }
+
+    if (al->elements.empty() && !expected_arr) {
         throw TypeCheckError(al, "Cannot infer type of empty array literal");
     }
 
-    // Extract expected element type from expected array type
-    std::shared_ptr<Type> expected_elem = nullptr;
-    if (expected) {
-        if (auto arr_type = std::dynamic_pointer_cast<ArrayType>(expected)) {
-            expected_elem = arr_type->element_type;
+    if (!expected_arr && al->elements.empty()) {
+        throw TypeCheckError(al, "Cannot infer type of empty array literal");
+    }
+
+    if (expected_arr && static_cast<int64_t>(al->elements.size()) > final_len) {
+        throw TypeCheckError(al,
+                             "Array literal length mismatch: expected at most " +
+                                 std::to_string(final_len) + ", got " +
+                                 std::to_string(al->elements.size()));
+    }
+
+    if (expected_arr && expected_elem) {
+        for (size_t i = 0; i < al->elements.size(); ++i) {
+            auto t = inferExpression(al->elements[i], expected_elem);
+            if (!t) {
+                throw TypeCheckError(al, "Failed to infer type of array literal element");
+            }
+            if (!t->equals(expected_elem)) {
+                if (canImplicitCast(t, expected_elem)) {
+                    al->elements[i] = std::make_shared<TypeCast>(al->elements[i], expected_elem, CastType::Normal);
+                } else {
+                    throw TypeCheckError(al, "Array literal element type mismatch: " +
+                                                 typeName(expected_elem) + " expected, got " + typeName(t));
+                }
+            }
         }
+
+        al->defined_len = static_cast<size_t>(final_len);
+        auto resolved = resolveType(al, expected_arr);
+        al->inferred_type = resolved;
+        return resolved;
+    }
+
+    if (al->elements.empty()) {
+        if (!expected_arr) {
+            throw TypeCheckError(al, "Cannot infer type of empty array literal");
+        }
+
+        al->defined_len = static_cast<size_t>(final_len);
+        auto resolved = resolveType(al, expected_arr);
+        al->inferred_type = resolved;
+        return resolved;
     }
 
     std::shared_ptr<Type> elem_type = nullptr;
@@ -2002,7 +2114,7 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
             m_const_eval.clearErrors();
         }
         auto fieldType = resolveType(p.second, st->getFieldType(p.first));
-        auto typeActual = inferExpression(p.second);
+        auto typeActual = inferExpression(p.second, fieldType);
         if (!typeActual)
             throw TypeCheckError(init, "Failed to infer type of struct " + st->name +
                                            " field " + p.first + " initializer");

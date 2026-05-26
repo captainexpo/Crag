@@ -1,0 +1,27 @@
+//NAME: Array initialization in structs
+//DESC:
+//BEGIN CODE
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+struct Test {
+    arr: [256]u8,
+    arr2: [128]i32,
+
+}
+
+fn main(argc: i32) -> i32 {
+    const t = Test {
+        arr: {},
+        arr2: {1,2,3},
+    };
+    t.arr[25] = 'H';
+    printf("%c %d %d %d", t.arr[25], t.arr2[0], t.arr2[2], t.arr2[120]);
+    return 0;
+}
+
+
+//END CODE
+//BEGIN EXPECT
+//H 1 3 0
+//END EXPECT

@@ -961,6 +961,17 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
         m_builder.SetCurrentDebugLocation(llvm::DebugLoc());
     }
 
+    // Validate function
+    if (llvm::verifyFunction(*function, &llvm::errs())) {
+        // Dump IR
+        std::string str;
+        llvm::raw_string_ostream rso(str);
+        function->print(rso);
+        std::cout << "Generated IR for function " << func->name << ":\n"
+                  << rso.str() << "\n";
+        throw CodeGenError(func, "Generated invalid IR for function: " + func->name);
+    }
+
     return function;
 }
 //
@@ -1686,37 +1697,42 @@ LLVMCodegen::generateUnaryOp(const std::shared_ptr<UnaryOperation> &operation,
     throw CodeGenError(operation, "Unsupported unary operator: " + op);
 }
 
-llvm::Value *LLVMCodegen::generateLogicalOp(std::shared_ptr<Expression> left, std::shared_ptr<Expression> right, std::string op) {
+llvm::Value *LLVMCodegen::generateLogicalOp(
+    std::shared_ptr<Expression> left,
+    std::shared_ptr<Expression> right,
+    std::string op) {
     llvm::Value *valLeft = generateExpression(left);
 
     llvm::BasicBlock *startBlock = m_builder.GetInsertBlock();
     llvm::Function *currentFunc = startBlock->getParent();
+
     llvm::BasicBlock *rhs = llvm::BasicBlock::Create(context, op == "&&" ? "land.rhs" : "lor.rhs", currentFunc);
+
     llvm::BasicBlock *end = llvm::BasicBlock::Create(context, op == "&&" ? "land.end" : "lor.end", currentFunc);
 
-    llvm::Value *valRight = nullptr;
-    if (op == "&&") {
+    if (op == "&&")
         m_builder.CreateCondBr(valLeft, rhs, end);
-
-        m_builder.SetInsertPoint(rhs);
-        valRight = generateExpression(right);
-
-        m_builder.CreateBr(end);
-    } else {
-
+    else
         m_builder.CreateCondBr(valLeft, end, rhs);
 
-        m_builder.SetInsertPoint(rhs);
-        valRight = generateExpression(right);
+    m_builder.SetInsertPoint(rhs);
 
-        m_builder.CreateBr(end);
-    }
+    llvm::Value *valRight = generateExpression(right);
+
+    llvm::BasicBlock *rhsEndBlock = m_builder.GetInsertBlock();
+
+    m_builder.CreateBr(end);
 
     m_builder.SetInsertPoint(end);
-    llvm::PHINode *phi = m_builder.CreatePHI(llvm::Type::getInt1Ty(context), 2, "phitmp");
 
-    phi->addIncoming(llvm::ConstantInt::get(context, llvm::APInt(1, op == "||" ? 1 : 0)), startBlock);
-    phi->addIncoming(valRight, rhs);
+    llvm::PHINode *phi =
+        m_builder.CreatePHI(llvm::Type::getInt1Ty(context), 2, "phitmp");
+
+    phi->addIncoming(
+        llvm::ConstantInt::get( context, llvm::APInt(1, op == "||" ? 1 : 0)),
+        startBlock);
+
+    phi->addIncoming(valRight, rhsEndBlock);
 
     return phi;
 }
@@ -1843,9 +1859,24 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
 
     // Allocate the raw array: [N x elemType]
     auto arrayLLVMType = getLLVMType(arrayType, arrayLit); // struct { ptr, i64 }
-    auto arrayLitType = llvm::ArrayType::get(elemType, numElements);
+    auto arrayLitType = llvm::ArrayType::get(elemType, arrayLit->defined_len);
     auto rawArrAlloc = m_builder.CreateAlloca(arrayLitType, nullptr, "arraylit");
     rawArrAlloc->setAlignment(llvm::Align(alignof(void *)));
+
+    // declare void @llvm.memset.p0.i64(ptr writeonly captures(none), i8, i64, i1 immarg) #1
+    auto memsetFunction = m_llvm_module->getOrInsertFunction(
+        "llvm.memset.p0.i64",
+        llvm::FunctionType::get(
+            llvm::Type::getVoidTy(context),
+            {llvm::PointerType::getUnqual(context), llvm::Type::getInt8Ty(context),
+             llvm::Type::getInt64Ty(context), llvm::Type::getInt1Ty(context)},
+            false));
+
+    // Zero out the array memory using memset
+    m_builder.CreateCall(memsetFunction, {m_builder.CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context)),
+                                          llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0),
+                                          llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len * m_llvm_module->getDataLayout().getTypeAllocSize(elemType)),
+                                          llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 0)});
 
     // Store elements in array using correct GEP (2 indices for array)
     for (int i = 0; i < numElements; i++) {
@@ -1866,14 +1897,16 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
         arrayLLVMType, arrayStructAlloc,
         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1)});
-    m_builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), numElements), lengthPtr);
+    m_builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len), lengthPtr);
 
     // Store pointer to raw array into struct (cast to i8* or element pointer type)
     llvm::Value *dataPtr = m_builder.CreateGEP(
         arrayLLVMType, arrayStructAlloc,
         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)});
+
     llvm::Value *castedPtr = m_builder.CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context));
+
     m_builder.CreateStore(castedPtr, dataPtr);
 
     if (loadValue) {
@@ -3078,8 +3111,7 @@ static bool isConcreteRegisterConstraint(const std::string &constraint) {
         "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp",
         "ax", "bx", "cx", "dx", "si", "di", "bp", "sp",
         "al", "bl", "cl", "dl", "ah", "bh", "ch", "dh",
-        "rip", "eip"
-    };
+        "rip", "eip"};
 
     for (const auto &name : exact_registers) {
         if (constraint == name) {
@@ -3115,8 +3147,6 @@ static bool isConcreteRegisterConstraint(const std::string &constraint) {
 
     return false;
 }
-
-
 
 llvm::Value *LLVMCodegen::generateAsmStatement(
     const std::shared_ptr<AsmStmt> &_stmt) {
@@ -3216,14 +3246,12 @@ llvm::Value *LLVMCodegen::generateAsmStatement(
     size_t outputIndex = 0;
     for (auto &op : stmt->operands) {
         if (op.type == AsmOperandType::Out || op.type == AsmOperandType::LateOut) {
-            llvm::Value *v = (outputTypes.size() == 1) ? result :
-                m_builder.CreateExtractValue(result, outputIndex);
+            llvm::Value *v = (outputTypes.size() == 1) ? result : m_builder.CreateExtractValue(result, outputIndex);
             llvm::Value *outputPtr = generateAddress(op.expr);
             m_builder.CreateStore(v, outputPtr);
             outputIndex++;
         } else if (op.type == AsmOperandType::InOut || op.type == AsmOperandType::InLateOut) {
-            llvm::Value *v = (outputTypes.size() == 1) ? result :
-                m_builder.CreateExtractValue(result, outputIndex);
+            llvm::Value *v = (outputTypes.size() == 1) ? result : m_builder.CreateExtractValue(result, outputIndex);
             llvm::Value *outputPtr = generateAddress(op.expr);
             m_builder.CreateStore(v, outputPtr);
             outputIndex++;
@@ -3233,7 +3261,7 @@ llvm::Value *LLVMCodegen::generateAsmStatement(
     return outputTypes.empty() ? nullptr : result;
 }
 
-llvm::Value* LLVMCodegen::generateSwitchStatement(const std::shared_ptr<SwitchStmt> &switchStmt) {
+llvm::Value *LLVMCodegen::generateSwitchStatement(const std::shared_ptr<SwitchStmt> &switchStmt) {
     int numCases = 0;
 
     for (const auto &caseBlock : switchStmt->cases) {
@@ -3244,8 +3272,7 @@ llvm::Value* LLVMCodegen::generateSwitchStatement(const std::shared_ptr<SwitchSt
     auto mergeBlock = llvm::BasicBlock::Create(context, "switch_merge", parentBlock->getParent());
     auto defaultBlock = llvm::BasicBlock::Create(context, "switch_default", parentBlock->getParent());
 
-
-    auto sStmt =m_builder.CreateSwitch(generateExpression(switchStmt->condition), defaultBlock, numCases);
+    auto sStmt = m_builder.CreateSwitch(generateExpression(switchStmt->condition), defaultBlock, numCases);
 
     for (const auto &caseBlock : switchStmt->cases) {
         auto exprs = caseBlock.first;
@@ -3265,7 +3292,7 @@ llvm::Value* LLVMCodegen::generateSwitchStatement(const std::shared_ptr<SwitchSt
             if (!IS_INSTANCE(expr, Literal)) {
                 throw CodeGenError(expr, "Only literal expressions are supported in switch cases");
             }
-            if (!expr->inferred_type->isInteger()){
+            if (!expr->inferred_type->isInteger()) {
                 throw CodeGenError(expr, "Only int, bool, and char literals are supported in switch cases");
             }
             llvm::Value *caseVal = generateLiteral(std::dynamic_pointer_cast<Literal>(expr));

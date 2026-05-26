@@ -110,12 +110,25 @@ bool str_in_vector(const std::string &s, const std::vector<std::string> &vec, si
     }
     return false;
 }
-
 std::shared_ptr<Type> Parser::parse_type(bool top_level) {
+    auto t = parse_non_error_type(top_level);
+
+    if (peek().type == TokenType::BANG) {
+        consume(TokenType::BANG);
+        auto error_type = parse_type(false);
+        t = std::make_shared<ErrorUnionType>(t, error_type);
+    }
+
+    return t;
+}
+
+std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
     Token current = peek();
     std::shared_ptr<Type> t = nullptr;
+
     switch (current.type) {
         case TokenType::ID:
+
             if (declared_structs.count(current.value)) {
                 std::string name = consume(TokenType::ID).value;
                 t = declared_structs[name];
@@ -170,45 +183,60 @@ std::shared_ptr<Type> Parser::parse_type(bool top_level) {
                 break;
             }
 
+
+
             t = parse_primitive_type();
             break;
+
         case TokenType::STAR:
             t = parse_pointer_type();
             break;
+
         case TokenType::LBRACKET:
             t = parse_array_type();
             break;
+
         case TokenType::FN:
             t = parse_function_ptr_type();
             break;
+
         default:
-            throw ParseError("Unexpected token in type: " + describeToken(current), current.line, current.column);
+            throw ParseError(
+                "Unexpected token in type: " + describeToken(current),
+                current.line,
+                current.column
+            );
     }
+
     if (top_level && peek().type == TokenType::QUESTION) {
         consume(TokenType::QUESTION);
-        throw ParseError("Nullable types not supported yet", current.line, current.column);
-        t->nullable = true;
+        throw ParseError(
+            "Nullable types not supported yet",
+            current.line,
+            current.column
+        );
     }
+
     if (peek().type == TokenType::DOUBLE_COLON) {
-        // Template instance
         consume(TokenType::DOUBLE_COLON);
         consume(TokenType::LT);
+
         std::vector<std::shared_ptr<Type>> type_args;
+
         while (true) {
             type_args.push_back(parse_type());
+
             if (peek().type == TokenType::COMMA)
                 consume(TokenType::COMMA);
             else
                 break;
         }
+
         consume(TokenType::GT);
+
         t = std::make_shared<TemplateInstanceType>(t, type_args);
     }
-    if (peek().type == TokenType::BANG) {
-        consume(TokenType::BANG);
-        auto error_type = parse_type();
-        t = std::make_shared<ErrorUnionType>(t, error_type);
-    }
+
     return t;
 }
 
@@ -250,28 +278,41 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
 
 std::shared_ptr<PointerType> Parser::parse_pointer_type() {
     consume(TokenType::STAR);
+
     if (peek().type == TokenType::CONST) {
         consume(TokenType::CONST);
-        return std::make_shared<PointerType>(parse_type(false), true);
+        return std::make_shared<PointerType>(
+            parse_non_error_type(false),
+            true
+        );
     }
-    return std::make_shared<PointerType>(parse_type(false));
+
+    return std::make_shared<PointerType>(
+        parse_non_error_type(false)
+    );
 }
 
 std::shared_ptr<ArrayType> Parser::parse_array_type() {
     consume(TokenType::LBRACKET);
 
     std::shared_ptr<Expression> size = nullptr;
+
     bool unsized = peek().type == TokenType::RBRACKET;
+
     if (!unsized) {
         size = parse_expression();
-
-        // HACK: should probably put this in the typechecker
         size->inferred_type = std::make_shared<I64>();
     }
+
     consume(TokenType::RBRACKET);
-    auto elem_type = parse_type(false);
-    auto arrTy = std::make_shared<ArrayType>(elem_type, size, unsized);
-    return arrTy;
+
+    auto elem_type = parse_non_error_type(false);
+
+    return std::make_shared<ArrayType>(
+        elem_type,
+        size,
+        unsized
+    );
 }
 
 std::shared_ptr<PointerType> Parser::parse_function_ptr_type() {

@@ -115,6 +115,8 @@ class TypeChecker {
     SymbolTable &symbolTable();
     const SymbolTable &symbolTable() const;
 
+    void ensureGlobalVariableVisible(const std::string &name);
+
     std::shared_ptr<Type> lookupNamedType(const std::string &name) const;
     std::shared_ptr<StructType> lookupStructType(const std::string &name) const;
     std::shared_ptr<UnionType> lookupUnionType(const std::string &name) const;

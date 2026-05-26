@@ -1068,7 +1068,10 @@ struct Literal : public Expression {
 
 struct ArrayLiteral : public Expression {
     std::vector<ExprPtr> elements;
-    size_t len = 0;
+
+    size_t len = 0; // # of defined elements
+    size_t defined_len = 0; // size of array it's initializing
+
     ArrayLiteral(std::vector<ExprPtr> elems)
         : elements(std::move(elems)) {
         len = elements.size();
