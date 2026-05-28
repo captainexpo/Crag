@@ -83,12 +83,21 @@ const SymbolTable &TypeChecker::symbolTable() const {
 
 std::shared_ptr<Type> TypeChecker::lookupNamedType(const std::string &name) const {
     if (m_scopes.empty())
-        return nullptr;
-    SymbolId id = m_scopes.front().find(name);
-    if (id == INVALID_SYMBOL_ID)
-        return nullptr;
-    auto entry = symbolTable().get(id);
-    return entry ? entry->type : nullptr;
+        goto error;
+
+    {
+        SymbolId id = m_scopes.front().find(name);
+        if (id == INVALID_SYMBOL_ID)
+            goto error;
+        auto entry = symbolTable().get(id);
+        if (!entry || !entry->type)
+            goto error;
+        return entry->type;
+    }
+
+error:
+    std::cout << "TypeChecker: lookupNamedType: unknown type: " << name << "\n";
+    return nullptr;
 }
 
 std::shared_ptr<StructType> TypeChecker::lookupStructType(const std::string &name) const {
@@ -422,8 +431,10 @@ static void substituteGenericTypes(std::shared_ptr<Type> &type,
 }
 
 std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t) {
-    if (!t)
+    if (!t) {
+        asm ("int3"); // trigger breakpoint for debugging
         throw TypeCheckError(node, "Internal type-checker error: attempted to resolve a null type");
+    }
 
     // Resolve bound generics if any (used in instantiation paths)
     if (auto gt = std::dynamic_pointer_cast<GenericType>(t)) {
@@ -2106,6 +2117,30 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
         throw TypeCheckError(init, "Struct initializer with non-struct type: " + typeName(_st));
     }
 
+    // Global variable initializers can be checked before struct declarations are finalized,
+    // which leaves `st` as a placeholder with no fields. Hydrate it from the declaration so
+    // field lookup and casts use the actual struct layout.
+    if ((!st->complete || st->fields.empty()) && current_module && current_module->ast) {
+        for (const auto &decl : current_module->ast->declarations) {
+            auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl);
+            if (!sd || sd->name != st->name) {
+                continue;
+            }
+
+            std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
+            fields.reserve(sd->fields.size());
+            for (const auto &field : sd->fields) {
+                auto resolved_field_type = resolveType(sd, field.second);
+                fields.emplace_back(field.first, resolved_field_type);
+            }
+
+            st->fields = std::move(fields);
+            st->methods = sd->methods;
+            st->complete = true;
+            break;
+        }
+    }
+
     bool all_are_const = true;
     for (auto &p : init->field_values) {
         auto res = m_const_eval.evaluateExpression(p.second);
@@ -2113,7 +2148,15 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
             all_are_const = false;
             m_const_eval.clearErrors();
         }
-        auto fieldType = resolveType(p.second, st->getFieldType(p.first));
+
+        auto fieldTypeRaw = st->getFieldType(p.first);
+        if (!fieldTypeRaw) {
+            throw TypeCheckError(init,
+                                 "Unknown field '" + p.first + "' in struct initializer for " +
+                                     st->name);
+        }
+
+        auto fieldType = resolveType(p.second, fieldTypeRaw);
         auto typeActual = inferExpression(p.second, fieldType);
         if (!typeActual)
             throw TypeCheckError(init, "Failed to infer type of struct " + st->name +

@@ -3,33 +3,108 @@
 > [!WARNING]
 > The Crag compiler is merely a recreational toy language and is not suitable for production code. Expect frequent breaking changes, incomplete features, spaghetti code, and informal commits. Contributions and feedback are welcome!
 
-Crag is a compiled systems programming language with a custom frontend and an LLVM backend.
+Crag is a systems programming language that is designed to be simple, similarly to C, but with more modern syntax and features, similar to Zig and Rust.
 
-This repository contains:
+The language was created as a learning project to explore compiler design and implementation, and to create a language that had all the good parts of C, while adding more modern features that improve the developer experience. At this point, it is not intended to be a production-ready language (and probably never will be), but is instead a fun project to work on and learn from.
 
-- The Crag compiler (`src/`)
-- Platform runtime sources (`runtime/`)
-- A small standard library (`stdlib/`)
-- Language examples (`examples/`)
-- An end-to-end test suite (`tests/`)
 
-## Current status
+## Language Features
 
-- Backend: LLVM (`--backend llvm`)
-- Runtime safety checks: enabled by default (null pointer, bounds, divide-by-zero)
-- Platform runtime directories exist for Linux, macOS, and Windows
+- Zig/Rust inspired syntax
+- C-like semantics
+- Manual memory management
+- Simple runtime safety checks (e.g. bounds checking, null pointer checks)
+- Simple module system
+- Generics for functions, structs, and unions
+- Small standard library (currently just a few basic utilities)
+- Built on top of LLVM for code generation and optimization (bloated and slow, but it works)
 
-## Requirements
+## Usage
+
+The Crag compiler is a command-line tool that takes a Crag source file and compiles it to an executable. The basic usage is as follows:
+
+```bash
+./crag <source_file.crag> -o <output_executable>
+```
+
+There are also some additional flags that can be used to control the compilation process:
+
+- `-ODebug` (debug symbols, no optimization), `-ORelease` (no debug symbols, equivalent of -O3 optimization) - Optimization levels (default is `-ODebug`)
+- Any linker flags needed to link against other libraries (e.g. `-lm` to link against the math library)
+- `--unsafe` - Disable runtime safety checks.
+- `--emit-llvm` - Emit LLVM IR instead of a native executable
+- `--dump-ast [asa|bsa]` - Dump the abstract syntax tree (AST) in either before semantic analysis (BSA) or after semantic analysis (ASA) form. This is useful for debugging and understanding how the compiler processes the source code.
+
+
+
+## Syntax Examples
+
+Hello World:
+```crag
+import "stdlib" as std;
+
+fn main() -> i32 {
+    // I hope to eventually have a more ergonomic standard library, but for now it needs to borrow from C's standard library for basic functionality.
+    std.cstdio.printf("Hello, World!");
+    return 0;
+}
+```
+
+Fibonacci:
+```crag
+fn fib(n: i32) -> i32 {
+    let a: i32 = 0;
+    let b: i32 = 1;
+    let temp: i32;
+    for (let i: i32 = 0; i < n; i++) {
+        temp = a + b;
+        a = b;
+        b = temp;
+    }
+    return b;
+}
+```
+
+Linked list:
+```crag
+import "stdlib" as std;
+
+struct Node<T> {
+    value: T,
+    next: *Node::<T>,
+
+    fn append(self: Node::<T>, value: T) -> void {
+        if (self.next != null) {
+            self.next.append(value);
+            return;
+        }
+        let new_node = Node::<T>{ value: value, next: null };
+        let current = self;
+        while (current.next != null) {
+            current = current.next;
+        }
+        current.next = &new_node;
+    }
+}
+
+fn main() -> i32 {
+    let head = Node::<i32>{ value: 1, next: null };
+    head.append(2);
+    head.append(3);
+    return 0;
+}
+```
+
+## Building the Compiler
+
+### Requirements
 
 - CMake 3.10+
 - A C++20 compiler
 - LLVM development tools and libraries available through `llvm-config`
   - `llvm-config --cxxflags`
   - `llvm-config --ldflags --libs core support irreader`
-- Python 3 (for running tests)
-
-## Build
-
+- Python 3 (optional - for running tests)
 From the repository root:
 
 ```bash
@@ -42,250 +117,17 @@ Build outputs:
 - Compiler executable: `build/crag`
 - Runtime static library: `build/lib/libruntime.a`
 
-## Quick start
 
-Create a file `hello.crag`:
+### Testing
 
-```crag
-import "stdlib" as std;
-
-fn main() -> i32 {
-	std::cstdio::printf("Hello, Crag!\n");
-	return 0;
-}
-```
-
-Compile and run:
-
-```bash
-./build/crag hello.crag -o hello
-./hello
-```
-
-## Compiler usage
-
-```text
-Crag Compiler [options] input
-```
-
-### Positional argument
-
-- `input` — source file to compile
-
-### Options
-
-- `-o, --output <name>`: output filename (default: `main`)
-- `--emit-ir`: emit LLVM IR instead of object code
-- `--runtime-path <path>`: path to runtime static library
-- `--backend <name>`: backend to use (currently only `llvm`)
-- `-ODebug`: debug optimization profile
-- `-ORelease`: release optimization profile
-- `--unsafe`: disable runtime safety checks
-- `--no-runtime`: do not link the runtime library
-- `-h, --help`: help
-- `-v, --version`: version
-
-### Build products by output extension
-
-- Output ends with `.o` → emits object file only
-- Otherwise → emits object file then links executable
-
-## Standard library and imports
-
-Crag supports relative file imports and shortcut imports.
-
-### Built-in import shortcuts
-
-- `stdlib` → standard umbrella module
-- `string`
-- `vector`
-- `random`
-- `libc`
-
-Example:
-
-```crag
-import "stdlib" as std;
-import "string" as string;
-```
-
-### `CRAGSTD` environment variable
-
-Set `CRAGSTD` to the directory containing `std.crag`.
-
-Example expected layout:
-
-```text
-$CRAGSTD/std.crag
-$CRAGSTD/string.crag
-$CRAGSTD/vector.crag
-...
-```
-
-### Project-local import shortcuts with `.cragrc`
-
-Create `.cragrc` next to your entry module:
-
-```ini
-# alias = path
-mylib = "./vendor/mylib/main.crag"
-game = "./src/game.crag"
-```
-
-Then in code:
-
-```crag
-import "mylib" as mylib;
-import "game" as game;
-```
-
-## Language examples
-
-### Functions, loops, and function pointers
-
-```crag
-extern fn printf(fmt: *u8, ...) -> i32;
-
-fn twice(x: i32) -> i32 {
-	return x * 2;
-}
-
-fn main() -> i32 {
-	let f: fn(i32) -> i32 = &twice;
-	for (let i: i32 = 0; i < 3; i += 1) {
-		printf("%d\n", f(i));
-	}
-	return 0;
-}
-```
-
-### Structs with methods
-
-```crag
-struct Counter {
-	value: i32,
-
-	fn inc(self: *Counter) -> void {
-		self.value += 1;
-	}
-}
-
-fn main() -> i32 {
-	let c = Counter { value: 0 };
-	c.inc();
-	return 0;
-}
-```
-
-### Generics
-
-```crag
-struct Pair<T> {
-	a: T,
-	b: T,
-}
-
-fn main() -> i32 {
-	let p = Pair::<i32> { a: 1, b: 2 };
-	return p.a + p.b;
-}
-```
-
-### Error unions (`T!E`)
-
-```crag
-enum ParseErr(i32) {
-	BAD = 1,
-}
-
-fn parse(ok: bool) -> i32!ParseErr {
-	if (!ok) {
-		return! ParseErr:BAD;
-	}
-	return 42;
-}
-```
-
-## Runtime safety model
-
-By default, generated programs include checks for:
-
-- null pointer dereference
-- out-of-bounds array access
-- division by zero
-
-To disable checks:
-
-```bash
-./build/crag input.crag --unsafe
-```
-
-## Tests
-
-Run all tests:
-
-```bash
-./run_tests.sh
-```
-
-or:
+To run the test suite, ensure you have Python 3 installed. From the repository root:
 
 ```bash
 python3 tests/run_all.py
 ```
 
-The runner:
-
-- compiles each `tests/*.cragtest`
-- executes produced binaries
-- compares stdout/stderr against expectations
-
-### `.cragtest` file format
-
-Sections understood by the test runner:
-
-- `NAME:`
-- `DESC:`
-- `REQUIRES:` (comma-separated additional files)
-- `BEGIN CODE` / `END CODE`
-- `BEGIN EXPECT` / `END EXPECT`
-- `BEGIN EXPECT ERR` / `END EXPECT ERR`
-
-Minimal example:
-
-```text
-//NAME: Hello
-//BEGIN CODE
-extern fn printf(fmt: *u8, ...) -> i32;
-fn main() -> i32 { printf("hi\n"); return 0; }
-//END CODE
-//BEGIN EXPECT
-//hi
-//END EXPECT
-```
-
-## Repository layout
-
-```text
-src/        compiler frontend + backend integration
-runtime/    platform panic/runtime sources
-stdlib/     standard library modules
-examples/   example Crag programs
-tests/      integration tests and runner
-lib/        generated artifacts (for runtime build steps)
-```
-
-## Example programs
-
-- `examples/fibb.crag` — vector + loops
-- `examples/strings.crag` — string module usage
-- `examples/modules/` — multi-file imports
-- `examples/raylib/` — raylib bindings demo
-
-Compile any example:
+Or
 
 ```bash
-./build/crag examples/fibb.crag -o fibb
-./fibb
+bash run_tests.sh
 ```
-
