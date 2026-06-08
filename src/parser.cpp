@@ -3,7 +3,6 @@
 #include "lexer.h"
 #include <algorithm>
 #include <cstddef>
-#include <llvm/IR/Intrinsics.h>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
@@ -21,6 +20,32 @@ std::string describeToken(const Token &token) {
         oss << " ('" << token.value << "')";
     }
     return oss.str();
+}
+
+bool extract_template_target(const std::shared_ptr<Expression> &expr,
+                             std::vector<std::string> &module_path,
+                             std::string &name) {
+    if (auto va = std::dynamic_pointer_cast<VarAccess>(expr)) {
+        name = va->name;
+        return true;
+    }
+    if (auto ma = std::dynamic_pointer_cast<ModuleAccess>(expr)) {
+        module_path = ma->module_path;
+        name = ma->member_name;
+        return true;
+    }
+    if (auto fa = std::dynamic_pointer_cast<FieldAccess>(expr)) {
+        std::vector<std::string> base_path;
+        std::string base_name;
+        if (!extract_template_target(fa->base, base_path, base_name)) {
+            return false;
+        }
+        base_path.push_back(base_name);
+        module_path = std::move(base_path);
+        name = fa->field;
+        return true;
+    }
+    return false;
 }
 } // namespace
 
@@ -149,9 +174,10 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
                 t = declared_type_aliases[name];
                 break;
             }
-            if (str_in_vector(current.value, current_generic_params, nullptr)) {
+            size_t index;
+            if (str_in_vector(current.value, current_generic_params, &index)) {
                 std::string name = consume(TokenType::ID).value;
-                t = std::make_shared<GenericType>(name);
+                t = std::make_shared<GenericType>(index, name);
                 break;
             }
             if (imported_modules.count(current.value) && peek(1).type == TokenType::DOT) {
@@ -166,25 +192,22 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
                 t = std::make_shared<QualifiedType>(path, b);
                 break;
             }
-            if (peek(1).type == TokenType::DOUBLE_COLON) {
-                std::vector<std::string> path;
-                path.push_back(consume(TokenType::ID).value);
-                while (peek().type == TokenType::DOUBLE_COLON) {
-                    // Check if this is a template instantiation
-                    if (peek(1).type == TokenType::LT) {
-                        break;
-                    }
-                    consume(TokenType::DOUBLE_COLON);
-                    path.push_back(consume(TokenType::ID).value);
-                }
-                auto b = path.back();
-                path.pop_back();
-                t = std::make_shared<QualifiedType>(path, b);
-                break;
-            }
-
-
-
+            // if (peek(1).type == TokenType::DOUBLE_COLON) {
+            //     std::vector<std::string> path;
+            //     path.push_back(consume(TokenType::ID).value);
+            //     while (peek().type == TokenType::DOUBLE_COLON) {
+            //         // Check if this is a template instantiation
+            //         if (peek(1).type == TokenType::LT) {
+            //             break;
+            //         }
+            //         consume(TokenType::DOUBLE_COLON);
+            //         path.push_back(consume(TokenType::ID).value);
+            //     }
+            //     auto b = path.back();
+            //     path.pop_back();
+            //     t = std::make_shared<QualifiedType>(path, b);
+            //     break;
+            // }
             t = parse_primitive_type();
             break;
 
@@ -218,6 +241,7 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
     }
 
     if (peek().type == TokenType::DOUBLE_COLON) {
+        std::cout << "Parsing template instance type, base type: " << current.value << std::endl;
         consume(TokenType::DOUBLE_COLON);
         consume(TokenType::LT);
 
@@ -270,8 +294,9 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
         return std::make_shared<Boolean>();
     if (val == "void")
         return std::make_shared<Void>();
-    if (std::find(current_generic_params.begin(), current_generic_params.end(), val) != current_generic_params.end())
-        return std::make_shared<GenericType>(val);
+    auto find = std::find(current_generic_params.begin(), current_generic_params.end(), val);
+    if (find != current_generic_params.end())
+        return std::make_shared<GenericType>(std::distance(current_generic_params.begin(), find), val);
     throw ParseError("Unknown type '" + val + "'", peek().line,
                      peek().column);
 }
@@ -944,6 +969,7 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                 expr->col = t.column;
                 return expr;
             }
+            // asm("int3");
             throw ParseError("Unexpected token in expression: '" + t.value + "'", t.line, t.column);
     }
 }
@@ -963,6 +989,53 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
                     t.type == TokenType::RE ? CastType::Reinterperet : CastType::Normal);
                 expr->line = t.line;
                 expr->col = t.column;
+                return expr;
+            }
+            case TokenType::DOUBLE_COLON: {
+                if (peek().type != TokenType::LT) {
+                    throw ParseError("Unexpected token after '::'", peek().line, peek().column);
+                }
+
+                std::vector<std::string> module_path;
+                std::string template_name;
+                if (!extract_template_target(left, module_path, template_name)) {
+                    throw ParseError("Template instantiation requires a qualified name", t.line, t.column);
+                }
+
+                consume(TokenType::LT);
+                std::vector<std::shared_ptr<Type>> type_args;
+                while (true) {
+                    type_args.push_back(parse_type());
+                    if (peek().type == TokenType::COMMA)
+                        consume(TokenType::COMMA);
+                    else
+                        break;
+                }
+                consume(TokenType::GT);
+
+                if (module_path.empty()) {
+                    expr = std::make_shared<TemplateInstantiation>(template_name, type_args);
+                } else {
+                    expr = std::make_shared<TemplateInstantiation>(module_path, template_name, type_args);
+                }
+                expr->line = t.line;
+                expr->col = t.column;
+
+                if (peek().type == TokenType::LBRACE) {
+                    consume(TokenType::LBRACE);
+                    std::map<std::string, std::shared_ptr<Expression>> field_values;
+                    while (peek().type != TokenType::RBRACE) {
+                        std::string fname = consume(TokenType::ID).value;
+                        consume(TokenType::COLON);
+                        field_values[fname] = parse_expression();
+                        if (peek().type == TokenType::COMMA)
+                            consume(TokenType::COMMA);
+                    }
+                    consume(TokenType::RBRACE);
+                    expr = std::make_shared<StructInitializer>(expr, field_values);
+                    expr->line = t.line;
+                    expr->col = t.column;
+                }
                 return expr;
             }
             case TokenType::DOT: {
@@ -1005,8 +1078,7 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
                 }
                 return expr;
             }
-            // case TokenType::DOUBLE_COLON: {
-            // }
+
             case TokenType::COLON: {
                 std::string variant_name = consume(TokenType::ID).value;
                 expr = std::make_shared<EnumAccess>(left, variant_name);
@@ -1392,16 +1464,45 @@ std::shared_ptr<AsmStmt> Parser::parse_asm_statement() {
     bool is_volatile = match({TokenType::VOLATILE});
 
     std::vector<AsmOperand> operands;
-    std::vector<std::string> options;
+    std::set<AsmStmt::AsmOption> options;
     std::string template_str = "";
 
     consume(TokenType::LPAREN);
-    template_str = consume(TokenType::STRING).value;
+    while (peek().type == TokenType::STRING) {
+        template_str += consume(TokenType::STRING).value;
+    }
 
     while (match({TokenType::COMMA})) {
         if (peek().type == TokenType::ID) {
             std::string keyword = consume(TokenType::ID).value;
             consume(TokenType::LPAREN);
+
+            if (keyword == "options") {
+                // Special case for options, which is just a list of identifiers without expressions or constraints
+                while (true) {
+                    std::string option = consume(TokenType::ID).value;
+                    if (option == "att_syntax")
+                        options.insert(AsmStmt::AsmOption::AttSyntax);
+                    else if (option == "intel_syntax")
+                        options.insert(AsmStmt::AsmOption::IntelSyntax);
+                    else if (option == "nomem")
+                        options.insert(AsmStmt::AsmOption::NoMem);
+                    else if (option == "nostack")
+                        options.insert(AsmStmt::AsmOption::NoStack);
+                    else if (option == "preserves_flags")
+                        options.insert(AsmStmt::AsmOption::PreservesFlags);
+                    else if (option == "noreturn")
+                        options.insert(AsmStmt::AsmOption::NoReturn);
+                    else if (option == "readonly")
+                        options.insert(AsmStmt::AsmOption::ReadOnly);
+                    else
+                        throw ParseError("Unknown asm option: " + option, peek().line, peek().column);
+                    if (!match({TokenType::COMMA}))
+                        break;
+                }
+                consume(TokenType::RPAREN);
+                continue;
+            }
 
             std::optional<std::string> constraint;
             if (peek().type == TokenType::STRING) {
@@ -1446,7 +1547,6 @@ std::shared_ptr<AsmStmt> Parser::parse_asm_statement() {
 
             operands.push_back(AsmOperand(type, expr, constraint));
         }
-        // TODO: Implement options to allow things like "pure", "nomem", etc.
         else {
             break;
         }

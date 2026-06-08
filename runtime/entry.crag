@@ -1,0 +1,36 @@
+fn _start() -> void @noprefix @naked @noreturn {
+    asm volatile (
+        "xor ebp, ebp\n"
+        "mov edi, [rsp]\n"
+        "lea rsi, [rsp + 8]\n"
+        "lea rdx, [rsp + 16 + rdi*8]\n"
+        "xor eax, eax\n"
+        "call __main_setup\n"
+        "mov edi, eax\n"
+        "xor eax, eax\n"
+        "call _exit\n",
+        options(intel_syntax, nomem, nostack, noreturn)
+    );
+}
+
+fn main(args: []*u8, envp: *const u8) -> i32;
+extern fn __global_var_init__() -> void @noprefix @weak;
+extern fn fflush(stream: *void) -> i32;
+
+fn __main_setup(argc: i32, argv: **u8, envp: *const u8) -> i32 @noprefix {
+    let args = slice(argv, argc);
+    if (&__global_var_init__ != null)
+        __global_var_init__();
+    let status = main(args, envp);
+    fflush(null);
+    return status;
+}
+
+fn _exit(status: i32) -> void @inline @noprefix @noreturn {
+    asm volatile (
+        "mov rax, 60\n"
+        "syscall\n",
+        in("rdi") status,
+        options(intel_syntax, nomem, nostack, noreturn),
+    );
+}

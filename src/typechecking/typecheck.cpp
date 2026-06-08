@@ -9,7 +9,6 @@
 #include <memory>
 #include <optional>
 
-namespace {
 // TODO: FFS don't do this, but it's the easiest way to solve the conflict between the when blocks and the module resolver.
 void rebuildModuleMetadata(const std::shared_ptr<Module> &module) {
     if (!module || !module->ast) {
@@ -45,7 +44,6 @@ void rebuildModuleMetadata(const std::shared_ptr<Module> &module) {
         }
     }
 }
-} // namespace
 
 TypeChecker::TypeChecker(CompilerOptions options) : m_const_eval(*new ConstEvaluator(this)) {
     m_const_eval.addIntrinsic(
@@ -96,7 +94,6 @@ std::shared_ptr<Type> TypeChecker::lookupNamedType(const std::string &name) cons
     }
 
 error:
-    std::cout << "TypeChecker: lookupNamedType: unknown type: " << name << "\n";
     return nullptr;
 }
 
@@ -432,7 +429,7 @@ static void substituteGenericTypes(std::shared_ptr<Type> &type,
 
 std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t) {
     if (!t) {
-        asm ("int3"); // trigger breakpoint for debugging
+        asm("int3"); // trigger breakpoint for debugging
         throw TypeCheckError(node, "Internal type-checker error: attempted to resolve a null type");
     }
 
@@ -526,8 +523,8 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
         // Check if base is a qualified type (module-qualified template)
         if (auto qt = std::dynamic_pointer_cast<QualifiedType>(tut->base)) {
             auto ti = std::make_shared<TemplateInstantiation>(qt->module_path, qt->type_name, resolved_args);
-            auto pair = inferTemplateInstantiation(ti);
-            auto instantiated_type = pair.first;
+            auto newExpr = inferTemplateInstantiation(ti);
+            auto instantiated_type = newExpr.type;
             if (!instantiated_type) {
                 throw TypeCheckError(
                     nullptr,
@@ -540,8 +537,8 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
         auto base_type = resolveType(node, tut->base);
         if (auto struct_type = std::dynamic_pointer_cast<StructType>(base_type)) {
             auto ti = std::make_shared<TemplateInstantiation>(struct_type->name, resolved_args);
-            auto pair = inferTemplateInstantiation(ti); // Will instantiate the template
-            auto instantiated_type = pair.first;
+            auto newExpr = inferTemplateInstantiation(ti); // Will instantiate the template
+            auto instantiated_type = newExpr.type;
             if (!instantiated_type) {
                 throw TypeCheckError(
                     nullptr,
@@ -563,18 +560,18 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                 }
             }
             if (all_generic_params) {
-                auto base_copy = base_template->copy();
+                auto base_copy = base_template->instantiate();
                 substituteGenericTypes(base_copy, generic_map);
                 auto collapsed = resolveType(node, base_copy);
                 if (auto collapsed_struct = std::dynamic_pointer_cast<StructType>(collapsed)) {
                     auto ti = std::make_shared<TemplateInstantiation>(collapsed_struct->name, resolved_args);
-                    auto pair = inferTemplateInstantiation(ti);
-                    if (!pair.first) {
+                    auto newExpr = inferTemplateInstantiation(ti);
+                    if (!newExpr.type) {
                         throw TypeCheckError(
                             nullptr,
                             "Failed to resolve template instantiation type for: " + tut->str());
                     }
-                    return pair.first;
+                    return newExpr.type;
                 }
                 return collapsed;
             }
@@ -857,6 +854,11 @@ void TypeChecker::checkStructDeclaration(
         st->methods = sd->methods;
         st->complete = true;
     } else {
+        // Dump symbol table for debugging
+        std::cerr << "Symbol table contents:\n";
+        for (const auto &entry : symbolTable().entries()) {
+            std::cerr << "  " << entry.name << ": " << (entry.type ? entry.type->str() : "null") << "\n";
+        }
         throw TypeCheckError(sd, "Internal error: struct " + sd->name + " not found in map");
     }
 
@@ -932,6 +934,12 @@ void TypeChecker::checkVariableDeclaration(
         if (auto expr = std::dynamic_pointer_cast<Expression>(init)) {
 
             auto init_type = resolveType(expr, inferExpression(expr, var->var_type));
+
+            // If the initializer expression was rewritten by inference (e.g. builtins
+            // such as sizeof/slice expand into other AST nodes), make sure the
+            // variable keeps the rewritten initializer for later checks and codegen.
+            var->initializer = expr;
+            init = var->initializer;
 
             if (!init_type) {
                 throw TypeCheckError(
@@ -1408,6 +1416,11 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
                 expr = so.second;
                 return so.first;
             }
+            if (va->name == "slice") {
+                auto so = expandSlice(call);
+                expr = so.second;
+                return so.first;
+            }
             if (va->name == "alignof") {
                 auto ao = expandAlignOf(call);
                 expr = ao.second;
@@ -1435,6 +1448,10 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         return inferMethodCall(mc);
     if (auto ma = std::dynamic_pointer_cast<ModuleAccess>(expr))
         return inferModuleAccess(ma);
+    if (auto te = std::dynamic_pointer_cast<TypeExpression>(expr)) {
+        te->inferred_type = resolveType(te, te->type);
+        return te->inferred_type;
+    }
     if (auto ea = std::dynamic_pointer_cast<EnumAccess>(expr)) {
         std::string enum_name;
         auto va = std::dynamic_pointer_cast<VarAccess>(ea->enum_expr);
@@ -1464,10 +1481,12 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         return res;
     }
     if (auto ta = std::dynamic_pointer_cast<TemplateInstantiation>(expr)) {
-        std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> pair = inferTemplateInstantiation(ta);
-        // std::cout << "Inferred template instantiation type: " << (pair.first ? pair.first->str() : "null") << std::endl;
-        expr = pair.second;
-        return pair.first;
+        auto newExpr = inferTemplateInstantiation(ta);
+        expr = newExpr.replacement;
+        std::cout << "Template type: " << typeName(newExpr.type) << std::endl;
+        std::cout << "Rewritten expression: " << expr->str() << std::endl;
+        std::cout << "Rewritten expression type: " << typeName(inferExpression(expr)) << std::endl;
+        return newExpr.type;
     }
     if (auto al = std::dynamic_pointer_cast<ArrayLiteral>(expr))
         return inferArrayLiteral(al, expected);
@@ -2105,16 +2124,60 @@ std::shared_ptr<Type>
 TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
                              const std::shared_ptr<Type> &expected) {
     std::shared_ptr<StructType> st;
+    std::shared_ptr<ArrayType> at;
     std::shared_ptr<Type> _st;
     if (auto mod_acc = std::dynamic_pointer_cast<ModuleAccess>(init->struct_type_expr)) {
         auto stype = inferModuleAccess(mod_acc);
         st = std::dynamic_pointer_cast<StructType>(stype);
+        at = std::dynamic_pointer_cast<ArrayType>(stype);
     } else {
         _st = inferExpression(init->struct_type_expr);
         st = std::dynamic_pointer_cast<StructType>(_st);
+        at = std::dynamic_pointer_cast<ArrayType>(_st);
     }
-    if (!st) {
+    if (!st && !at) {
         throw TypeCheckError(init, "Struct initializer with non-struct type: " + typeName(_st));
+    }
+
+    if (at) {
+        auto ptr_field_type = std::make_shared<PointerType>(resolveType(init, at->element_type));
+        auto len_field_type = std::make_shared<USize>();
+
+        auto ptr_it = init->field_values.find("ptr");
+        auto len_it = init->field_values.find("len");
+        if (ptr_it == init->field_values.end() || len_it == init->field_values.end() ||
+            init->field_values.size() != 2) {
+            throw TypeCheckError(init, "Array initializer expects fields ptr and len");
+        }
+
+        bool all_are_const = true;
+        for (auto &p : init->field_values) {
+            auto res = m_const_eval.evaluateExpression(p.second);
+            if (!m_const_eval.ok() || !res) {
+                all_are_const = false;
+                m_const_eval.clearErrors();
+            }
+
+            auto fieldTypeRaw = p.first == "ptr" ? std::dynamic_pointer_cast<Type>(ptr_field_type) : std::dynamic_pointer_cast<Type>(len_field_type);
+            auto fieldType = resolveType(p.second, fieldTypeRaw);
+            auto typeActual = inferExpression(p.second, fieldType);
+            if (!typeActual) {
+                throw TypeCheckError(init, "Failed to infer type of array field " + p.first + " initializer");
+            }
+            if (!typeActual->equals(fieldType)) {
+                if (canImplicitCast(typeActual, fieldType)) {
+                    p.second = std::make_shared<TypeCast>(p.second, fieldType, CastType::Normal);
+                } else {
+                    throw TypeCheckError(init, "Array field " + p.first + " type mismatch: expected " +
+                                                   typeName(fieldType) + " got " + typeName(typeActual));
+                }
+            }
+        }
+        if (all_are_const) {
+            init->constant_evaluated = true;
+        }
+        init->inferred_type = at;
+        return at;
     }
 
     // Global variable initializers can be checked before struct declarations are finalized,

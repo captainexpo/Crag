@@ -50,6 +50,8 @@ struct Arguments {
     bool dump_ast_asa;
     OSTarget os;
     ArchTarget arch;
+    EnvironmentTarget environment;
+    VendorTarget vendor;
 };
 
 void printHelp(int argc, char **argv) {
@@ -65,10 +67,13 @@ void printHelp(int argc, char **argv) {
     std::cout << "  --unsafe                     Disable safety checks (bounds checking, null pointer checks)\n";
     std::cout << "  --no-runtime                 Do not link against the runtime library\n";
     std::cout << "  --dump-ast [bsa],[asa]       Dump the AST and exit. Provide 'bsa' to dump before semantic analysis and 'asa' to dump after semantic analysis\n";
-    std::cout << "  --target-os <os>              Target operating system (linux, macos, windows)\n";
-    std::cout << "  --target-arch <arch>          Target architecture (x86_64, x86, arm64)\n";
+    std::cout << "  --target-os <os>             Target operating system (linux, macos, windows)\n";
+    std::cout << "  --target-arch <arch>         Target architecture (x86_64, x86, arm64)\n";
+    std::cout << "  --target-vendor <vendor>     Target vendor (pc, apple, unkown)\n";
+    std::cout << "  --target-environment <env>   Target environment (gnu, msvc, elf, eabi)\n";
     std::cout << "  -l<arg>, -L<arg>, -W<arg>    Pass <arg> to the backend as a linker or compiler flag\n";
     std::cout << "  --help or -h                 Show this help message\n";
+    std::cout << "  --nocstdlib                  Do not link against the standard library (implies --no-runtime)\n";
 }
 
 Arguments parseArguments(int argc, char **argv) {
@@ -188,7 +193,53 @@ Arguments parseArguments(int argc, char **argv) {
                 printHelp(argc, argv);
                 exit(1);
             }
-        } else if (arg[0] == '-') {
+        } else if (arg == "--target-vendor") {
+            if (i + 1 < argc) {
+                std::string vendor_arg = argv[++i];
+                if (vendor_arg == "pc") {
+                    args.vendor = PC;
+                } else if (vendor_arg == "apple") {
+                    args.vendor = Apple;
+                } else if (vendor_arg == "unknown") {
+                    args.vendor = UnknownVendor;
+                } else {
+                    std::cerr << "Error: Invalid value for --target-vendor. Expected 'pc', 'apple', or 'unknown'.\n";
+                    printHelp(argc, argv);
+                    exit(1);
+                }
+            } else {
+                std::cerr << "Error: Missing value for " << arg << "\n";
+                printHelp(argc, argv);
+                exit(1);
+            }
+        } else if (arg == "--target-environment") {
+            if (i + 1 < argc) {
+                std::string env_arg = argv[++i];
+                if (env_arg == "gnu") {
+                    args.environment = GNU;
+                } else if (env_arg == "msvc") {
+                    args.environment = MSVC;
+                } else if (env_arg == "elf") {
+                    args.environment = ELF;
+                } else if (env_arg == "eabi") {
+                    args.environment = EABI;
+                } else if (env_arg == "unknown") {
+                    args.environment = UnknownEnvironment;
+                } else {
+                    std::cerr << "Error: Invalid value for --target-environment. Expected 'gnu', 'msvc', 'elf', 'eabi', or 'unknown'.\n";
+                    printHelp(argc, argv);
+                    exit(1);
+                }
+            } else {
+                std::cerr << "Error: Missing value for " << arg << "\n";
+                printHelp(argc, argv);
+                exit(1);
+            }
+        }  else if (arg == "--nocstdlib") {
+            // Pass --nostdlib to the backend to avoid linking against the C standard library (assumes the backend is clang or gcc)
+            args.backend_args.push_back("-nostdlib");
+        }
+        else if (arg[0] == '-') {
             if (arg[1] == 'l' || arg[1] == 'L' || arg[1] == 'W') {
                 args.backend_args.push_back(arg);
             } else {
@@ -231,8 +282,7 @@ int main(int argc, char **argv) {
     auto pathToRuntime = args.runtime_path;
     auto noRuntime = args.no_runtime;
 
-    auto context = llvm::LLVMContext();
-    std::shared_ptr<Backend> codegen = compileModule(inputFilepath, context, options);
+    std::shared_ptr<Backend> codegen = compileModule(inputFilepath, options);
 
     if (codegen == nullptr) {
         std::cerr << "Compilation failed.\n";

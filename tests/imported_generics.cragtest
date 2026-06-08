@@ -1,0 +1,26 @@
+//NAME: Imported Generics
+//DESC:
+//BEGIN CODE
+
+import "imported_generics.crag" as ig;
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+
+    let v = ig.Vec2::<f64> { x: 3.0, y: 4.0 };
+    printf("%f %f\n", v.x, v.y);
+
+    let v2 = ig.Vec2::<i32> { x: 30, y: 40 };
+    printf("%d %d\n", v2.x, v2.y);
+
+    return 0;
+}
+
+
+//END CODE
+//BEGIN EXPECT
+//3.000000 4.000000
+//30 40
+//END EXPECT
+

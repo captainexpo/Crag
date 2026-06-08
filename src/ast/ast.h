@@ -92,7 +92,7 @@ struct ASTVisitor {
     virtual void visit(struct TypeExpression &) {}
     virtual void visit(struct AsmStmt &) {}
     virtual void visit(struct WhenBlock &) {}
-    virtual void visit(struct SwitchStmt&) {}
+    virtual void visit(struct SwitchStmt &) {}
 };
 
 struct Type {
@@ -106,7 +106,7 @@ struct Type {
 
     virtual bool equals(const std::shared_ptr<Type> &other) const = 0;
 
-    virtual std::shared_ptr<Type> copy() const = 0;
+    virtual std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const = 0;
 
     virtual bool isNumeric() const { return false; }
     virtual bool isInteger() const { return false; }
@@ -176,7 +176,7 @@ struct ASTNode : std::enable_shared_from_this<ASTNode> {
     virtual NodeKind kind() const { return NodeKind::Unknown; }
     virtual void accept(ASTVisitor &v);
 
-    virtual std::shared_ptr<ASTNode> copy() const;
+    virtual std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> generic_types = {}) const;
 
     std::string locationStr() const {
         return "(line " + std::to_string(line) + ", col " + std::to_string(col) +
@@ -200,7 +200,7 @@ struct Void : Type {
     bool equals(const std::shared_ptr<Type> &other) const override {
         return other->kind() == TypeKind::Void;
     }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<Void>(*this);
     }
 };
@@ -215,7 +215,7 @@ struct U8 : Type {
     bool isInteger() const override { return true; }
     bool isUnsigned() const override { return true; }
     int numericRank() const override { return 0; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<U8>(*this);
     }
 };
@@ -230,7 +230,7 @@ struct U16 : Type {
     bool isInteger() const override { return true; }
     bool isUnsigned() const override { return true; }
     int numericRank() const override { return 1; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<U16>(*this);
     }
 };
@@ -245,7 +245,7 @@ struct U32 : Type {
     bool isInteger() const override { return true; }
     bool isUnsigned() const override { return true; }
     int numericRank() const override { return 1; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<U32>(*this);
     }
 };
@@ -260,7 +260,7 @@ struct U64 : Type {
     bool isInteger() const override { return true; }
     bool isUnsigned() const override { return true; }
     int numericRank() const override { return 2; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<U64>(*this);
     }
 };
@@ -275,7 +275,7 @@ struct USize : Type {
     bool isInteger() const override { return true; }
     bool isUnsigned() const override { return true; }
     int numericRank() const override { return 2; } // usually same as U64
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<USize>(*this);
     }
 };
@@ -290,7 +290,7 @@ struct ISize : Type {
     bool isInteger() const override { return true; }
     bool isSigned() const override { return true; }
     int numericRank() const override { return 2; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<ISize>(*this);
     }
 };
@@ -305,7 +305,7 @@ struct I16 : Type {
     bool isInteger() const override { return true; }
     bool isSigned() const override { return true; }
     int numericRank() const override { return 1; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<I16>(*this);
     }
 };
@@ -320,7 +320,7 @@ struct I8 : Type {
     bool isInteger() const override { return true; }
     bool isSigned() const override { return true; }
     int numericRank() const override { return 0; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<I8>(*this);
     }
 };
@@ -335,7 +335,7 @@ struct I32 : Type {
     bool isInteger() const override { return true; }
     bool isSigned() const override { return true; }
     int numericRank() const override { return 1; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<I32>(*this);
     }
 };
@@ -350,7 +350,7 @@ struct I64 : Type {
     bool isInteger() const override { return true; }
     bool isSigned() const override { return true; }
     int numericRank() const override { return 2; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<I64>(*this);
     }
 };
@@ -364,7 +364,7 @@ struct F32 : Type {
     bool isNumeric() const override { return true; }
     bool isFloating() const override { return true; }
     int numericRank() const override { return 3; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<F32>(*this);
     }
 };
@@ -377,7 +377,7 @@ struct F64 : Type {
     bool isNumeric() const override { return true; }
     bool isFloating() const override { return true; }
     int numericRank() const override { return 4; }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<F64>(*this);
     }
 };
@@ -389,7 +389,7 @@ struct Boolean : Type {
         return other->kind() == TypeKind::Bool;
     }
     int numericRank() const override { return 0; } // optional: treat as lowest
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<Boolean>(*this);
     }
 };
@@ -400,7 +400,7 @@ struct NullType : Type {
     bool equals(const std::shared_ptr<Type> &other) const override {
         return other->kind() == TypeKind::Null;
     }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<NullType>(*this);
     }
 };
@@ -423,8 +423,8 @@ struct PointerType : Type {
             return false;
         return pointer_const == o->pointer_const && base->equals(o->base);
     }
-    std::shared_ptr<Type> copy() const override {
-        return std::make_shared<PointerType>(base->copy(), pointer_const);
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
+        return std::make_shared<PointerType>(base->instantiate(gp_replace), pointer_const);
     }
 };
 
@@ -460,8 +460,8 @@ struct ArrayType : Type {
         // TODO: Better length expression comparison
         return length_expr == o->length_expr;
     }
-    std::shared_ptr<Type> copy() const override {
-        return std::make_shared<ArrayType>(element_type->copy(),
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
+        return std::make_shared<ArrayType>(element_type->instantiate(gp_replace),
                                            length_expr, unsized);
     }
 };
@@ -485,9 +485,9 @@ struct ErrorUnionType : Type {
         return valueType->equals(o->valueType) &&
                errorType->equals(o->errorType);
     }
-    std::shared_ptr<Type> copy() const override {
-        return std::make_shared<ErrorUnionType>(valueType->copy(),
-                                                errorType->copy());
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
+        return std::make_shared<ErrorUnionType>(valueType->instantiate(gp_replace),
+                                                errorType->instantiate(gp_replace));
     }
 };
 struct QualifiedType : Type {
@@ -514,7 +514,7 @@ struct QualifiedType : Type {
             return false;
         return module_path == o->module_path && type_name == o->type_name;
     }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<QualifiedType>(module_path, type_name);
     }
 };
@@ -542,7 +542,7 @@ struct ModuleType : Type {
         // return type_checker->lookup(
     }
 
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<ModuleType>(name, type_checker);
     }
 };
@@ -593,12 +593,12 @@ struct TemplateInstanceType : Type {
         return true;
     }
 
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         std::vector<std::shared_ptr<Type>> arg_copies;
         for (const auto &arg : type_args) {
-            arg_copies.push_back(arg->copy());
+            arg_copies.push_back(arg->instantiate(gp_replace));
         }
-        return std::make_shared<TemplateInstanceType>(base->copy(), arg_copies);
+        return std::make_shared<TemplateInstanceType>(base->instantiate(gp_replace), arg_copies);
     }
 
     TypeKind kind() const override { return TypeKind::TemplateInstanceType; }
@@ -607,10 +607,13 @@ struct TemplateInstanceType : Type {
 struct GenericType : Type {
     TypeKind kind() const override { return TypeKind::Unknown; }
 
-    std::string name;
+    int id;
+
+    std::string name; // Debugging purposes only, not used for equality/substitution
+
     GenericConstraintKind constraint = GenericConstraintKind::Any; // Not implemented yet
 
-    GenericType(std::string n) : name(std::move(n)) {}
+    GenericType(int id, std::string n = "?") : id(id), name(std::move(n)) {}
 
     std::string str() const override {
         return "Generic<" + name + ">";
@@ -622,8 +625,11 @@ struct GenericType : Type {
             return false;
         return name == o->name;
     }
-    std::shared_ptr<Type> copy() const override {
-        return std::make_shared<GenericType>(name);
+
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
+        if (id < static_cast<int>(gp_replace.size()))
+            return gp_replace[id];
+        return std::make_shared<GenericType>(id, name);
     }
 };
 
@@ -680,7 +686,7 @@ struct StructType : Type {
         return name == o->name;
     }
 
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<StructType>(name, fields);
     }
 };
@@ -732,7 +738,7 @@ struct UnionType : Type {
         return name == o->name;
     }
 
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<UnionType>(name, fields);
     }
 };
@@ -780,12 +786,12 @@ struct FunctionType : Type {
                 return false;
         return true;
     }
-    std::shared_ptr<Type> copy() const override {
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         std::vector<std::shared_ptr<Type>> param_copies;
         for (const auto &param : params) {
-            param_copies.push_back(param->copy());
+            param_copies.push_back(param->instantiate(gp_replace));
         }
-        return std::make_shared<FunctionType>(param_copies, ret->copy(), variadic);
+        return std::make_shared<FunctionType>(param_copies, ret->instantiate(gp_replace), variadic);
     }
 };
 
@@ -813,7 +819,7 @@ struct Program : ASTNode {
     }
     NodeKind kind() const override { return NodeKind::Program; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 // ----------------- Expressions -----------------
@@ -834,7 +840,7 @@ struct TypeCast : public Expression {
     }
     NodeKind kind() const override { return NodeKind::TypeCast; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct TypeExpression : public Expression {
@@ -845,7 +851,7 @@ struct TypeExpression : public Expression {
     }
     NodeKind kind() const override { return NodeKind::TypeExpression; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct VarAccess : public Expression {
@@ -855,7 +861,7 @@ struct VarAccess : public Expression {
     std::string str() const override { return "VarAccess(" + name + ")"; }
     NodeKind kind() const override { return NodeKind::VarAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct Dereference : public Expression {
@@ -868,7 +874,7 @@ struct Dereference : public Expression {
         return NodeKind::Dereference;
     };
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 struct FuncCall : public Expression {
     ExprPtr func;
@@ -887,7 +893,7 @@ struct FuncCall : public Expression {
     }
     NodeKind kind() const override { return NodeKind::FuncCall; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 struct MethodCall : public Expression {
     ExprPtr object;
@@ -907,7 +913,7 @@ struct MethodCall : public Expression {
     }
     NodeKind kind() const override { return NodeKind::MethodCall; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct Access : Expression {};
@@ -919,7 +925,7 @@ struct EnumAccess : public Access {
     std::string str() const override { return "EnumAccess(" + enum_expr->toString() + ":" + variant + ")"; }
     NodeKind kind() const override { return NodeKind::VarAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct FieldAccess : public Access {
@@ -932,7 +938,7 @@ struct FieldAccess : public Access {
     }
     NodeKind kind() const override { return NodeKind::FieldAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct TemplateInstantiation : public Expression {
@@ -968,7 +974,7 @@ struct TemplateInstantiation : public Expression {
     }
     NodeKind kind() const override { return NodeKind::TemplateInstantiation; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct ModuleAccess : public Access {
@@ -986,7 +992,7 @@ struct ModuleAccess : public Access {
     }
     NodeKind kind() const override { return NodeKind::ModuleAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct OffsetAccess : public Expression {
@@ -999,7 +1005,7 @@ struct OffsetAccess : public Expression {
     }
     NodeKind kind() const override { return NodeKind::OffsetAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct BinaryOperation : public Expression {
@@ -1014,7 +1020,7 @@ struct BinaryOperation : public Expression {
     }
     NodeKind kind() const override { return NodeKind::BinaryOp; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct UnaryOperation : public Expression {
@@ -1028,7 +1034,7 @@ struct UnaryOperation : public Expression {
     }
     NodeKind kind() const override { return NodeKind::UnaryOp; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 using ConstValue = std::variant<uint64_t, int64_t, double, bool, std::string>;
@@ -1063,13 +1069,13 @@ struct Literal : public Expression {
     }
     NodeKind kind() const override { return NodeKind::Literal; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct ArrayLiteral : public Expression {
     std::vector<ExprPtr> elements;
 
-    size_t len = 0; // # of defined elements
+    size_t len = 0;         // # of defined elements
     size_t defined_len = 0; // size of array it's initializing
 
     ArrayLiteral(std::vector<ExprPtr> elems)
@@ -1088,7 +1094,7 @@ struct ArrayLiteral : public Expression {
     }
     NodeKind kind() const override { return NodeKind::Literal; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct StructInitializer : public Expression {
@@ -1114,7 +1120,7 @@ struct StructInitializer : public Expression {
     }
     NodeKind kind() const override { return NodeKind::StructInit; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 // ----------------- Statements -----------------
@@ -1141,7 +1147,7 @@ struct Block : public Statement {
     }
     NodeKind kind() const override { return NodeKind::Block; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct IfStatement : public Statement {
@@ -1161,7 +1167,7 @@ struct IfStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::IfStmt; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct ForStatement : public Statement {
@@ -1180,7 +1186,7 @@ struct ForStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::ForStmt; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct WhileStatement : public Statement {
@@ -1194,7 +1200,7 @@ struct WhileStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::WhileStmt; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct ReturnStatement : public Statement {
@@ -1206,7 +1212,7 @@ struct ReturnStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::ReturnStmt; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct BreakStatement : public Statement {
@@ -1216,7 +1222,7 @@ struct BreakStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::BreakStatement; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct ContinueStatement : public Statement {
@@ -1226,7 +1232,7 @@ struct ContinueStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::ContinueStatement; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct ExpressionStatement : public Statement {
@@ -1237,7 +1243,7 @@ struct ExpressionStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::ExpressionStatement; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct Assignment : public Statement {
@@ -1250,7 +1256,7 @@ struct Assignment : public Statement {
     }
     NodeKind kind() const override { return NodeKind::Assignment; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct FunctionDeclaration : public TypeDecl {
@@ -1273,7 +1279,7 @@ struct FunctionDeclaration : public TypeDecl {
     }
     NodeKind kind() const override { return NodeKind::FunctionDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
@@ -1293,7 +1299,7 @@ struct VariableDeclaration : Statement, Declaration {
     }
     NodeKind kind() const override { return NodeKind::VarDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 struct ImportDeclaration : Declaration {
     std::string path;
@@ -1305,7 +1311,7 @@ struct ImportDeclaration : Declaration {
     }
     NodeKind kind() const override { return NodeKind::ImportDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct EnumType : Type {
@@ -1327,10 +1333,10 @@ struct EnumType : Type {
             return false;
         return name == o->name;
     }
-    std::shared_ptr<Type> copy() const override {
-        auto enum_type_copy = std::make_shared<EnumType>(name, base_type->copy());
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
+        auto enum_type_copy = std::make_shared<EnumType>(name, base_type->instantiate(gp_replace));
         for (const auto &[variant, value] : variant_map) {
-            enum_type_copy->addVariant(variant, std::dynamic_pointer_cast<Literal>(value->copy()));
+            enum_type_copy->addVariant(variant, std::dynamic_pointer_cast<Literal>(value->instantiate(gp_replace)));
         }
         return enum_type_copy;
     }
@@ -1357,7 +1363,7 @@ struct EnumDeclaration : public TypeDecl {
     }
     NodeKind kind() const override { return NodeKind::EnumDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
@@ -1398,7 +1404,7 @@ struct StructDeclaration : public TypeDecl {
     }
     NodeKind kind() const override { return NodeKind::StructDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
@@ -1434,7 +1440,7 @@ struct UnionDeclaration : public TypeDecl {
 
     NodeKind kind() const override { return NodeKind::UnionDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
@@ -1443,7 +1449,7 @@ struct TypeAliasDeclaration : public TypeDecl {
     std::shared_ptr<Type> aliased_type;
 
     TypeAliasDeclaration(std::string n, std::shared_ptr<Type> t)
-        : aliased_type(std::move(t)){
+        : aliased_type(std::move(t)) {
         name = std::move(n);
     }
     std::string str() const override {
@@ -1452,7 +1458,7 @@ struct TypeAliasDeclaration : public TypeDecl {
 
     NodeKind kind() const override { return NodeKind::TypeAliasDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
@@ -1479,12 +1485,22 @@ struct AsmOperand {
 };
 
 struct AsmStmt : public Statement {
+    enum class AsmOption {
+        NoMem,
+        AttSyntax,
+        IntelSyntax,
+        NoStack,
+        PreservesFlags,
+        NoReturn,
+        ReadOnly,
+    };
+
     bool is_volatile;
     std::string template_str;
     std::vector<AsmOperand> operands;
-    std::vector<std::string> options; // e.g. "pure", "nomem", "att_syntax"
+    std::set<AsmOption> options;
 
-    AsmStmt(bool vol, std::string tmpl, std::vector<AsmOperand> ops, std::vector<std::string> opts)
+    AsmStmt(bool vol, std::string tmpl, std::vector<AsmOperand> ops, std::set<AsmOption> opts)
         : is_volatile(vol), template_str(std::move(tmpl)), operands(std::move(ops)), options(std::move(opts)) {}
 
     NodeKind kind() const override { return NodeKind::AsmStmt; }
@@ -1496,16 +1512,15 @@ struct AsmStmt : public Statement {
         }
         result += "], options: [";
         for (const auto &opt : options) {
-            result += opt + ", ";
+            result += std::to_string(static_cast<int>(opt)) + ", ";
         }
         result += "])";
         return result;
     }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
-
-struct WhenBlock: public Declaration, public Statement { // Conditional compilation
+struct WhenBlock : public Declaration, public Statement { // Conditional compilation
 
     ExprPtr condition; // e.g. "windows", "debug", "feature=\"foo\""
     std::vector<ASTNodePtr> body;
@@ -1522,9 +1537,7 @@ struct WhenBlock: public Declaration, public Statement { // Conditional compilat
         result += "}";
         return result;
     }
-    std::shared_ptr<ASTNode> copy() const override;
-
-
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 struct SwitchStmt : public Statement {
@@ -1561,7 +1574,7 @@ struct SwitchStmt : public Statement {
         result += "}";
         return result;
     }
-    std::shared_ptr<ASTNode> copy() const override;
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
 uint64_t getLitValue(const std::shared_ptr<Literal> &lit);

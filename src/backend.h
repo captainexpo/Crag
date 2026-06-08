@@ -30,6 +30,20 @@ enum ArchTarget {
     UnknownArch
 };
 
+enum VendorTarget {
+    PC,
+    Apple,
+    UnknownVendor
+};
+
+enum EnvironmentTarget {
+    GNU,
+    MSVC,
+    EABI,
+    ELF,
+    UnknownEnvironment
+};
+
 inline ArchTarget defaultArch() {
     // Current arch detection
 #if defined(__x86_64__) || defined(_M_X64)
@@ -56,33 +70,92 @@ inline OSTarget defaultOS() {
 #endif
 }
 
+inline VendorTarget defaultVendor() {
+#if defined(__APPLE__)
+    return Apple;
+#else
+    return PC;
+#endif
+}
+
+inline EnvironmentTarget defaultEnvironment() {
+#if defined(_WIN32) || defined(_WIN64)
+    return MSVC;
+#elif defined(__linux__) || defined(__APPLE__)
+    return GNU;
+#else
+    return UnknownEnvironment;
+#endif
+}
+
 struct Target {
     OSTarget os;
     ArchTarget arch;
+    VendorTarget vendor;
+    EnvironmentTarget environment;
 
-    Target() : os(UnknownOS), arch(UnknownArch) {}
-    Target(OSTarget os, ArchTarget arch) : os(os), arch(arch) {}
+    Target() : os(UnknownOS), arch(UnknownArch), vendor(UnknownVendor), environment(UnknownEnvironment) {}
+    Target(OSTarget os, ArchTarget arch, VendorTarget vendor = defaultVendor(), EnvironmentTarget environment = defaultEnvironment())
+        : os(os), arch(arch), vendor(vendor), environment(environment) {}
 
     static Target defaultTarget() {
-        return Target(defaultOS(), defaultArch());
+        return Target(defaultOS(), defaultArch(), defaultVendor(), defaultEnvironment());
     }
 
     std::string osToString() {
         switch (os) {
-            case Linux: return "linux";
-            case MacOS: return "macos";
-            case Windows: return "windows";
-            default: return "unknown";
+            case Linux:
+                return "linux";
+            case MacOS:
+                return "macos";
+            case Windows:
+                return "windows";
+            default:
+                return "unknown";
         }
     }
 
     std::string archToString() {
         switch (arch) {
-            case X86_64: return "x86_64";
-            case X86: return "x86";
-            case ARM64: return "arm64";
-            default: return "unknown";
+            case X86_64:
+                return "x86_64";
+            case X86:
+                return "x86";
+            case ARM64:
+                return "arm64";
+            default:
+                return "unknown";
         }
+    }
+
+    std::string vendorToString() {
+        switch (vendor) {
+            case PC:
+                return "pc";
+            case Apple:
+                return "apple";
+            default:
+                return "unknown";
+        }
+    }
+
+    std::string environmentToString() {
+        switch (environment) {
+            case GNU:
+                return "gnu";
+            case MSVC:
+                return "msvc";
+            case EABI:
+                return "eabi";
+            case ELF:
+                return "elf";
+            default:
+                return "unknown";
+        }
+    }
+
+    std::string targetTriple() {
+        return archToString() + "-" + vendorToString() + "-" + osToString() + "-" + environmentToString();
     }
 };
 
@@ -94,8 +167,6 @@ typedef struct {
     bool dump_ast_asa;
     Target target;
 } CompilerOptions;
-
-
 
 class Backend {
   public:

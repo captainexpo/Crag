@@ -1,5 +1,6 @@
 #pragma once
 #include "llvm/IR/InstrTypes.h"
+#include "llvm/TargetParser/Triple.h"
 #ifndef IR_H
 #define IR_H
 
@@ -85,12 +86,17 @@ class Scope {
 
 class LLVMCodegen : public Backend {
   public:
-    LLVMCodegen(std::string module_name, llvm::LLVMContext &ctx, ModuleResolver moduleResolver, CompilerOptions options)
-        : context(ctx), m_builder(ctx), m_module_resolver(moduleResolver), m_options(options) {
+    LLVMCodegen(std::string module_name, ModuleResolver moduleResolver, CompilerOptions options)
+        :  m_module_resolver(moduleResolver), m_options(options) {
+                m_builder = std::make_unique<llvm::IRBuilder<>>(context);
 
-        m_llvm_module = std::make_unique<llvm::Module>(module_name, ctx);
+                m_llvm_module = std::make_unique<llvm::Module>(module_name, context);
         m_scopeStack.push_back(Scope(nullptr));
         m_emit_debug = (options.opt_level == Debug);
+
+        llvm::Triple triple(options.target.targetTriple());
+
+        m_llvm_module->setTargetTriple(triple);
 
         if (options.do_runtime_safety)
             emitBuiltinDeclarations();
@@ -112,7 +118,7 @@ class LLVMCodegen : public Backend {
     std::unique_ptr<llvm::Module> takeModule() { return std::move(m_llvm_module); }
 
     void prepareForNewModule() {
-        m_builder.ClearInsertionPoint();
+        m_builder->ClearInsertionPoint();
 
         if (m_scopeStack.size() > 1) {
             Scope &globalScope = m_scopeStack[0];
@@ -140,9 +146,9 @@ class LLVMCodegen : public Backend {
     std::vector<LoopInfo> m_loop_stack;
     std::vector<CodeGenError> m_errors;
 
-    llvm::LLVMContext &context;
+    llvm::LLVMContext context;
     std::unique_ptr<llvm::Module> m_llvm_module;
-    llvm::IRBuilder<> m_builder;
+    std::unique_ptr<llvm::IRBuilder<>> m_builder;
 
     ModuleResolver m_module_resolver;
 

@@ -15,6 +15,7 @@
 class ParseError : public std::exception {
   public:
     std::string message;
+    // std::string filename;
     int line;
     int col;
 
@@ -39,7 +40,7 @@ class Parser {
 
     std::vector<Token> tokens;
 
-    // HACK: Assume single level generics for now as that's all the language needs, but it might be expanded later (and should be)
+    // Assume single level generics for now as that's all the language needs for now
     std::vector<std::string> current_generic_params;
 
     size_t position;

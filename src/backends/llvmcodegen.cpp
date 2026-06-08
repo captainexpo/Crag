@@ -1,6 +1,7 @@
 #include "llvmcodegen.h"
 #include "../module_resolver.h"
 #include "src/ast/ast.h"
+#include <algorithm>
 #include <filesystem>
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
@@ -158,7 +159,7 @@ void LLVMCodegen::setDebugLocation(const ASTNodePtr &node) {
     }
 
     if (!node) {
-        m_builder.SetCurrentDebugLocation(llvm::DebugLoc());
+        m_builder->SetCurrentDebugLocation(llvm::DebugLoc());
         return;
     }
 
@@ -167,7 +168,7 @@ void LLVMCodegen::setDebugLocation(const ASTNodePtr &node) {
         scope = nullptr;
     }
     if (!scope) {
-        auto *bb = m_builder.GetInsertBlock();
+        auto *bb = m_builder->GetInsertBlock();
         auto *func = bb ? bb->getParent() : nullptr;
         if (func) {
             scope = func->getSubprogram();
@@ -175,14 +176,14 @@ void LLVMCodegen::setDebugLocation(const ASTNodePtr &node) {
     }
 
     if (!scope) {
-        m_builder.SetCurrentDebugLocation(llvm::DebugLoc());
+        m_builder->SetCurrentDebugLocation(llvm::DebugLoc());
         return;
     }
 
     unsigned line = node->line > 0 ? static_cast<unsigned>(node->line) : 1;
     unsigned col = node->col > 0 ? static_cast<unsigned>(node->col) : 1;
     auto *loc = llvm::DILocation::get(context, line, col, scope);
-    m_builder.SetCurrentDebugLocation(loc);
+    m_builder->SetCurrentDebugLocation(loc);
 }
 
 llvm::DIType *LLVMCodegen::getDIType(const std::shared_ptr<Type> &type, const ASTNodePtr &node) {
@@ -475,7 +476,10 @@ void LLVMCodegen::compileObjectFileToExecutable(
     bool no_runtime,
     std::optional<std::vector<std::string>> backend_args) {
     std::string linker = "cc";
-    std::string cmd = linker + " " + object_filepath + " -o " + executable_filepath.string() + " -lm ";
+
+    bool nocstdlib = std::find(backend_args->begin(), backend_args->end(), "--nocstdlib") != backend_args->end();
+
+    std::string cmd = linker + " " + object_filepath + " -o " + executable_filepath.string() + " -lm -nostdlib -Wl,--entry=_start " + (!nocstdlib ? "-lc " : "");
     if (backend_args) {
         for (const auto &arg : *backend_args) {
             cmd += arg + " ";
@@ -638,7 +642,7 @@ llvm::Value *LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &exp
         if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
             llvm::Value *zero = llvm::ConstantPointerNull::get(
                 llvm::PointerType::getUnqual(context));
-            llvm::Value *isZero = m_builder.CreateICmpNE(base, zero, "isnullptrtmp");
+            llvm::Value *isZero = m_builder->CreateICmpNE(base, zero, "isnullptrtmp");
             conditionOrPanic(isZero, NullPointerDereference, expr->line, expr->col);
         }
         return base;
@@ -700,12 +704,12 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
         if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
             llvm::Value *zero = llvm::ConstantPointerNull::get(
                 llvm::PointerType::getUnqual(context));
-            llvm::Value *isZero = m_builder.CreateICmpNE(ptr, zero, "isnullptrtmp");
+            llvm::Value *isZero = m_builder->CreateICmpNE(ptr, zero, "isnullptrtmp");
             conditionOrPanic(isZero, NullPointerDereference, expr->line, expr->col);
         }
         if (loadValue)
-            return m_builder.CreateLoad(getLLVMType(deref->inferred_type, expr), ptr,
-                                        "derefloadtmp");
+            return m_builder->CreateLoad(getLLVMType(deref->inferred_type, expr), ptr,
+                                         "derefloadtmp");
         return ptr;
     }
     if (IS_INSTANCE(expr, MethodCall)) {
@@ -715,6 +719,9 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
     if (IS_INSTANCE(expr, ModuleAccess)) {
         return generateModuleAccess(std::dynamic_pointer_cast<ModuleAccess>(expr),
                                     loadValue);
+    }
+    if (IS_INSTANCE(expr, TypeExpression)) {
+        throw CodeGenError(expr, "TypeExpression is not a runtime value");
     }
     if (IS_INSTANCE(expr, ArrayLiteral)) {
         return generateArrayLiteral(std::dynamic_pointer_cast<ArrayLiteral>(expr),
@@ -746,36 +753,36 @@ LLVMCodegen::generateCast(const std::shared_ptr<TypeCast> &typeCast,
         unsigned destBits = destType->getIntegerBitWidth();
         if (srcBits < destBits) {
             if (typeCast->expr->inferred_type->isUnsigned() || typeCast->expr->inferred_type->kind() == TypeKind::Bool)
-                return m_builder.CreateZExt(val, destType, "zexttmp");
+                return m_builder->CreateZExt(val, destType, "zexttmp");
             else
-                return m_builder.CreateSExt(val, destType, "sexttmp");
+                return m_builder->CreateSExt(val, destType, "sexttmp");
         } else {
-            return m_builder.CreateTrunc(val, destType, "trunctmp");
+            return m_builder->CreateTrunc(val, destType, "trunctmp");
         }
     } else if (srcType->isFloatingPointTy() && destType->isFloatingPointTy()) {
         unsigned srcBits = srcType->getPrimitiveSizeInBits();
         unsigned destBits = destType->getPrimitiveSizeInBits();
         if (srcBits < destBits) {
-            return m_builder.CreateFPExt(val, destType, "fpexttmp");
+            return m_builder->CreateFPExt(val, destType, "fpexttmp");
         } else {
-            return m_builder.CreateFPTrunc(val, destType, "fptrunctmp");
+            return m_builder->CreateFPTrunc(val, destType, "fptrunctmp");
         }
     } else if (srcType->isIntegerTy() && destType->isFloatingPointTy()) {
         if (typeCast->expr->inferred_type->isUnsigned()) {
-            return m_builder.CreateUIToFP(val, destType, "uitofptmp");
+            return m_builder->CreateUIToFP(val, destType, "uitofptmp");
         }
-        return m_builder.CreateSIToFP(val, destType, "sitofptmp");
+        return m_builder->CreateSIToFP(val, destType, "sitofptmp");
     } else if (srcType->isFloatingPointTy() && destType->isIntegerTy()) {
         if (typeCast->target_type->isUnsigned()) {
-            return m_builder.CreateFPToUI(val, destType, "fptouitmp");
+            return m_builder->CreateFPToUI(val, destType, "fptouitmp");
         }
-        return m_builder.CreateFPToSI(val, destType, "fptositmp");
+        return m_builder->CreateFPToSI(val, destType, "fptositmp");
     } else if (srcType->isPointerTy() && destType->isPointerTy()) {
-        return m_builder.CreateBitCast(val, destType, "ptrcasttmp");
+        return m_builder->CreateBitCast(val, destType, "ptrcasttmp");
     } else if (srcType->isPointerTy() && destType->isIntegerTy()) {
-        return m_builder.CreatePtrToInt(val, destType, "ptrtointtmp");
+        return m_builder->CreatePtrToInt(val, destType, "ptrtointtmp");
     } else if (srcType->isIntegerTy() && destType->isPointerTy()) {
-        return m_builder.CreateIntToPtr(val, destType, "inttoptrtmp");
+        return m_builder->CreateIntToPtr(val, destType, "inttoptrtmp");
     }
     throw CodeGenError(typeCast, "Unsupported cast from " + llvmTypeToString(srcType) +
                                      " to " + llvmTypeToString(destType) + " at " + typeCast->str());
@@ -807,11 +814,11 @@ LLVMCodegen::generateStatement(const std::shared_ptr<Statement> &stmt) {
             std::dynamic_pointer_cast<ReturnStatement>(stmt));
     } else if (IS_INSTANCE(stmt, BreakStatement)) {
         llvm::Value *val = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
-        m_builder.CreateBr(m_loop_stack.back().breakBB);
+        m_builder->CreateBr(m_loop_stack.back().breakBB);
         return val;
     } else if (IS_INSTANCE(stmt, ContinueStatement)) {
         llvm::Value *val = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
-        m_builder.CreateBr(m_loop_stack.back().continueBB);
+        m_builder->CreateBr(m_loop_stack.back().continueBB);
         return val;
     } else if (IS_INSTANCE(stmt, AsmStmt)) {
         return generateAsmStatement(std::dynamic_pointer_cast<AsmStmt>(stmt));
@@ -831,7 +838,7 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
         if (func->is_extern) {
             return m_llvm_module->getFunction(fname);
         }
-        throw CodeGenError(func, "Duplicate defition of function: " + func->name);
+        throw CodeGenError(func, "Duplicate definition of function: " + func->name);
     }
 
     // For extern functions, we need to apply ABI coercion to struct parameters and return types
@@ -858,6 +865,27 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
 
     llvm::Function *function = llvm::Function::Create(
         abiType, linkage, fname, m_llvm_module.get());
+
+    if (std::find(func->attributes.begin(), func->attributes.end(), "noreturn") != func->attributes.end()) {
+        function->addFnAttr(llvm::Attribute::NoReturn);
+    }
+
+    if (std::find(func->attributes.begin(), func->attributes.end(), "naked") != func->attributes.end()) {
+        function->addFnAttr(llvm::Attribute::Naked);
+    }
+
+    if (std::find(func->attributes.begin(), func->attributes.end(), "inline") != func->attributes.end()) {
+        function->addFnAttr(llvm::Attribute::AlwaysInline);
+    }
+
+    if (std::find(func->attributes.begin(), func->attributes.end(), "weak") != func->attributes.end()) {
+        if (func->is_extern) {
+            function->setLinkage(llvm::Function::ExternalWeakLinkage);
+        } else {
+            throw CodeGenError(func, "Only extern functions can be marked as weak");
+        }
+    }
+
     CUR_SCOPE.set(fname, function, fType, func->type);
     // Set names for all arguments
     unsigned int idx = 0;
@@ -884,7 +912,7 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
 
     llvm::BasicBlock *entry =
         llvm::BasicBlock::Create(context, "entry", function);
-    m_builder.SetInsertPoint(entry);
+    m_builder->SetInsertPoint(entry);
 
     if (m_emit_debug && m_di_builder) {
         llvm::DIFile *file = m_di_file ? m_di_file : getDIFileForPath(m_current_module ? m_current_module->path : "");
@@ -909,14 +937,14 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
             llvm::DISubprogram::SPFlagDefinition);
         function->setSubprogram(subprogram);
         m_di_scope = subprogram;
-        m_builder.SetCurrentDebugLocation(llvm::DILocation::get(context, line, col, m_di_scope));
+        m_builder->SetCurrentDebugLocation(llvm::DILocation::get(context, line, col, m_di_scope));
     }
     // Allocate space for arguments and store them
     unsigned int idx = 0;
     for (auto &arg : function->args()) {
         llvm::AllocaInst *alloca =
-            m_builder.CreateAlloca(arg.getType(), nullptr, arg.getName() + ".addr");
-        m_builder.CreateStore(&arg, alloca);
+            m_builder->CreateAlloca(arg.getType(), nullptr, arg.getName() + ".addr");
+        m_builder->CreateStore(&arg, alloca);
         auto argname = arg.getName().str();
         CUR_SCOPE.set(canonicalizeNonexternName(argname), alloca, arg.getType(),
                       func->type->params[idx]);
@@ -939,7 +967,7 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
                 var,
                 m_di_builder->createExpression(),
                 llvm::DILocation::get(context, line, col, m_di_scope),
-                m_builder.GetInsertBlock());
+                m_builder->GetInsertBlock());
         }
         idx++;
     }
@@ -951,14 +979,14 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
         m_error_union_return_type = nullptr;
     }
     generateStatement(func->body);
-    if (m_builder.GetInsertBlock()->getTerminator() == nullptr) {
+    if (m_builder->GetInsertBlock()->getTerminator() == nullptr){
         emitDefaultReturn(func);
     }
     m_error_union_return_type = nullptr;
 
     if (m_emit_debug) {
         m_di_scope = m_di_compile_unit;
-        m_builder.SetCurrentDebugLocation(llvm::DebugLoc());
+        m_builder->SetCurrentDebugLocation(llvm::DebugLoc());
     }
 
     // Validate function
@@ -974,69 +1002,6 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
 
     return function;
 }
-//
-// llvm::Function *IRGenerator::generateFunction(
-//     const std::shared_ptr<FunctionDeclaration> &func) {
-//   llvm::FunctionType *fType =
-//       llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type));
-//
-//   std::string fname = canonicalizeNonexternName(func->name);
-//
-//   if (m_llvm_module->getFunction(fname)) {
-//     if (func->is_extern) {
-//       return m_llvm_module->getFunction(fname);
-//     }
-//     throw CodeGenError(func, "Duplicate defition of function: " + func->name);
-//   }
-//
-//   llvm::Function *function = llvm::Function::Create(
-//       fType, llvm::Function::ExternalLinkage, fname, m_llvm_module.get());
-//   CUR_SCOPE.set(fname, function, fType, func->type);
-//   // Set names for all arguments
-//   unsigned idx = 0;
-//   for (auto &arg : function->args()) {
-//     arg.setName(func->param_names[idx++]);
-//   }
-//
-//   if (!func->body)
-//     return function;
-//
-//   m_scopeStack.push_back(Scope(CUR_SCOPE));
-//
-//   llvm::BasicBlock *entry =
-//       llvm::BasicBlock::Create(context, "entry", function);
-//   m_builder.SetInsertPoint(entry);
-//   // Allocate space for arguments and store them
-//   idx = 0;
-//   for (auto &arg : function->args()) {
-//     llvm::AllocaInst *alloca =
-//         m_builder.CreateAlloca(arg.getType(), nullptr, arg.getName() + ".addr");
-//     m_builder.CreateStore(&arg, alloca);
-//     auto argname = arg.getName().str();
-//     CUR_SCOPE.set(canonicalizeNonexternName(argname), alloca, arg.getType(),
-//                   func->type->params[idx]);
-//     idx++;
-//   }
-//
-//   if (IS_INSTANCE(func->type->ret, ErrorUnionType)) {
-//     m_error_union_return_type =
-//         std::dynamic_pointer_cast<ErrorUnionType>(func->type->ret);
-//   } else {
-//     m_error_union_return_type = nullptr;
-//   }
-//   generateStatement(func->body);
-//   if (m_builder.GetInsertBlock()->getTerminator() == nullptr) {
-//     if (IS_INSTANCE(func->type->ret, Void)) {
-//       m_builder.CreateRetVoid();
-//     } else {
-//       throw CodeGenError(func, "Non-void function missing return: " + func->name);
-//     }
-//   }
-//   m_error_union_return_type = nullptr;
-//
-//   return function;
-// }
-//
 
 void LLVMCodegen::finished(bool is_final_module) {
     if (!is_final_module) {
@@ -1053,11 +1018,22 @@ void LLVMCodegen::finished(bool is_final_module) {
             }
         }
         if (initBB) {
-            llvm::BasicBlock *currentBB = m_builder.GetInsertBlock();
-            m_builder.SetInsertPoint(initBB);
-            m_builder.CreateRetVoid();
-            m_builder.SetInsertPoint(currentBB);
+            llvm::BasicBlock *currentBB = m_builder->GetInsertBlock();
+            m_builder->SetInsertPoint(initBB);
+            m_builder->CreateRetVoid();
+            m_builder->SetInsertPoint(currentBB);
         }
+    }
+
+    // Verify the module
+    if (llvm::verifyModule(*m_llvm_module, &llvm::errs())) {
+        // Dump IR
+        std::string str;
+        llvm::raw_string_ostream rso(str);
+        m_llvm_module->print(rso, nullptr);
+        std::cout << "Generated IR for module " << (m_current_module ? m_current_module->canon_name : "<unknown>") << ":\n"
+                  << rso.str() << "\n";
+        throw CodeGenError(nullptr, "Module verification failed - invalid IR");
     }
 
     finalizeDebugInfo();
@@ -1073,14 +1049,14 @@ llvm::Value *LLVMCodegen::addGlobalVarInitializer(llvm::Value *var, std::shared_
         llvm::FunctionType *initFuncType =
             llvm::FunctionType::get(llvm::Type::getVoidTy(context), false);
         llvm::Function *initFunc = llvm::Function::Create(initFuncType,
-                                                          llvm::Function::InternalLinkage,
+                                                          llvm::Function::ExternalLinkage,
                                                           GLOBAL_VAR_INIT_FUNC_NAME, m_llvm_module.get());
         registerGlobalCtor(*m_llvm_module, initFunc, 65535);
 
         initBB = llvm::BasicBlock::Create(context, "init", initFunc);
     }
-    llvm::BasicBlock *currentBB = m_builder.GetInsertBlock();
-    m_builder.SetInsertPoint(initBB);
+    llvm::BasicBlock *currentBB = m_builder->GetInsertBlock();
+    m_builder->SetInsertPoint(initBB);
     llvm::Value *initVal = nullptr;
     initVal = generateExpression(std::dynamic_pointer_cast<Expression>(initializer));
 
@@ -1088,8 +1064,8 @@ llvm::Value *LLVMCodegen::addGlobalVarInitializer(llvm::Value *var, std::shared_
         throw CodeGenError(initializer, "Failed to generate initializer for global variable");
         initVal = llvm::Constant::getNullValue(var->getType());
     }
-    m_builder.CreateStore(initVal, var);
-    m_builder.SetInsertPoint(currentBB);
+    m_builder->CreateStore(initVal, var);
+    m_builder->SetInsertPoint(currentBB);
     return initVal;
 }
 
@@ -1305,10 +1281,10 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
     }
 
     llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
-    llvm::Function *currentFunction = m_builder.GetInsertBlock() ? m_builder.GetInsertBlock()->getParent() : nullptr;
+    llvm::Function *currentFunction = m_builder->GetInsertBlock() ? m_builder->GetInsertBlock()->getParent() : nullptr;
     llvm::Value *alloca = createEntryBlockAlloca(currentFunction, varType, varDecl->name);
     if (!alloca) {
-        alloca = m_builder.CreateAlloca(varType, nullptr, varDecl->name);
+        alloca = m_builder->CreateAlloca(varType, nullptr, varDecl->name);
     }
     CUR_SCOPE.set(canonicalizeNonexternName(varDecl->name), alloca, varType, varDecl->var_type);
     if (m_emit_debug && m_di_builder && m_di_scope) {
@@ -1327,7 +1303,7 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
             var,
             m_di_builder->createExpression(),
             llvm::DILocation::get(context, line, col, m_di_scope),
-            m_builder.GetInsertBlock());
+            m_builder->GetInsertBlock());
     }
     if (varDecl->initializer) {
         llvm::Value *initVal = nullptr;
@@ -1342,7 +1318,7 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
                                             varDecl->name);
             initVal = llvm::Constant::getNullValue(varType);
         }
-        m_builder.CreateStore(initVal, alloca);
+        m_builder->CreateStore(initVal, alloca);
     }
     return alloca;
 }
@@ -1462,7 +1438,7 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
         if (!l) {
             throw CodeGenError(left, "Left operand of assignment is not an lvalue");
         }
-        m_builder.CreateStore(r, l);
+        m_builder->CreateStore(r, l);
         return r;
     }
 
@@ -1478,105 +1454,105 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
     static const std::map<std::string, OpInfo> ops = {
         {"+",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateAdd(a, b, "add");
+              return m_builder->CreateAdd(a, b, "add");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFAdd(a, b, "add");
+              return m_builder->CreateFAdd(a, b, "add");
           }}},
         {"-",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateSub(a, b, "sub");
+              return m_builder->CreateSub(a, b, "sub");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFSub(a, b, "sub");
+              return m_builder->CreateFSub(a, b, "sub");
           }}},
         {"*",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateMul(a, b, "mul");
+              return m_builder->CreateMul(a, b, "mul");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFMul(a, b, "mul");
+              return m_builder->CreateFMul(a, b, "mul");
           }}},
         {"/",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateSDiv(a, b, "div");
+              return m_builder->CreateSDiv(a, b, "div");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFDiv(a, b, "div");
+              return m_builder->CreateFDiv(a, b, "div");
           }}},
         {"%",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateSRem(a, b, "mod");
+              return m_builder->CreateSRem(a, b, "mod");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFRem(a, b, "mod");
+              return m_builder->CreateFRem(a, b, "mod");
           }}},
 
         {"==",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpEQ(a, b, "eq");
+              return m_builder->CreateICmpEQ(a, b, "eq");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpUEQ(a, b, "eq");
+              return m_builder->CreateFCmpUEQ(a, b, "eq");
           }}},
         {"!=",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpNE(a, b, "ne");
+              return m_builder->CreateICmpNE(a, b, "ne");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpUNE(a, b, "ne");
+              return m_builder->CreateFCmpUNE(a, b, "ne");
           }}},
         {"<",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpSLT(a, b, "lt");
+              return m_builder->CreateICmpSLT(a, b, "lt");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpULT(a, b, "lt");
+              return m_builder->CreateFCmpULT(a, b, "lt");
           }}},
         {"<=",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpSLE(a, b, "le");
+              return m_builder->CreateICmpSLE(a, b, "le");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpULE(a, b, "le");
+              return m_builder->CreateFCmpULE(a, b, "le");
           }}},
         {">",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpSGT(a, b, "gt");
+              return m_builder->CreateICmpSGT(a, b, "gt");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpUGT(a, b, "gt");
+              return m_builder->CreateFCmpUGT(a, b, "gt");
           }}},
         {">=",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateICmpSGE(a, b, "ge");
+              return m_builder->CreateICmpSGE(a, b, "ge");
           },
           [this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateFCmpUGE(a, b, "ge");
+              return m_builder->CreateFCmpUGE(a, b, "ge");
           }}},
         {"<<",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateShl(a, b, "shl");
+              return m_builder->CreateShl(a, b, "shl");
           },
           nullptr}},
         {">>",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateAShr(a, b, "shr");
+              return m_builder->CreateAShr(a, b, "shr");
           },
           nullptr}},
         {"&",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateAnd(a, b, "and");
+              return m_builder->CreateAnd(a, b, "and");
           },
           nullptr}},
         {"|",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateOr(a, b, "or");
+              return m_builder->CreateOr(a, b, "or");
           },
           nullptr}},
         {"^",
          {[this](llvm::Value *a, llvm::Value *b) {
-              return m_builder.CreateXor(a, b, "xor");
+              return m_builder->CreateXor(a, b, "xor");
           },
           nullptr}},
     };
@@ -1587,7 +1563,7 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
             // For pointer arithmetic, use GEP instruction
             // If right operand is a pointer (from cast), convert to integer
             if (r->getType()->isPointerTy()) {
-                r = m_builder.CreatePtrToInt(r, llvm::Type::getInt64Ty(context), "ptrtoint_offset");
+                r = m_builder->CreatePtrToInt(r, llvm::Type::getInt64Ty(context), "ptrtoint_offset");
             }
             // Ensure right operand is integer type
             if (!r->getType()->isIntegerTy()) {
@@ -1595,17 +1571,17 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
             }
             // For subtraction, negate the offset
             if (op == "-") {
-                r = m_builder.CreateNeg(r, "neg_offset");
+                r = m_builder->CreateNeg(r, "neg_offset");
             }
 
             // Use GEP for pointer arithmetic (returns pointer)
-            return m_builder.CreateGEP(llvm::Type::getInt8Ty(context), l, r, "ptrarith");
+            return m_builder->CreateGEP(llvm::Type::getInt8Ty(context), l, r, "ptrarith");
         }
 
         // For other operations, convert both to integers
         ty = llvm::Type::getInt64Ty(context);
-        l = m_builder.CreatePtrToInt(l, ty, "ptrtoint_lhs");
-        r = m_builder.CreatePtrToInt(r, ty, "ptrtoint_rhs");
+        l = m_builder->CreatePtrToInt(l, ty, "ptrtoint_lhs");
+        r = m_builder->CreatePtrToInt(r, ty, "ptrtoint_rhs");
         if (!l || !r) {
             throw CodeGenError(nullptr, "Failed to convert pointer operands to integer");
         }
@@ -1628,11 +1604,11 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
     if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
         if (op == "/" && r->getType()->isIntegerTy()) {
             llvm::Value *zero = llvm::ConstantInt::get(r->getType(), 0);
-            llvm::Value *isZero = m_builder.CreateICmpNE(r, zero, "divbyzerotmp");
+            llvm::Value *isZero = m_builder->CreateICmpNE(r, zero, "divbyzerotmp");
             conditionOrPanic(isZero, DivisionByZero, left->line, left->col);
         } else if ((op == "/" || op == "%") && r->getType()->isFloatingPointTy()) {
             llvm::Value *zero = llvm::ConstantFP::get(r->getType(), 0.0);
-            llvm::Value *isZero = m_builder.CreateFCmpUNE(r, zero, "fpdivbyzerotmp");
+            llvm::Value *isZero = m_builder->CreateFCmpUNE(r, zero, "fpdivbyzerotmp");
             conditionOrPanic(isZero, DivisionByZero, left->line, left->col);
         }
     }
@@ -1653,43 +1629,43 @@ LLVMCodegen::generateUnaryOp(const std::shared_ptr<UnaryOperation> &operation,
     auto op = operation->op;
     if (op == "-") {
         if (val->getType()->isFloatingPointTy()) {
-            return m_builder.CreateFNeg(val, "fnegtmp");
+            return m_builder->CreateFNeg(val, "fnegtmp");
         }
-        return m_builder.CreateNeg(val, "negtmp");
+        return m_builder->CreateNeg(val, "negtmp");
     } else if (op == "+")
         return val; // Unary plus is a no-op
     else if (op == "!")
-        return m_builder.CreateNot(val, "nottmp");
+        return m_builder->CreateNot(val, "nottmp");
     else if (op == "&")
         return generateAddress(operation->operand);
     else if (op == "~") {
-        return m_builder.CreateNot(val, "bwnottmp");
+        return m_builder->CreateNot(val, "bwnottmp");
     } else if (op == "++") {
         if (operation->is_prefix) {
             llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
-            llvm::Value *inc = m_builder.CreateAdd(val, one, "inc");
+            llvm::Value *inc = m_builder->CreateAdd(val, one, "inc");
             llvm::Value *addr = generateAddress(operation->operand);
-            m_builder.CreateStore(inc, addr);
+            m_builder->CreateStore(inc, addr);
             return inc;
         } else {
             llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
-            llvm::Value *inc = m_builder.CreateAdd(val, one, "inc");
+            llvm::Value *inc = m_builder->CreateAdd(val, one, "inc");
             llvm::Value *addr = generateAddress(operation->operand);
-            m_builder.CreateStore(inc, addr);
+            m_builder->CreateStore(inc, addr);
             return val;
         }
     } else if (op == "--") {
         if (operation->is_prefix) {
             llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
-            llvm::Value *dec = m_builder.CreateSub(val, one, "dec");
+            llvm::Value *dec = m_builder->CreateSub(val, one, "dec");
             llvm::Value *addr = generateAddress(operation->operand);
-            m_builder.CreateStore(dec, addr);
+            m_builder->CreateStore(dec, addr);
             return dec;
         } else {
             llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
-            llvm::Value *dec = m_builder.CreateSub(val, one, "dec");
+            llvm::Value *dec = m_builder->CreateSub(val, one, "dec");
             llvm::Value *addr = generateAddress(operation->operand);
-            m_builder.CreateStore(dec, addr);
+            m_builder->CreateStore(dec, addr);
             return val;
         }
     }
@@ -1703,7 +1679,7 @@ llvm::Value *LLVMCodegen::generateLogicalOp(
     std::string op) {
     llvm::Value *valLeft = generateExpression(left);
 
-    llvm::BasicBlock *startBlock = m_builder.GetInsertBlock();
+    llvm::BasicBlock *startBlock = m_builder->GetInsertBlock();
     llvm::Function *currentFunc = startBlock->getParent();
 
     llvm::BasicBlock *rhs = llvm::BasicBlock::Create(context, op == "&&" ? "land.rhs" : "lor.rhs", currentFunc);
@@ -1711,25 +1687,25 @@ llvm::Value *LLVMCodegen::generateLogicalOp(
     llvm::BasicBlock *end = llvm::BasicBlock::Create(context, op == "&&" ? "land.end" : "lor.end", currentFunc);
 
     if (op == "&&")
-        m_builder.CreateCondBr(valLeft, rhs, end);
+        m_builder->CreateCondBr(valLeft, rhs, end);
     else
-        m_builder.CreateCondBr(valLeft, end, rhs);
+        m_builder->CreateCondBr(valLeft, end, rhs);
 
-    m_builder.SetInsertPoint(rhs);
+    m_builder->SetInsertPoint(rhs);
 
     llvm::Value *valRight = generateExpression(right);
 
-    llvm::BasicBlock *rhsEndBlock = m_builder.GetInsertBlock();
+    llvm::BasicBlock *rhsEndBlock = m_builder->GetInsertBlock();
 
-    m_builder.CreateBr(end);
+    m_builder->CreateBr(end);
 
-    m_builder.SetInsertPoint(end);
+    m_builder->SetInsertPoint(end);
 
     llvm::PHINode *phi =
-        m_builder.CreatePHI(llvm::Type::getInt1Ty(context), 2, "phitmp");
+        m_builder->CreatePHI(llvm::Type::getInt1Ty(context), 2, "phitmp");
 
     phi->addIncoming(
-        llvm::ConstantInt::get( context, llvm::APInt(1, op == "||" ? 1 : 0)),
+        llvm::ConstantInt::get(context, llvm::APInt(1, op == "||" ? 1 : 0)),
         startBlock);
 
     phi->addIncoming(valRight, rhsEndBlock);
@@ -1789,10 +1765,10 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
         return llvm::ConstantInt::get(context,
                                       llvm::APInt(64, tryGetConstValue<uint64_t>(lit)));
     } else if (IS_INSTANCE(lit->inferred_type, F32)) {
-        return llvm::ConstantFP::get(m_builder.getFloatTy(),
+        return llvm::ConstantFP::get(m_builder->getFloatTy(),
                                      tryGetConstValue<double>(lit));
     } else if (IS_INSTANCE(lit->inferred_type, F64)) {
-        return llvm::ConstantFP::get(m_builder.getDoubleTy(),
+        return llvm::ConstantFP::get(m_builder->getDoubleTy(),
                                      tryGetConstValue<double>(lit));
     } else if (IS_INSTANCE(lit->inferred_type, Boolean)) {
         return llvm::ConstantInt::get(
@@ -1860,7 +1836,7 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
     // Allocate the raw array: [N x elemType]
     auto arrayLLVMType = getLLVMType(arrayType, arrayLit); // struct { ptr, i64 }
     auto arrayLitType = llvm::ArrayType::get(elemType, arrayLit->defined_len);
-    auto rawArrAlloc = m_builder.CreateAlloca(arrayLitType, nullptr, "arraylit");
+    auto rawArrAlloc = m_builder->CreateAlloca(arrayLitType, nullptr, "arraylit");
     rawArrAlloc->setAlignment(llvm::Align(alignof(void *)));
 
     // declare void @llvm.memset.p0.i64(ptr writeonly captures(none), i8, i64, i1 immarg) #1
@@ -1873,44 +1849,44 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
             false));
 
     // Zero out the array memory using memset
-    m_builder.CreateCall(memsetFunction, {m_builder.CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context)),
-                                          llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0),
-                                          llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len * m_llvm_module->getDataLayout().getTypeAllocSize(elemType)),
-                                          llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 0)});
+    m_builder->CreateCall(memsetFunction, {m_builder->CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context)),
+                                           llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0),
+                                           llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len * m_llvm_module->getDataLayout().getTypeAllocSize(elemType)),
+                                           llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 0)});
 
     // Store elements in array using correct GEP (2 indices for array)
     for (int i = 0; i < numElements; i++) {
         llvm::Value *elemVal = generateExpression(arrayLit->elements[i]);
-        llvm::Value *elemPtr = m_builder.CreateGEP(
+        llvm::Value *elemPtr = m_builder->CreateGEP(
             arrayLitType,
             rawArrAlloc,
             {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
              llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i)});
-        m_builder.CreateStore(elemVal, elemPtr);
+        m_builder->CreateStore(elemVal, elemPtr);
     }
 
     // Allocate struct { ptr, i64 }
-    llvm::Value *arrayStructAlloc = m_builder.CreateAlloca(arrayLLVMType, nullptr, "arraystruct");
+    llvm::Value *arrayStructAlloc = m_builder->CreateAlloca(arrayLLVMType, nullptr, "arraystruct");
 
     // Store array length into struct
-    llvm::Value *lengthPtr = m_builder.CreateGEP(
+    llvm::Value *lengthPtr = m_builder->CreateGEP(
         arrayLLVMType, arrayStructAlloc,
         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1)});
-    m_builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len), lengthPtr);
+    m_builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len), lengthPtr);
 
     // Store pointer to raw array into struct (cast to i8* or element pointer type)
-    llvm::Value *dataPtr = m_builder.CreateGEP(
+    llvm::Value *dataPtr = m_builder->CreateGEP(
         arrayLLVMType, arrayStructAlloc,
         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)});
 
-    llvm::Value *castedPtr = m_builder.CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context));
+    llvm::Value *castedPtr = m_builder->CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context));
 
-    m_builder.CreateStore(castedPtr, dataPtr);
+    m_builder->CreateStore(castedPtr, dataPtr);
 
     if (loadValue) {
-        return m_builder.CreateLoad(arrayLLVMType, arrayStructAlloc, "arrload");
+        return m_builder->CreateLoad(arrayLLVMType, arrayStructAlloc, "arrload");
     }
     return arrayStructAlloc;
 }
@@ -1932,9 +1908,9 @@ LLVMCodegen::generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
     if (!loadValue)
         return v;
     // if (auto ar = std::dynamic_pointer_cast<ArrayType>(varAccess->inferred_type)) {
-    //     return m_builder.CreateInBoundsGEP(getLLVMType(ar), v, {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)}, "arraydecay");
+    //     return m_builder->CreateInBoundsGEP(getLLVMType(ar), v, {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)}, "arraydecay");
     // }
-    return m_builder.CreateLoad(sym->type, v, varAccess->name);
+    return m_builder->CreateLoad(sym->type, v, varAccess->name);
 }
 
 llvm::Value *LLVMCodegen::generateEnumAccess(const std::shared_ptr<EnumAccess> &ea, bool loadValue) {
@@ -1974,7 +1950,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(
         if (ptrType) {
             structType =
                 std::dynamic_pointer_cast<StructType>(ptrType->base);
-            obj = m_builder.CreateLoad(
+            obj = m_builder->CreateLoad(
                 llvm::PointerType::getUnqual(context),
                 obj,
                 "load_ptr_for_method");
@@ -2001,7 +1977,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(
 
     // If method expects struct by value, load it
     if (callee->getArg(0)->getType()->isStructTy()) {
-        obj = m_builder.CreateLoad(
+        obj = m_builder->CreateLoad(
             callee->getArg(0)->getType(),
             obj,
             "load_this");
@@ -2014,7 +1990,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(
     }
 
     llvm::CallInst *call =
-        m_builder.CreateCall(callee, args, callee->getFunctionType()->getReturnType()->isVoidTy() ? "" : "methodcalltmp");
+        m_builder->CreateCall(callee, args, callee->getFunctionType()->getReturnType()->isVoidTy() ? "" : "methodcalltmp");
 
     return call;
 }
@@ -2090,15 +2066,15 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
             }
             llvm::Type *ty = arg->getType();
             if (ty->isIntegerTy(1) || ty->isIntegerTy(8) || ty->isIntegerTy(16)) {
-                argsV[i] = m_builder.CreateZExt(arg, llvm::Type::getInt32Ty(context), "vapromotetmp");
+                argsV[i] = m_builder->CreateZExt(arg, llvm::Type::getInt32Ty(context), "vapromotetmp");
             } else if (ty->isFloatTy()) {
-                argsV[i] = m_builder.CreateFPExt(arg, llvm::Type::getDoubleTy(context), "vapromotetmp");
+                argsV[i] = m_builder->CreateFPExt(arg, llvm::Type::getDoubleTy(context), "vapromotetmp");
             }
         }
     }
 
-    llvm::Value *result = m_builder.CreateCall(funcTy, calleeValue, argsV,
-                                               funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
+    llvm::Value *result = m_builder->CreateCall(funcTy, calleeValue, argsV,
+                                                funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
 
     // If calling an extern function that returns a coerced struct, convert it back
     if (isExtern && result && shouldCoerceForABI(funcTy->getReturnType())) {
@@ -2114,16 +2090,16 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
 }
 void LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicType panicType, int line, int col) {
 
-    llvm::Function *curFunc = m_builder.GetInsertBlock()->getParent();
+    llvm::Function *curFunc = m_builder->GetInsertBlock()->getParent();
     llvm::BasicBlock *thenBB = llvm::BasicBlock::Create(context, "good_check", curFunc);
     llvm::BasicBlock *elseBB = llvm::BasicBlock::Create(context, "bad_check", curFunc);
     llvm::BasicBlock *mergeBB = llvm::BasicBlock::Create(context, "post_check", curFunc);
 
-    m_builder.CreateCondBr(condition, thenBB, elseBB);
+    m_builder->CreateCondBr(condition, thenBB, elseBB);
 
-    m_builder.SetInsertPoint(thenBB);
-    m_builder.CreateBr(mergeBB);
-    m_builder.SetInsertPoint(elseBB);
+    m_builder->SetInsertPoint(thenBB);
+    m_builder->CreateBr(mergeBB);
+    m_builder->SetInsertPoint(elseBB);
 
     llvm::Function *panicFunc = m_llvm_module->getFunction(RUNTIME_PANIC_FUNC_NAME);
     llvm::FunctionType *panicFuncTy = panicFunc->getFunctionType();
@@ -2133,10 +2109,10 @@ void LLVMCodegen::conditionOrPanic(llvm::Value *condition, RuntimePanicType pani
         llvm::ConstantInt::get(context, llvm::APInt(32, line)),
         llvm::ConstantInt::get(context, llvm::APInt(32, col)),
     };
-    m_builder.CreateCall(panicFuncTy, panicFunc, panicArgs);
+    m_builder->CreateCall(panicFuncTy, panicFunc, panicArgs);
 
-    m_builder.CreateBr(mergeBB);
-    m_builder.SetInsertPoint(mergeBB);
+    m_builder->CreateBr(mergeBB);
+    m_builder->SetInsertPoint(mergeBB);
 }
 llvm::Value *LLVMCodegen::generateArrayAccess(
     const std::shared_ptr<OffsetAccess> &arrayAccess, bool loadValue) {
@@ -2164,33 +2140,33 @@ llvm::Value *LLVMCodegen::generateArrayAccess(
     }
     // Condition check for index within bounds
     if (index->getType() != llvm::Type::getInt64Ty(context)) {
-        index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
+        index = m_builder->CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
     }
-    llvm::Value *arrLoad = m_builder.CreateLoad(
+    llvm::Value *arrLoad = m_builder->CreateLoad(
         getLLVMType(arrayAccess->base->inferred_type, arrayAccess->base), basePtr);
     if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
-        llvm::Value *arraySizeVal = m_builder.CreateExtractValue(
+        llvm::Value *arraySizeVal = m_builder->CreateExtractValue(
             arrLoad,
             {1}, "array_size");
 
         // Zext index to i64 if needed
         if (index->getType() != llvm::Type::getInt64Ty(context)) {
-            index = m_builder.CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
+            index = m_builder->CreateZExt(index, llvm::Type::getInt64Ty(context), "index_to_i64");
         }
-        llvm::Value *indexInBounds = m_builder.CreateICmpULT(
+        llvm::Value *indexInBounds = m_builder->CreateICmpULT(
             index, arraySizeVal, "index_in_bounds");
         conditionOrPanic(indexInBounds, OutOfBounds, arrayAccess->line, arrayAccess->col);
     }
 
-    llvm::Value *dataPtr = m_builder.CreateExtractValue(
+    llvm::Value *dataPtr = m_builder->CreateExtractValue(
         arrLoad,
         {0}, "array_data_ptr");
 
-    llvm::Value *gep = m_builder.CreateGEP(
+    llvm::Value *gep = m_builder->CreateGEP(
         elementType, dataPtr, index, "array_elem_ptr");
 
     if (loadValue)
-        return m_builder.CreateLoad(elementType, gep, "load_array_elem");
+        return m_builder->CreateLoad(elementType, gep, "load_array_elem");
     else
         return gep;
 }
@@ -2220,10 +2196,10 @@ llvm::Value *LLVMCodegen::generateOffsetAccess(
                                              offsetAccess->inferred_type->str());
     }
     llvm::Value *gep =
-        m_builder.CreateGEP(resultType, basePtr, index, "offset_access");
+        m_builder->CreateGEP(resultType, basePtr, index, "offset_access");
 
     if (loadValue)
-        return m_builder.CreateLoad(resultType, gep, "load_offset");
+        return m_builder->CreateLoad(resultType, gep, "load_offset");
     else
         return gep;
 }
@@ -2258,17 +2234,17 @@ llvm::Value *LLVMCodegen::generateArrayFieldAccess(const std::shared_ptr<FieldAc
     if (fieldAccess->field == "len") {
         // Return index 1
         llvm::Type *length_type = llvm::Type::getInt64Ty(context);
-        auto gep = m_builder.CreateStructGEP(arrStructType, basePtr, 1, "len_access");
+        auto gep = m_builder->CreateStructGEP(arrStructType, basePtr, 1, "len_access");
         return loadValue
-                   ? m_builder.CreateLoad(length_type, gep, "load_len")
+                   ? m_builder->CreateLoad(length_type, gep, "load_len")
                    : gep;
 
     } else if (fieldAccess->field == "ptr") {
         // Return index 0
         llvm::Type *data_ptr_type = llvm::PointerType::getUnqual(context);
-        auto gep = m_builder.CreateStructGEP(arrStructType, basePtr, 0, "ptr_access");
+        auto gep = m_builder->CreateStructGEP(arrStructType, basePtr, 0, "ptr_access");
         return loadValue
-                   ? m_builder.CreateLoad(data_ptr_type, gep, "load_ptr")
+                   ? m_builder->CreateLoad(data_ptr_type, gep, "load_ptr")
                    : gep;
 
     } else {
@@ -2425,7 +2401,7 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
 
             if (structType || unionType) {
                 // Adjust basePtr to dereference the pointer
-                basePtr = m_builder.CreateLoad(
+                basePtr = m_builder->CreateLoad(
                     llvm::PointerType::getUnqual(context), basePtr,
                     "load_ptr_for_field");
                 if (!basePtr) {
@@ -2464,7 +2440,7 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
 
         // For unions, all fields are at offset 0 in the byte array (field 0)
         // Get pointer to the storage (byte array)
-        llvm::Value *storagePtr = m_builder.CreateGEP(
+        llvm::Value *storagePtr = m_builder->CreateGEP(
             llvmUnion, basePtr,
             {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
              llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)},
@@ -2472,13 +2448,13 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
 
         // Cast the byte array pointer to the desired field type
         llvm::Type *targetType = getLLVMType(fieldType, fieldAccess);
-        llvm::Value *fieldPtr = m_builder.CreateBitCast(
+        llvm::Value *fieldPtr = m_builder->CreateBitCast(
             storagePtr,
             llvm::PointerType::getUnqual(context),
             "union_field_cast");
 
         if (loadValue) {
-            return m_builder.CreateLoad(targetType, fieldPtr, fieldName + "_load");
+            return m_builder->CreateLoad(targetType, fieldPtr, fieldName + "_load");
         } else {
             return fieldPtr;
         }
@@ -2532,7 +2508,7 @@ llvm::Value *LLVMCodegen::generateModuleAccess(const std::shared_ptr<ModuleAcces
         return v;
     if (!loadValue)
         return v;
-    return m_builder.CreateLoad(sym->type, v, var_name);
+    return m_builder->CreateLoad(sym->type, v, var_name);
 }
 
 llvm::Value *LLVMCodegen::generateUnionInitializer(std::shared_ptr<StructInitializer> unionInit, bool loadValue) {
@@ -2551,13 +2527,13 @@ llvm::Value *LLVMCodegen::generateUnionInitializer(std::shared_ptr<StructInitial
     llvm::StructType *llvmUnion = it->second;
     llvm::Value *alloca = nullptr;
     if (loadValue) {
-        llvm::Function *currentFunction = m_builder.GetInsertBlock()
-                                              ? m_builder.GetInsertBlock()->getParent()
+        llvm::Function *currentFunction = m_builder->GetInsertBlock()
+                                              ? m_builder->GetInsertBlock()->getParent()
                                               : nullptr;
         alloca = createEntryBlockAlloca(currentFunction, llvmUnion, "uniontmp");
     }
     if (!alloca) {
-        alloca = m_builder.CreateAlloca(llvmUnion, nullptr, "uniontmp");
+        alloca = m_builder->CreateAlloca(llvmUnion, nullptr, "uniontmp");
     }
 
     // Unions can only initialize one field at a time
@@ -2574,7 +2550,7 @@ llvm::Value *LLVMCodegen::generateUnionInitializer(std::shared_ptr<StructInitial
     }
 
     // Get pointer to the storage (byte array at field 0)
-    llvm::Value *storagePtr = m_builder.CreateGEP(
+    llvm::Value *storagePtr = m_builder->CreateGEP(
         llvmUnion, alloca,
         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)},
@@ -2582,18 +2558,18 @@ llvm::Value *LLVMCodegen::generateUnionInitializer(std::shared_ptr<StructInitial
 
     // Cast to the field type pointer
     llvm::Type *targetType = getLLVMType(fieldType, unionInit);
-    llvm::Value *fieldPtr = m_builder.CreateBitCast(
+    llvm::Value *fieldPtr = m_builder->CreateBitCast(
         storagePtr,
         llvm::PointerType::getUnqual(context),
         "union_field_ptr");
 
     // Store the value
     llvm::Value *fieldVal = generateExpression(field.second);
-    m_builder.CreateStore(fieldVal, fieldPtr);
+    m_builder->CreateStore(fieldVal, fieldPtr);
 
     if (!loadValue)
         return alloca;
-    return m_builder.CreateLoad(llvmUnion, alloca, "loadunion");
+    return m_builder->CreateLoad(llvmUnion, alloca, "loadunion");
 }
 
 llvm::Value *LLVMCodegen::generateStructInitializer(
@@ -2601,10 +2577,45 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
     auto _if_type = structInit->inferred_type;
     auto if_type = std::dynamic_pointer_cast<StructType>(_if_type);
     auto union_type = std::dynamic_pointer_cast<UnionType>(_if_type);
+    auto array_type = std::dynamic_pointer_cast<ArrayType>(_if_type);
 
     if (union_type) {
         // If it's a union initializer, delegate to the union initializer generator
         return generateUnionInitializer(structInit, loadValue);
+    }
+
+    if (array_type) {
+        auto llvmArray = llvm::cast<llvm::StructType>(getLLVMType(array_type, structInit));
+        auto ptrIt = structInit->field_values.find("ptr");
+        auto lenIt = structInit->field_values.find("len");
+        if (ptrIt == structInit->field_values.end() || lenIt == structInit->field_values.end()) {
+            throw CodeGenError(structInit, "Array initializer expects ptr and len fields");
+        }
+
+        auto ptrVal = generateExpression(ptrIt->second);
+        auto lenVal = generateExpression(lenIt->second);
+
+        if (loadValue) {
+            llvm::Value *agg = llvm::UndefValue::get(llvmArray);
+            agg = m_builder->CreateInsertValue(agg, ptrVal, 0, "slice_ptr_insert");
+            agg = m_builder->CreateInsertValue(agg, lenVal, 1, "slice_len_insert");
+            return agg;
+        }
+
+        llvm::Value *alloca = m_builder->CreateAlloca(llvmArray, nullptr, "slicetmp");
+        llvm::Value *ptrField = m_builder->CreateGEP(
+            llvmArray, alloca,
+            {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+             llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)},
+            "slice_ptr_ptr");
+        llvm::Value *lenField = m_builder->CreateGEP(
+            llvmArray, alloca,
+            {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+             llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1)},
+            "slice_len_ptr");
+        m_builder->CreateStore(ptrVal, ptrField);
+        m_builder->CreateStore(lenVal, lenField);
+        return alloca;
     }
 
     if (!if_type) {
@@ -2625,14 +2636,14 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
                                                    "' has no field named '" + field.first + "'");
             }
             llvm::Value *fieldVal = generateExpression(field.second);
-            agg = m_builder.CreateInsertValue(agg, fieldVal, fieldIndex,
-                                              field.first + "_insert");
+            agg = m_builder->CreateInsertValue(agg, fieldVal, fieldIndex,
+                                               field.first + "_insert");
         }
         return agg;
     }
 
     llvm::Value *alloca =
-        m_builder.CreateAlloca(llvmStruct, nullptr, "structtmp");
+        m_builder->CreateAlloca(llvmStruct, nullptr, "structtmp");
     for (const auto &field : structInit->field_values) {
         // Find field index
         auto fieldIndex = if_type->getFieldIndex(field.first);
@@ -2641,13 +2652,13 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
                                                "' has no field named '" + field.first + "'");
         }
         // Generate GEP for field
-        llvm::Value *fieldPtr = m_builder.CreateGEP(
+        llvm::Value *fieldPtr = m_builder->CreateGEP(
             llvmStruct, alloca,
             {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
              llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), fieldIndex)},
             field.first + "_ptr");
         llvm::Value *fieldVal = generateExpression(field.second);
-        m_builder.CreateStore(fieldVal, fieldPtr);
+        m_builder->CreateStore(fieldVal, fieldPtr);
     }
     return alloca;
 }
@@ -2675,31 +2686,31 @@ LLVMCodegen::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
 
     // Condition generation
     llvm::Value *condV = generateExpression(ifStmt->condition);
-    condV = m_builder.CreateICmpNE(
+    condV = m_builder->CreateICmpNE(
         condV, llvm::ConstantInt::get(condV->getType(), 0), "ifcond");
-    llvm::Function *theFunction = m_builder.GetInsertBlock()->getParent();
+    llvm::Function *theFunction = m_builder->GetInsertBlock()->getParent();
     llvm::BasicBlock *thenBB =
         llvm::BasicBlock::Create(context, "then", theFunction);
     llvm::BasicBlock *elseBB =
         llvm::BasicBlock::Create(context, "else", theFunction);
     llvm::BasicBlock *mergeBB =
         llvm::BasicBlock::Create(context, "ifcont", theFunction);
-    m_builder.CreateCondBr(condV, thenBB, elseBB);
-    m_builder.SetInsertPoint(thenBB);
+    m_builder->CreateCondBr(condV, thenBB, elseBB);
+    m_builder->SetInsertPoint(thenBB);
     llvm::Value *thenV = generateStatement(ifStmt->then_branch);
     // Only branch to merge if the then block is not already terminated
-    if (!m_builder.GetInsertBlock()->getTerminator()) {
-        m_builder.CreateBr(mergeBB);
+    if (!m_builder->GetInsertBlock()->getTerminator()) {
+        m_builder->CreateBr(mergeBB);
     }
-    thenBB = m_builder.GetInsertBlock();
-    m_builder.SetInsertPoint(elseBB);
+    thenBB = m_builder->GetInsertBlock();
+    m_builder->SetInsertPoint(elseBB);
     if (ifStmt->else_branch)
         llvm::Value *elseV = generateStatement(ifStmt->else_branch);
     // Only branch to merge if the else block is not already terminated
-    if (!m_builder.GetInsertBlock()->getTerminator()) {
-        m_builder.CreateBr(mergeBB);
+    if (!m_builder->GetInsertBlock()->getTerminator()) {
+        m_builder->CreateBr(mergeBB);
     }
-    m_builder.SetInsertPoint(mergeBB);
+    m_builder->SetInsertPoint(mergeBB);
     return nullptr;
 }
 
@@ -2749,10 +2760,10 @@ llvm::Value *LLVMCodegen::generateReturnStatement(
                 throw CodeGenError(retStmt, "Error return requires a value");
             }
             llvm::Value *okReturn = buildErrorUnionValue(m_error_union_return_type, nullptr, nullptr, false, retStmt);
-            auto retInstr = m_builder.CreateRet(okReturn);
+            auto retInstr = m_builder->CreateRet(okReturn);
             return retInstr;
         }
-        auto retInstr = m_builder.CreateRetVoid();
+        auto retInstr = m_builder->CreateRetVoid();
         return retInstr;
     }
     auto retVal = generateExpression(retStmt->value);
@@ -2768,7 +2779,7 @@ llvm::Value *LLVMCodegen::generateReturnStatement(
         }
     }
 
-    auto retInstr = m_builder.CreateRet(retVal);
+    auto retInstr = m_builder->CreateRet(retVal);
     return retInstr;
 }
 
@@ -2799,10 +2810,10 @@ llvm::Value *LLVMCodegen::buildErrorUnionValue(const std::shared_ptr<ErrorUnionT
         if (!errVal) {
             errVal = llvm::Constant::getNullValue(getLLVMType(euType->errorType, node));
         }
-        auto withErr = m_builder.CreateInsertValue(zeroVal, errVal, 0, "insert_err");
-        return m_builder.CreateInsertValue(withErr,
-                                           llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), isErr ? 1 : 0),
-                                           1, "insert_is_err");
+        auto withErr = m_builder->CreateInsertValue(zeroVal, errVal, 0, "insert_err");
+        return m_builder->CreateInsertValue(withErr,
+                                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), isErr ? 1 : 0),
+                                            1, "insert_is_err");
     }
 
     if (isErr && errVal == nullptr) {
@@ -2815,23 +2826,27 @@ llvm::Value *LLVMCodegen::buildErrorUnionValue(const std::shared_ptr<ErrorUnionT
         errVal = llvm::Constant::getNullValue(getLLVMType(euType->errorType, node));
     }
 
-    auto withOk = m_builder.CreateInsertValue(zeroVal, okVal, 0, "insert_ok");
-    auto withErr = m_builder.CreateInsertValue(withOk, errVal, 1, "insert_err");
-    return m_builder.CreateInsertValue(withErr,
-                                       llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), isErr ? 1 : 0),
-                                       2, "insert_is_err");
+    auto withOk = m_builder->CreateInsertValue(zeroVal, okVal, 0, "insert_ok");
+    auto withErr = m_builder->CreateInsertValue(withOk, errVal, 1, "insert_err");
+    return m_builder->CreateInsertValue(withErr,
+                                        llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), isErr ? 1 : 0),
+                                        2, "insert_is_err");
 }
 
 void LLVMCodegen::emitDefaultReturn(const std::shared_ptr<FunctionDeclaration> &funcDecl) {
+    if (funcDecl->attributes.find("noreturn") != funcDecl->attributes.end()) {
+        m_builder->CreateUnreachable();
+        return;
+    }
     if (IS_INSTANCE(funcDecl->type->ret, Void)) {
-        m_builder.CreateRetVoid();
+        m_builder->CreateRetVoid();
         return;
     }
     if (IS_INSTANCE(funcDecl->type->ret, ErrorUnionType)) {
         auto expected_error = std::dynamic_pointer_cast<ErrorUnionType>(funcDecl->type->ret);
         if (expected_error && IS_INSTANCE(expected_error->valueType, Void)) {
             llvm::Value *okReturn = buildErrorUnionValue(expected_error, nullptr, nullptr, false, funcDecl);
-            m_builder.CreateRet(okReturn);
+            m_builder->CreateRet(okReturn);
             return;
         }
     }
@@ -2860,7 +2875,7 @@ llvm::Value *LLVMCodegen::createStructFieldAccess(llvm::StructType *structType,
                                                   llvm::Type *fieldType,
                                                   const std::string &name,
                                                   bool loadValue) {
-    llvm::Value *gep = m_builder.CreateGEP(
+    llvm::Value *gep = m_builder->CreateGEP(
         structType, basePtr,
         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), fieldIndex)},
@@ -2871,7 +2886,7 @@ llvm::Value *LLVMCodegen::createStructFieldAccess(llvm::StructType *structType,
     }
 
     if (loadValue) {
-        return m_builder.CreateLoad(fieldType, gep, "load_" + name);
+        return m_builder->CreateLoad(fieldType, gep, "load_" + name);
     }
     return gep;
 }
@@ -2882,7 +2897,7 @@ void LLVMCodegen::emitLoop(const std::function<void()> &emitInit,
                            const std::function<void()> &emitIncrement,
                            bool hasIncrement,
                            const std::string &labelPrefix) {
-    llvm::Function *theFunction = m_builder.GetInsertBlock()->getParent();
+    llvm::Function *theFunction = m_builder->GetInsertBlock()->getParent();
     if (emitInit) {
         emitInit();
     }
@@ -2901,36 +2916,36 @@ void LLVMCodegen::emitLoop(const std::function<void()> &emitInit,
         .continueBB = hasIncrement ? inc_block : cond_block,
     });
 
-    m_builder.CreateBr(cond_block);
-    m_builder.SetInsertPoint(cond_block);
+    m_builder->CreateBr(cond_block);
+    m_builder->SetInsertPoint(cond_block);
 
     llvm::Value *condition = nullptr;
     if (emitCondition) {
         condition = emitCondition();
     }
     if (condition) {
-        condition = m_builder.CreateICmpNE(
+        condition = m_builder->CreateICmpNE(
             condition, llvm::ConstantInt::get(condition->getType(), 0), labelPrefix + "cond");
     } else {
         condition = llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 1);
     }
 
-    m_builder.CreateCondBr(condition, body_block, after_block);
-    m_builder.SetInsertPoint(body_block);
+    m_builder->CreateCondBr(condition, body_block, after_block);
+    m_builder->SetInsertPoint(body_block);
     if (emitBody) {
         emitBody();
     }
-    if (!m_builder.GetInsertBlock()->getTerminator()) {
-        m_builder.CreateBr(hasIncrement ? inc_block : cond_block);
+    if (!m_builder->GetInsertBlock()->getTerminator()) {
+        m_builder->CreateBr(hasIncrement ? inc_block : cond_block);
     }
 
-    m_builder.SetInsertPoint(inc_block);
+    m_builder->SetInsertPoint(inc_block);
     if (hasIncrement && emitIncrement) {
         emitIncrement();
     }
-    m_builder.CreateBr(cond_block);
+    m_builder->CreateBr(cond_block);
 
-    m_builder.SetInsertPoint(after_block);
+    m_builder->SetInsertPoint(after_block);
     m_loop_stack.pop_back();
 }
 
@@ -2948,7 +2963,7 @@ llvm::Value *LLVMCodegen::materializeAggregate(llvm::Value *abiValue, llvm::Stru
 
     assert(abiTy->isStructTy());
 
-    llvm::IRBuilder<> &B = m_builder;
+    llvm::IRBuilder<> &B = *m_builder;
     llvm::LLVMContext &C = context;
 
     // Allocate ABI-shaped temporary
@@ -3040,8 +3055,8 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
         if (ptrOp) {
             if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(ptrOp->stripPointerCasts())) {
                 llvm::PointerType *abiPtrTy = llvm::PointerType::getUnqual(context);
-                llvm::Value *abiPtr = m_builder.CreateBitCast(ptrOp, abiPtrTy, "abi.ptr");
-                return m_builder.CreateLoad(abiType, abiPtr, "abi.val");
+                llvm::Value *abiPtr = m_builder->CreateBitCast(ptrOp, abiPtrTy, "abi.ptr");
+                return m_builder->CreateLoad(abiType, abiPtr, "abi.val");
             }
         }
     }
@@ -3055,13 +3070,13 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
     }
 
     // Fallback: allocate temporary for struct and perform the usual ABI coercion.
-    llvm::AllocaInst *structAlloca = m_builder.CreateAlloca(structType, nullptr, "struct.tmp");
-    m_builder.CreateStore(structValue, structAlloca);
+    llvm::AllocaInst *structAlloca = m_builder->CreateAlloca(structType, nullptr, "struct.tmp");
+    m_builder->CreateStore(structValue, structAlloca);
 
-    llvm::Value *abiPtr = m_builder.CreateBitCast(structAlloca,
-                                                  llvm::PointerType::getUnqual(context),
-                                                  "abi.ptr");
-    llvm::Value *abiValue = m_builder.CreateLoad(abiType, abiPtr, "abi.val");
+    llvm::Value *abiPtr = m_builder->CreateBitCast(structAlloca,
+                                                   llvm::PointerType::getUnqual(context),
+                                                   "abi.ptr");
+    llvm::Value *abiValue = m_builder->CreateLoad(abiType, abiPtr, "abi.val");
 
     return abiValue;
 }
@@ -3074,14 +3089,14 @@ llvm::Value *LLVMCodegen::coerceFromABI(llvm::Value *abiValue, llvm::Type *struc
     llvm::Type *abiType = getABICoercionType(structType);
 
     // Allocate temporary for ABI value
-    llvm::AllocaInst *abiAlloca = m_builder.CreateAlloca(abiType, nullptr, "abi.tmp");
-    m_builder.CreateStore(abiValue, abiAlloca);
+    llvm::AllocaInst *abiAlloca = m_builder->CreateAlloca(abiType, nullptr, "abi.tmp");
+    m_builder->CreateStore(abiValue, abiAlloca);
 
     // Bitcast to struct type pointer and load
-    llvm::Value *structPtr = m_builder.CreateBitCast(abiAlloca,
-                                                     llvm::PointerType::getUnqual(context),
-                                                     "struct.ptr");
-    llvm::Value *structValue = m_builder.CreateLoad(structType, structPtr, "struct.val");
+    llvm::Value *structPtr = m_builder->CreateBitCast(abiAlloca,
+                                                      llvm::PointerType::getUnqual(context),
+                                                      "struct.ptr");
+    llvm::Value *structValue = m_builder->CreateLoad(structType, structPtr, "struct.val");
 
     return structValue;
 }
@@ -3238,22 +3253,33 @@ llvm::Value *LLVMCodegen::generateAsmStatement(
         }
     }
 
-    auto *ia = llvm::InlineAsm::get(fnTy, stmt->template_str, constraints, stmt->is_volatile);
+    llvm::InlineAsm::AsmDialect dialect = llvm::InlineAsm::AD_Intel; // Default
+    if (stmt->options.find(AsmStmt::AsmOption::AttSyntax) != stmt->options.end()) {
+        dialect = llvm::InlineAsm::AD_ATT;
+    }
 
-    llvm::Value *result = m_builder.CreateCall(ia, args);
+    auto *ia = llvm::InlineAsm::get(
+        fnTy,
+        stmt->template_str,
+        constraints,
+        stmt->is_volatile,
+        false,
+        dialect);
+
+    llvm::Value *result = m_builder->CreateCall(ia, args);
 
     // Store outputs back to memory
     size_t outputIndex = 0;
     for (auto &op : stmt->operands) {
         if (op.type == AsmOperandType::Out || op.type == AsmOperandType::LateOut) {
-            llvm::Value *v = (outputTypes.size() == 1) ? result : m_builder.CreateExtractValue(result, outputIndex);
+            llvm::Value *v = (outputTypes.size() == 1) ? result : m_builder->CreateExtractValue(result, outputIndex);
             llvm::Value *outputPtr = generateAddress(op.expr);
-            m_builder.CreateStore(v, outputPtr);
+            m_builder->CreateStore(v, outputPtr);
             outputIndex++;
         } else if (op.type == AsmOperandType::InOut || op.type == AsmOperandType::InLateOut) {
-            llvm::Value *v = (outputTypes.size() == 1) ? result : m_builder.CreateExtractValue(result, outputIndex);
+            llvm::Value *v = (outputTypes.size() == 1) ? result : m_builder->CreateExtractValue(result, outputIndex);
             llvm::Value *outputPtr = generateAddress(op.expr);
-            m_builder.CreateStore(v, outputPtr);
+            m_builder->CreateStore(v, outputPtr);
             outputIndex++;
         }
     }
@@ -3268,22 +3294,22 @@ llvm::Value *LLVMCodegen::generateSwitchStatement(const std::shared_ptr<SwitchSt
         numCases += caseBlock.first.size();
     }
 
-    auto parentBlock = m_builder.GetInsertBlock();
+    auto parentBlock = m_builder->GetInsertBlock();
     auto mergeBlock = llvm::BasicBlock::Create(context, "switch_merge", parentBlock->getParent());
     auto defaultBlock = llvm::BasicBlock::Create(context, "switch_default", parentBlock->getParent());
 
-    auto sStmt = m_builder.CreateSwitch(generateExpression(switchStmt->condition), defaultBlock, numCases);
+    auto sStmt = m_builder->CreateSwitch(generateExpression(switchStmt->condition), defaultBlock, numCases);
 
     for (const auto &caseBlock : switchStmt->cases) {
         auto exprs = caseBlock.first;
         numCases += exprs.size();
 
         auto caseBB = llvm::BasicBlock::Create(context, "switch_case", parentBlock->getParent());
-        m_builder.SetInsertPoint(caseBB);
+        m_builder->SetInsertPoint(caseBB);
         generateStatement(caseBlock.second);
 
-        if (!m_builder.GetInsertBlock()->getTerminator()) {
-            m_builder.CreateBr(mergeBlock);
+        if (!m_builder->GetInsertBlock()->getTerminator()) {
+            m_builder->CreateBr(mergeBlock);
         }
         for (const auto &expr : exprs) {
             if (!expr->inferred_type) {
@@ -3300,13 +3326,13 @@ llvm::Value *LLVMCodegen::generateSwitchStatement(const std::shared_ptr<SwitchSt
         }
     }
 
-    m_builder.SetInsertPoint(defaultBlock);
+    m_builder->SetInsertPoint(defaultBlock);
     if (switchStmt->default_case) {
         generateStatement(switchStmt->default_case);
     }
-    if (!m_builder.GetInsertBlock()->getTerminator()) {
-        m_builder.CreateBr(mergeBlock);
+    if (!m_builder->GetInsertBlock()->getTerminator()) {
+        m_builder->CreateBr(mergeBlock);
     }
-    m_builder.SetInsertPoint(mergeBlock);
+    m_builder->SetInsertPoint(mergeBlock);
     return nullptr;
 }

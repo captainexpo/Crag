@@ -5,7 +5,8 @@ pub import "io.crag"          as io;
 pub import "arena.crag"       as arena;
 pub import "time.crag"        as time;
 pub import "math.crag"        as math;
-pub import "fs/fs.crag"     as fs;
+pub import "fs/fs.crag"       as fs;
+pub import "heap.crag"        as heap;
 
 pub import "libc/stdio.crag"  as cstdio;
 pub import "libc/stdlib.crag" as cstdlib;

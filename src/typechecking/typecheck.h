@@ -13,31 +13,6 @@
 #include <unordered_map>
 #include <vector>
 
-#define DUMP_TYPECHECKER_STATE()                                                                     \
-    do {                                                                                             \
-        std::cerr << "=== TypeChecker State Dump ===\n";                                             \
-        std::cerr << "LINE: " << __LINE__ << " in " << __FILE__ << "\n";                             \
-        std::cerr << "Current module: " << (current_module ? current_module->path : "null") << "\n"; \
-        std::cerr << "Current scopes:\n";                                                            \
-        for (size_t i = 0; i < m_scopes.size(); ++i) {                                               \
-            std::cerr << "  Scope " << i << ":\n";                                                   \
-            for (const auto &sym : m_scopes[i].symbols) {                                            \
-                std::cerr << "    " << sym.first << ": " << sym.second->str() << "\n";               \
-            }                                                                                        \
-        }                                                                                            \
-        std::cerr << "Symbols:\n";                                                                   \
-        for (const auto &sym : symbolTable().entries()) {                                            \
-            std::cerr << "  " << sym.name << ": " << (sym.type ? sym.type->str() : "<no_type>") << "\n"; \
-        }                                                                                            \
-        std::cerr << "Templates:\n";                                                                 \
-        for (const auto &t : m_templates) {                                                          \
-            auto entry = symbolTable().get(t.first);                                                  \
-            std::string name = entry ? entry->name : "<unknown>";                                   \
-            std::cerr << "  " << name << " (#" << t.first << "): "                                \
-                      << (t.second ? t.second->str() : "<null>") << "\n";                          \
-        }                                                                                            \
-    } while (0);
-
 class TypeCheckError : public std::runtime_error {
   public:
     TypeCheckError(ASTNodePtr node, const std::string &msg)
@@ -67,6 +42,12 @@ typedef struct TypeScope {
         return it->second;
     }
 } TypeScope;
+
+
+typedef struct TemplateInstanceResult {
+    std::shared_ptr<Type> type; // Used for type of declaration or when the template is used as a type
+    std::shared_ptr<Expression> replacement; // Used when the template is used as a value (e.g. function template)
+} TemplateInstanceResult;
 
 class TypeChecker {
   public:
@@ -170,13 +151,14 @@ class TypeChecker {
     std::shared_ptr<Type> inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa);
     std::shared_ptr<Type> inferStructInit(const std::shared_ptr<StructInitializer> &init,
                                           const std::shared_ptr<Type> &expected = nullptr);
-    std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti);
+    TemplateInstanceResult inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti);
     void handleArrayLiteralAssignment(
         const std::string &name,
         const std::shared_ptr<ArrayLiteral> &arr_lit,
         const std::shared_ptr<ArrayType> &arr_type);
 
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandSizeOf(const std::shared_ptr<FuncCall> &call);
+    std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandSlice(const std::shared_ptr<FuncCall> &call);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandOffsetOf(const std::shared_ptr<FuncCall> &call);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandAlignOf(const std::shared_ptr<FuncCall> &call);
 };

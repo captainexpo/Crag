@@ -76,6 +76,7 @@ fn, return, if, else, while, for, let, const, struct, union, enum, import, exter
 - Variable access: `ident`
 - Module access / qualification: `mod::name` or `mod::type::<T>`
 - Template instantiation: `Name::<T1, T2>` (parser accepts `ID DOUBLE_COLON LT ... GT` form)
+- Slice constructor: `slice(ptr, len)` returns an unsized array view `[]T`
 - Struct initializer: `TypeName { field: expr, ... }` (also works after module/field access or template instantiation)
 - Array literal: `{ e1, e2, ... }` (note: parser uses `{}` for array literals)
 - Unary: prefix `* & + - ! ~ ++ --` and postfix `++ --`
@@ -122,4 +123,9 @@ let b = a[1];
 ```
 import "stdlib" as std;
 extern fn printf(fmt: *const u8, ...) -> i32;
+```
+
+- Inline Assembly
+```
+asm("mov {0}, {1}", in(reg) x, out(reg) y);
 ```

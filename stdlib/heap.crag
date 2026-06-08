@@ -1,0 +1,8 @@
+extern fn malloc(size: usize) -> *u8;
+pub fn alloc_arr<T>(len: usize) -> []T {
+    return slice(malloc(len * sizeof(T)) as *T, len);
+}
+
+pub fn alloc<T>() -> *T {
+    return malloc(sizeof(T)) as *T;
+}

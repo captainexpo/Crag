@@ -8,10 +8,6 @@
 
 #include "module_resolver.h"
 #include "typechecking/typecheck.h"
-
-
-
-
 #include "utils.h"
 #include <filesystem>
 #include <llvm/Support/TargetSelect.h>
@@ -22,9 +18,9 @@
 void initializeLLVM() {
     static bool initialized = false;
     if (!initialized) {
-        llvm::InitializeNativeTarget();
-        llvm::InitializeNativeTargetAsmPrinter();
-        llvm::InitializeNativeTargetAsmParser();
+        llvm::InitializeAllTargets();
+        llvm::InitializeAllAsmPrinters();
+        llvm::InitializeAllAsmParsers();
         initialized = true;
     }
 }
@@ -38,8 +34,7 @@ std::string backendToString(BackendType backend) {
     }
 }
 
-std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LLVMContext &context, CompilerOptions options) {
-
+std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, CompilerOptions options) {
     if (options.backend != LLVM) {
         fail("Unsupported backend: " + backendToString(options.backend));
     }
@@ -109,7 +104,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, llvm::LL
     }
 #ifndef NO_LLVM
     // Call llvm codegen directly here, should probably make it more modular later
-    auto codegen = std::make_shared<LLVMCodegen>("mainmod", context, moduleResolver, options);
+    auto codegen = std::make_shared<LLVMCodegen>("mainmod", moduleResolver, options);
     bool has_errors = false;
     std::vector<std::string> order = moduleResolver.getBestOrder();
     for (std::string path : order) {

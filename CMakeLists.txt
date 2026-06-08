@@ -67,12 +67,40 @@ file(GLOB RUNTIME_SRC_FILES
 
 make_directory(lib)
 
+#for all runtime source files, add a custom command to compile them into object files
+
+set(RUNTIME_OBJ_FILES)
+
+foreach(RUNTIME_SRC_FILE ${RUNTIME_SRC_FILES})
+    get_filename_component(RUNTIME_NAME "${RUNTIME_SRC_FILE}" NAME_WE)
+
+    set(RUNTIME_OBJ_FILE
+        "${CMAKE_CURRENT_BINARY_DIR}/lib/${RUNTIME_NAME}.o")
+
+    add_custom_command(
+        OUTPUT ${RUNTIME_OBJ_FILE}
+        COMMAND $<TARGET_FILE:crag>
+                ${RUNTIME_SRC_FILE}
+                -o ${RUNTIME_OBJ_FILE}
+                --unsafe
+                -ORelease
+                --no-runtime
+        DEPENDS crag ${RUNTIME_SRC_FILE}
+    )
+
+    list(APPEND RUNTIME_OBJ_FILES ${RUNTIME_OBJ_FILE})
+endforeach()
+
+# Combine all runtime object files into a single object file using ld
+
+message(STATUS "Runtime object files: ${RUNTIME_OBJ_FILES}")
 add_custom_command(
     OUTPUT lib/runtime.o
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/crag ARGS ${RUNTIME_SRC_FILES} -o lib/runtime.o --unsafe -ORelease --no-runtime
-    DEPENDS ${RUNTIME_SRC_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/build/crag
-    COMMENT "Compiling runtime.o"
+    COMMAND ${CMAKE_LINKER} -r -o lib/runtime.o ${RUNTIME_OBJ_FILES}
+    DEPENDS ${RUNTIME_OBJ_FILES}
+    COMMENT "Combining runtime object files into lib/runtime.o"
 )
+
 
 # Create a static library for the runtime
 set_source_files_properties(lib/runtime.o PROPERTIES GENERATED TRUE)
