@@ -1,8 +1,9 @@
 //NAME: Imported Generics
 //DESC:
+//REQUIRES:mod_test_requires/imported_generic.crag
 //BEGIN CODE
 
-import "imported_generics.crag" as ig;
+import "imported_generic.crag" as ig;
 
 extern fn printf(fmt: *u8, ...) -> i32;
 

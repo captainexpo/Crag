@@ -429,7 +429,6 @@ static void substituteGenericTypes(std::shared_ptr<Type> &type,
 
 std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t) {
     if (!t) {
-        asm ("int3"); // trigger breakpoint for debugging
         throw TypeCheckError(node, "Internal type-checker error: attempted to resolve a null type");
     }
 

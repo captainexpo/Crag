@@ -241,7 +241,6 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
     }
 
     if (peek().type == TokenType::DOUBLE_COLON) {
-        std::cout << "Parsing template instance type, base type: " << current.value << std::endl;
         consume(TokenType::DOUBLE_COLON);
         consume(TokenType::LT);
 
@@ -969,7 +968,6 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                 expr->col = t.column;
                 return expr;
             }
-            // asm("int3");
             throw ParseError("Unexpected token in expression: '" + t.value + "'", t.line, t.column);
     }
 }
