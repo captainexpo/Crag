@@ -151,7 +151,8 @@ class TypeChecker {
     std::shared_ptr<Type> inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa);
     std::shared_ptr<Type> inferStructInit(const std::shared_ptr<StructInitializer> &init,
                                           const std::shared_ptr<Type> &expected = nullptr);
-    TemplateInstanceResult inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti);
+    std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti);
+
     void handleArrayLiteralAssignment(
         const std::string &name,
         const std::shared_ptr<ArrayLiteral> &arr_lit,

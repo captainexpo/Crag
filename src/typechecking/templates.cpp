@@ -5,6 +5,7 @@
 #include <cstring>
 #include <memory>
 
+
 std::string mangleTemplateName(const std::string &base, const std::vector<std::shared_ptr<Type>> &params) {
     std::string mangled = base + "<";
     for (size_t i = 0; i < params.size(); ++i) {
@@ -85,7 +86,7 @@ static bool isTemplateDeclaration(const std::shared_ptr<Declaration> &decl) {
 }
 
 // Returns type of expression, and replacement for the instantiation
-TemplateInstanceResult TypeChecker::inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti) {
+std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti) {
     std::string qualified_name = formatQualifiedTemplateName(ti->module_path, ti->template_name);
 
     TypeChecker *target_checker = this;
@@ -132,8 +133,8 @@ TemplateInstanceResult TypeChecker::inferTemplateInstantiation(const std::shared
     if (auto alias_decl = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
         if (alias_decl->generic_params.size() != params.size()) {
             throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + templateDeclName(decl) +
-                                         ": expected " + std::to_string(alias_decl->generic_params.size()) +
-                                         ", got " + std::to_string(params.size()));
+                                        ": expected " + std::to_string(alias_decl->generic_params.size()) +
+                                        ", got " + std::to_string(params.size()));
         }
 
         std::unordered_map<std::string, std::shared_ptr<Type>> generic_map;
@@ -153,9 +154,7 @@ TemplateInstanceResult TypeChecker::inferTemplateInstantiation(const std::shared
         }
 
         ti->inferred_type = resolved;
-        return TemplateInstanceResult {
-            .type = resolved,
-        };
+        return std::make_pair(resolved, std::make_shared<TypeExpression>(resolved));
     }
 
     if (target_checker != this) {
@@ -166,176 +165,114 @@ TemplateInstanceResult TypeChecker::inferTemplateInstantiation(const std::shared
 
         auto result = target_checker->inferTemplateInstantiation(ti_copy);
 
-        if (auto fn_type = std::dynamic_pointer_cast<FunctionType>(result.type)) {
+        if (auto fn_type = std::dynamic_pointer_cast<FunctionType>(result.first)) {
             if (auto st = std::dynamic_pointer_cast<StructType>(fn_type->ret)) {
                 auto complete = target_checker->lookupStructType(st->name);
-                st->name = formatQualifiedTemplateName(ti->module_path, st->name);
                 if (complete) {
                     fn_type->ret = complete;
                     insertGlobalSymbol(st->name, complete, nullptr);
                 }
             }
-        } else if (auto st = std::dynamic_pointer_cast<StructType>(result.type)) {
+        } else if (auto st = std::dynamic_pointer_cast<StructType>(result.first)) {
             auto complete = target_checker->lookupStructType(st->name);
-            st->name = formatQualifiedTemplateName(ti->module_path, st->name);
             if (complete) {
-                result.type = complete;
+                result.first = complete;
                 insertGlobalSymbol(st->name, complete, nullptr);
             }
         }
 
-        ti->inferred_type = result.type;
+        ti->inferred_type = result.first;
         std::string mangled_name = mangleTemplateName(templateDeclName(decl), params);
         auto ma = std::make_shared<ModuleAccess>(ti->module_path, mangled_name);
-        ma->inferred_type = result.type;
-        return TemplateInstanceResult {
-            .type = result.type,
-            .replacement = ma,
-        };
+        ma->inferred_type = result.first;
+        return std::make_pair(result.first, ma);
     }
 
     auto to_instantiate = decl;
 
-    if (auto td = std::dynamic_pointer_cast<TypeDecl>(to_instantiate)) {
-        auto copiedNode = to_instantiate->instantiate(params);
+    if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(to_instantiate)) {
+        auto new_name = mangleTemplateName(fd->name, params);
+        // std::cout << "Instantiating function template: " << fd->name << " as " << new_name << "\n";
+        // Check if already instantiated
+        auto existing = lookupFunctionType(new_name);
+        if (existing) {
+            ti->inferred_type = existing;
+            return std::make_pair(
+                ti->inferred_type,
+                std::make_shared<VarAccess>(new_name));
+        }
+
+        std::shared_ptr<FunctionDeclaration> declCopy = std::dynamic_pointer_cast<FunctionDeclaration>(fd->instantiate());
+        if (fd->generic_params.size() != params.size()) {
+            throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + fd->name +
+                                         ": expected " + std::to_string(fd->generic_params.size()) +
+                                         ", got " + std::to_string(params.size()));
+        }
+        std::unordered_map<std::string, std::shared_ptr<Type>> generic_map;
+        for (size_t i = 0; i < fd->generic_params.size(); ++i) {
+            generic_map[fd->generic_params[i]] = params[i];
+        }
+        // std::cout << "Generic map:\n";
+        // for (const auto &gm : generic_map) {
+        //     std::cout << "  " << gm.first << " -> " << gm.second->str() << "\n";
+        // }
+        replaceGenericTypes(declCopy, generic_map);
+        // std::cout << declCopy->str() << "\n";
+        declCopy->name = new_name;
+        // Clear generic_params since this is now an instantiated function, not a template
+        declCopy->generic_params.clear();
+        auto saved_expected_return_type = m_expected_return_type;
+        checkFunctionDeclaration(declCopy);
+        m_expected_return_type = saved_expected_return_type;
+        ti->inferred_type = declCopy->type;
+        insertGlobalSymbol(new_name, ti->inferred_type, declCopy);
+        current_module->ast->declarations.push_back(declCopy);
+        return std::make_pair(
+            ti->inferred_type,
+            std::make_shared<VarAccess>(new_name));
+    } else if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(to_instantiate)) {
+        auto new_name = mangleTemplateName(sd->name, params);
+        // Check if already instantiated
+        auto existing = lookupStructType(new_name);
+        if (existing) {
+            ti->inferred_type = existing;
+            return std::make_pair(
+                ti->inferred_type,
+                std::make_shared<TypeExpression>(ti->inferred_type));
+        }
+
+        std::shared_ptr<StructDeclaration> declCopy = std::dynamic_pointer_cast<StructDeclaration>(sd->instantiate());
+        if (sd->generic_params.size() != params.size()) {
+            throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + sd->name +
+                                         ": expected " + std::to_string(sd->generic_params.size()) +
+                                         ", got " + std::to_string(params.size()));
+        }
+        std::unordered_map<std::string, std::shared_ptr<Type>> generic_map;
+        for (size_t i = 0; i < sd->generic_params.size(); ++i) {
+            generic_map[sd->generic_params[i]] = params[i];
+        }
+        replaceGenericTypes(declCopy, generic_map);
+        declCopy->name = new_name;
+        // Clear generic_params since this is now an instantiated struct, not a template
+        declCopy->generic_params.clear();
+
+        auto st = std::make_shared<StructType>(new_name);
+        st->complete = false;
+        insertGlobalSymbol(new_name, st, sd);
+
         auto old_expected_return_type = m_expected_return_type;
         m_expected_return_type = nullptr;
-        if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(copiedNode)) {
-            sd->name = mangleTemplateName(sd->name, params);
-            checkStructDeclaration(sd);
-            insertGlobalSymbol(sd->name, sd->inferred_type, sd);
-        } else if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(copiedNode)) {
-            ud->name = mangleTemplateName(ud->name, params);
-            checkUnionDeclaration(ud);
-            insertGlobalSymbol(ud->name, ud->inferred_type, ud);
-        } else if (auto en = std::dynamic_pointer_cast<EnumDeclaration>(copiedNode)) {
-            en->name = mangleTemplateName(en->name, params);
-            checkEnumDeclaration(en);
-            insertGlobalSymbol(en->name, en->inferred_type, en);
-        } else if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(copiedNode)) {
-            ta->name = mangleTemplateName(ta->name, params);
-            checkNode(ta);
-            insertGlobalSymbol(ta->name, ta->inferred_type, ta);
-        } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(copiedNode)) {
-            fd->name = mangleTemplateName(fd->name, params);
-            checkFunctionDeclaration(fd);
-            // Add to symbol table so that recursive templates can find it
-            insertGlobalSymbol(fd->name, fd->type, fd);
+        checkStructDeclaration(declCopy);
+        // std::cout << "TYP " << st->str() << "\n";
+        current_module->ast->declarations.push_back(declCopy);
 
-        } else {
-            throw TypeCheckError(ti, "Unsupported template kind: " + to_instantiate->str());
-        }
+        ti->inferred_type = st;
         m_expected_return_type = old_expected_return_type;
-        current_module->ast->declarations.push_back(copiedNode);
-        ti->inferred_type = copiedNode->inferred_type;
-        std::dynamic_pointer_cast<TypeDecl>(copiedNode)->generic_params.clear();
-        ExprPtr expr = nullptr;
-        if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(copiedNode)) {
-            expr = std::make_shared<TypeExpression>(ti->inferred_type);
-        } else if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(copiedNode)) {
-            expr = std::make_shared<TypeExpression>(ti->inferred_type);
-        } else if (auto en = std::dynamic_pointer_cast<EnumDeclaration>(copiedNode)) {
-            expr = std::make_shared<TypeExpression>(ti->inferred_type);
-        } else if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(copiedNode)) {
-            expr = std::make_shared<TypeExpression>(ti->inferred_type);
-        } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(copiedNode)) {
-            expr = std::make_shared<VarAccess>(fd->name);
-        } else {
-            throw TypeCheckError(ti, "Unsupported template kind: " + to_instantiate->str());
-        }
-        std::cout << copiedNode->str() << "\n";
-        std::cout << expr->str() << "\n";
-        return TemplateInstanceResult {
-            .type = inferExpression(expr),
-            .replacement = expr,
-        };
-    } else {
-        throw TypeCheckError(ti, "Unsupported template kind: " + to_instantiate->str());
+        return std::make_pair(
+            ti->inferred_type,
+            std::make_shared<TypeExpression>(ti->inferred_type));
     }
-
-    // if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(to_instantiate)) {
-    //     auto new_name = mangleTemplateName(fd->name, params);
-    //     // std::cout << "Instantiating function template: " << fd->name << " as " << new_name << "\n";
-    //     // Check if already instantiated
-    //     auto existing = lookupFunctionType(new_name);
-    //     if (existing) {
-    //         ti->inferred_type = existing;
-    //         return std::make_pair(
-    //             ti->inferred_type,
-    //             std::make_shared<VarAccess>(new_name));
-    //     }
-    //
-    //     std::shared_ptr<FunctionDeclaration> declCopy = std::dynamic_pointer_cast<FunctionDeclaration>(fd->instantiate());
-    //     if (fd->generic_params.size() != params.size()) {
-    //         throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + fd->name +
-    //                                      ": expected " + std::to_string(fd->generic_params.size()) +
-    //                                      ", got " + std::to_string(params.size()));
-    //     }
-    //     std::unordered_map<std::string, std::shared_ptr<Type>> generic_map;
-    //     for (size_t i = 0; i < fd->generic_params.size(); ++i) {
-    //         generic_map[fd->generic_params[i]] = params[i];
-    //     }
-    //     // std::cout << "Generic map:\n";
-    //     // for (const auto &gm : generic_map) {
-    //     //     std::cout << "  " << gm.first << " -> " << gm.second->str() << "\n";
-    //     // }
-    //     replaceGenericTypes(declCopy, generic_map);
-    //     // std::cout << declCopy->str() << "\n";
-    //     declCopy->name = new_name;
-    //     // Clear generic_params since this is now an instantiated function, not a template
-    //     declCopy->generic_params.clear();
-    //     auto saved_expected_return_type = m_expected_return_type;
-    //     checkFunctionDeclaration(declCopy);
-    //     m_expected_return_type = saved_expected_return_type;
-    //     ti->inferred_type = declCopy->type;
-    //     insertGlobalSymbol(new_name, ti->inferred_type, declCopy);
-    //     current_module->ast->declarations.push_back(declCopy);
-    //     return std::make_pair(
-    //         ti->inferred_type,
-    //         std::make_shared<VarAccess>(new_name));
-    // } else if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(to_instantiate)) {
-    //     auto new_name = mangleTemplateName(sd->name, params);
-    //     // Check if already instantiated
-    //     auto existing = lookupStructType(new_name);
-    //     if (existing) {
-    //         ti->inferred_type = existing;
-    //         return std::make_pair(
-    //             ti->inferred_type,
-    //             std::make_shared<TypeExpression>(ti->inferred_type));
-    //     }
-    //
-    //     std::shared_ptr<StructDeclaration> declCopy = std::dynamic_pointer_cast<StructDeclaration>(sd->instantiate());
-    //     if (sd->generic_params.size() != params.size()) {
-    //         throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + sd->name +
-    //                                      ": expected " + std::to_string(sd->generic_params.size()) +
-    //                                      ", got " + std::to_string(params.size()));
-    //     }
-    //     std::unordered_map<std::string, std::shared_ptr<Type>> generic_map;
-    //     for (size_t i = 0; i < sd->generic_params.size(); ++i) {
-    //         generic_map[sd->generic_params[i]] = params[i];
-    //     }
-    //     replaceGenericTypes(declCopy, generic_map);
-    //     declCopy->name = new_name;
-    //     // Clear generic_params since this is now an instantiated struct, not a template
-    //     declCopy->generic_params.clear();
-    //
-    //     auto st = std::make_shared<StructType>(new_name);
-    //     st->complete = false;
-    //     insertGlobalSymbol(new_name, st, sd);
-    //
-    //     auto old_expected_return_type = m_expected_return_type;
-    //     m_expected_return_type = nullptr;
-    //     checkStructDeclaration(declCopy);
-    //     // std::cout << "TYP " << st->str() << "\n";
-    //     current_module->ast->declarations.push_back(declCopy);
-    //
-    //     ti->inferred_type = st;
-    //     m_expected_return_type = old_expected_return_type;
-    //     return std::make_pair(
-    //         ti->inferred_type,
-    //         std::make_shared<TypeExpression>(ti->inferred_type));
-    // }
-    // throw TypeCheckError(ti, "Unsupported template kind: " + to_instantiate->str());
+    throw TypeCheckError(ti, "Unsupported template kind: " + to_instantiate->str());
 }
 
 void replaceInType(std::shared_ptr<Type> &type, const std::unordered_map<std::string, std::shared_ptr<Type>> &generic_map) {
@@ -616,3 +553,4 @@ void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map
 
     throw TypeCheckError(node, "replaceGenericTypes: unhandled AST node type: " + node->str());
 }
+

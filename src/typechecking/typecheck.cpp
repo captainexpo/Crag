@@ -429,7 +429,7 @@ static void substituteGenericTypes(std::shared_ptr<Type> &type,
 
 std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t) {
     if (!t) {
-        asm("int3"); // trigger breakpoint for debugging
+        asm ("int3"); // trigger breakpoint for debugging
         throw TypeCheckError(node, "Internal type-checker error: attempted to resolve a null type");
     }
 
@@ -523,8 +523,8 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
         // Check if base is a qualified type (module-qualified template)
         if (auto qt = std::dynamic_pointer_cast<QualifiedType>(tut->base)) {
             auto ti = std::make_shared<TemplateInstantiation>(qt->module_path, qt->type_name, resolved_args);
-            auto newExpr = inferTemplateInstantiation(ti);
-            auto instantiated_type = newExpr.type;
+            auto pair = inferTemplateInstantiation(ti);
+            auto instantiated_type = pair.first;
             if (!instantiated_type) {
                 throw TypeCheckError(
                     nullptr,
@@ -537,8 +537,8 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
         auto base_type = resolveType(node, tut->base);
         if (auto struct_type = std::dynamic_pointer_cast<StructType>(base_type)) {
             auto ti = std::make_shared<TemplateInstantiation>(struct_type->name, resolved_args);
-            auto newExpr = inferTemplateInstantiation(ti); // Will instantiate the template
-            auto instantiated_type = newExpr.type;
+            auto pair = inferTemplateInstantiation(ti); // Will instantiate the template
+            auto instantiated_type = pair.first;
             if (!instantiated_type) {
                 throw TypeCheckError(
                     nullptr,
@@ -565,13 +565,13 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                 auto collapsed = resolveType(node, base_copy);
                 if (auto collapsed_struct = std::dynamic_pointer_cast<StructType>(collapsed)) {
                     auto ti = std::make_shared<TemplateInstantiation>(collapsed_struct->name, resolved_args);
-                    auto newExpr = inferTemplateInstantiation(ti);
-                    if (!newExpr.type) {
+                    auto pair = inferTemplateInstantiation(ti);
+                    if (!pair.first) {
                         throw TypeCheckError(
                             nullptr,
                             "Failed to resolve template instantiation type for: " + tut->str());
                     }
-                    return newExpr.type;
+                    return pair.first;
                 }
                 return collapsed;
             }
@@ -1481,12 +1481,10 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         return res;
     }
     if (auto ta = std::dynamic_pointer_cast<TemplateInstantiation>(expr)) {
-        auto newExpr = inferTemplateInstantiation(ta);
-        expr = newExpr.replacement;
-        std::cout << "Template type: " << typeName(newExpr.type) << std::endl;
-        std::cout << "Rewritten expression: " << expr->str() << std::endl;
-        std::cout << "Rewritten expression type: " << typeName(inferExpression(expr)) << std::endl;
-        return newExpr.type;
+        std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> pair = inferTemplateInstantiation(ta);
+        // std::cout << "Inferred template instantiation type: " << (pair.first ? pair.first->str() : "null") << std::endl;
+        expr = pair.second;
+        return pair.first;
     }
     if (auto al = std::dynamic_pointer_cast<ArrayLiteral>(expr))
         return inferArrayLiteral(al, expected);
