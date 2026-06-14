@@ -377,6 +377,7 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
         case TokenType::CONST: {
             auto vd = parse_variable_declaration();
             consume(TokenType::SEMICOLON);
+            vd->is_pub = is_pub;
             return vd;
         }
         case TokenType::USING: {

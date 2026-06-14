@@ -1,15 +1,33 @@
-#include <string>
-#include <memory>
-#include <unordered_map>
-#include <vector>
-#include "../ast/ast.h"
-
 #ifndef TABLES_H
 #define TABLES_H
 
+#include "../ast/ast.h"
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #define INVALID_SYMBOL_ID UINT32_MAX
 
-using SymbolId = uint32_t;
+// Symbol IDs are 64-bit integers where the upper 32 bits represent the module ID and the lower 32 bits represent the symbol index within that module's symbol table.
+using SymbolId = uint64_t;
+
+inline SymbolId extractModuleId(SymbolId id) {
+    return id >> 32;
+}
+
+inline SymbolId extractSymbolIndex(SymbolId id) {
+    return id & 0xFFFFFFFF;
+}
+
+inline SymbolId makeSymbolId(SymbolId module_id, SymbolId symbol_index) {
+    if (module_id > 0xFFFFFFFF || symbol_index > 0xFFFFFFFF) {
+        throw std::runtime_error("Module ID or Symbol Index exceeds 32 bits");
+    }
+    return (static_cast<SymbolId>(module_id) << 32) | symbol_index;
+}
+
+class Module;
 
 struct Symbol {
     std::string name;
@@ -18,47 +36,41 @@ struct Symbol {
 };
 
 class SymbolTable {
-public:
-    SymbolId insert(Symbol symbol) {
-        SymbolId id = symbols.size();
+  public:
+    SymbolId insert(Symbol symbol);
 
-        symbols.push_back(std::move(symbol));
+    SymbolId lookup(const std::string &name) const;
 
-        name_lookup[symbols[id].name] = id;
+    Symbol *get(SymbolId id);
 
-        return id;
-    }
+    const Symbol *get(SymbolId id) const;
 
-    SymbolId lookup(const std::string& name) const {
-        auto it = name_lookup.find(name);
+    bool remove(SymbolId id);
 
-        if (it == name_lookup.end())
-            return INVALID_SYMBOL_ID;
+    const std::vector<Symbol> &entries() const;
 
-        return it->second;
-    }
+    // Id for the module this table belongs to, set by the global symbol table when the module is inserted
+    SymbolId table_id;
 
-    Symbol* get(SymbolId id) {
-        if (id >= symbols.size())
-            return nullptr;
-
-        return &symbols[id];
-    }
-
-    const Symbol* get(SymbolId id) const {
-        if (id >= symbols.size())
-            return nullptr;
-
-        return &symbols[id];
-    }
-
-    const std::vector<Symbol> &entries() const {
-        return symbols;
-    }
-
-private:
+  private:
     std::vector<Symbol> symbols;
 
     std::unordered_map<std::string, SymbolId> name_lookup;
 };
+
+class GlobalSymbolTable {
+  public:
+    SymbolId insertModule(std::shared_ptr<Module> module);
+
+    std::pair<SymbolTable, std::shared_ptr<Module>> *lookupModule(uint32_t module_id);
+
+    const std::pair<SymbolTable, std::shared_ptr<Module>> *lookupModule(uint32_t module_id) const;
+
+    std::unordered_map<uint32_t, std::pair<SymbolTable, std::shared_ptr<Module>>> modules;
+
+    void dump() const;
+
+  private:
+};
+
 #endif

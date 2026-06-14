@@ -61,11 +61,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
     std::cout << mod->ast->toString();
 #endif
 
-    if (!mod->type_checker) {
-        mod->type_checker = std::make_shared<TypeChecker>(options);
-    }
-
-    auto typeChecker = mod->type_checker;
+    auto typeChecker = new TypeChecker(options);
     typeChecker->check(mod);
 
     if (options.dump_ast_bsa) {
@@ -75,13 +71,10 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
     }
     if (!typeChecker->ok()) {
         std::cout << typeChecker->errors().size() << " errors during type checking:\n";
+        typeChecker->globalSymbols().dump();
         for (const auto &err : typeChecker->errors()) {
-            std::cerr << err.second << "\n";
-            if (err.first) {
-                std::cerr << err.first->line << " " << err.first->col << "\n";
-            }
-            prettyError(err.first ? err.first->line : -1,
-                        err.first ? err.first->col : -1, err.second, mod->source_code);
+            prettyError(err.node ? err.node->line : -1,
+                        err.node ? err.node->col : -1, err.what(), err.module->source_code, err.module->name);
         }
         return nullptr;
     }
@@ -118,7 +111,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
             for (const auto &err : codegen->errors()) {
                 std::cerr << err.what() << "\n";
                 prettyError(err.node() ? err.node()->line : -1,
-                            err.node() ? err.node()->col : -1, err.what(), module->source_code);
+                            err.node() ? err.node()->col : -1, err.what(), module->source_code, module->canon_name);
             }
             has_errors = true;
         }

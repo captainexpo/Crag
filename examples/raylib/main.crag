@@ -94,10 +94,15 @@ pub fn main() -> i32 {
             else if (ball_future_y > SCREEN_HEIGHT) {
                 ball_future_y = 2 * SCREEN_HEIGHT - ball_future_y;
             }
+            let pos_delta = ball_future_y - (p2_y + PADDLE_HEIGHT / 2);
+            let movement = PADDLE_SPEED;
+            if (std.math.abs::<f32>(pos_delta) > movement) {
+                movement = movement * std.math.sign::<f32>(pos_delta);
+            }
             if (ball_future_y < p2_y + PADDLE_HEIGHT / 2) {
-                p2_y -= PADDLE_SPEED * delta;
+                p2_y -= movement * delta;
             } else if (ball_future_y > p2_y + PADDLE_HEIGHT / 2) {
-                p2_y += PADDLE_SPEED * delta;   
+                p2_y += movement * delta;
             }
         }
         else {
@@ -107,7 +112,7 @@ pub fn main() -> i32 {
             } else if (p2_y + PADDLE_HEIGHT / 2 > SCREEN_HEIGHT / 2) {
                 p2_y -= PADDLE_SPEED * delta;
             }
-        }        
+        }
         // Clamp paddles to screen
         if (p1_y < 0) {
             p1_y = 0;

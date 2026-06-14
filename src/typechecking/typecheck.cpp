@@ -2,6 +2,7 @@
 #include "../ast/ast.h"
 #include "../const_eval.h"
 #include "src/backend.h"
+#include "src/typechecking/tables.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -58,6 +59,10 @@ TypeChecker::TypeChecker(CompilerOptions options) : m_const_eval(*new ConstEvalu
         "@target_os",
         std::make_shared<Literal>(std::string(options.target.osToString()),
                                   std::make_shared<PointerType>(std::make_shared<U8>(), true)));
+    m_const_eval.addIntrinsic(
+        "@target_env",
+        std::make_shared<Literal>(std::string(options.target.environmentToString()),
+                                  std::make_shared<PointerType>(std::make_shared<U8>(), true)));
 
     m_expected_return_type = nullptr;
     m_errors.clear();
@@ -65,18 +70,17 @@ TypeChecker::TypeChecker(CompilerOptions options) : m_const_eval(*new ConstEvalu
     m_templates.clear();
     m_current_generic_types.clear();
     m_struct_methods.clear();
-    imported_modules.clear();
     compilerOptions = options;
 
     pushScope();
 }
 
 SymbolTable &TypeChecker::symbolTable() {
-    return current_module->symbols;
+    return symbol_table.lookupModule(current_module->id)->first;
 }
 
 const SymbolTable &TypeChecker::symbolTable() const {
-    return current_module->symbols;
+    return symbol_table.lookupModule(current_module->id)->first;
 }
 
 std::shared_ptr<Type> TypeChecker::lookupNamedType(const std::string &name) const {
@@ -116,26 +120,34 @@ std::shared_ptr<FunctionType> TypeChecker::lookupFunctionType(const std::string 
 void TypeChecker::pushScope() { m_scopes.emplace_back(); }
 
 void TypeChecker::popScope() {
-    if (!m_scopes.empty())
+    if (!m_scopes.empty()) {
+        // Remove all symbols in the current scope from the symbol table
+        for (const auto &entry : m_scopes.back().symbols) {
+            symbolTable().remove(entry.second);
+        }
         m_scopes.pop_back();
+    }
 }
 
 bool TypeChecker::insertSymbol(const std::string &name,
-                               std::shared_ptr<Type> t, ASTNodePtr decl) {
+                               std::shared_ptr<Type> t, ASTNodePtr decl, SymbolId *id_out) {
     if (m_scopes.empty())
         pushScope();
     auto &top = m_scopes.back();
+
     if (top.find(name) != INVALID_SYMBOL_ID)
         return false;
 
     SymbolId id = symbolTable().insert({name, t, decl});
 
     top.symbols[name] = id;
+    if (id_out)
+        *id_out = id;
     return true;
 }
 
-bool TypeChecker::insertGlobalSymbol(const std::string &name,
-                                     std::shared_ptr<Type> t, ASTNodePtr decl) {
+SymbolId TypeChecker::insertGlobalSymbol(const std::string &name,
+                                         std::shared_ptr<Type> t, ASTNodePtr decl) {
     if (m_scopes.empty())
         pushScope();
     auto &global = m_scopes.front();
@@ -144,7 +156,7 @@ bool TypeChecker::insertGlobalSymbol(const std::string &name,
 
     SymbolId id = symbolTable().insert({name, t, decl});
     global.symbols[name] = id;
-    return true;
+    return id;
 }
 
 SymbolId TypeChecker::insertTemplateSymbol(const std::string &name,
@@ -290,10 +302,10 @@ bool canExplicitCast(const std::shared_ptr<Type> &from,
 
     return false;
 }
-std::shared_ptr<Type> getCastType(std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &from,
-                                  const std::shared_ptr<Type> &to) {
+std::shared_ptr<Type> TypeChecker::getCastType(std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &from,
+                                               const std::shared_ptr<Type> &to) {
     if (!from || !to)
-        throw TypeCheckError(node,
+        throw TypeCheckError(current_module, node,
                              "getCastType: from or to type is null");
     if (from->equals(to))
         return to;
@@ -314,7 +326,7 @@ std::shared_ptr<Type> getCastType(std::shared_ptr<ASTNode> &node, const std::sha
         auto to_ptr = dynamic_cast<PointerType *>(to.get());
         auto from_ptr = dynamic_cast<PointerType *>(from.get());
         if (!to_ptr || !from_ptr)
-            throw TypeCheckError(node,
+            throw TypeCheckError(current_module, node,
                                  "getCastType: failed to cast to/from pointer types");
 
         if (from_ptr->base->equals(to_ptr->base)) {
@@ -429,7 +441,7 @@ static void substituteGenericTypes(std::shared_ptr<Type> &type,
 
 std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t) {
     if (!t) {
-        throw TypeCheckError(node, "Internal type-checker error: attempted to resolve a null type");
+        throw TypeCheckError(current_module, node, "Internal type-checker error: attempted to resolve a null type");
     }
 
     // Resolve bound generics if any (used in instantiation paths)
@@ -447,13 +459,13 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
         if (resolved) {
             return resolved;
         }
-        // throw TypeCheckError(node, "resolveType: unknown struct type: " + st->name);
+        // throw TypeCheckError(current_module, node, "resolveType: unknown struct type: " + st->name);
         return st; // unknown struct type
     }
     if (auto pt = std::dynamic_pointer_cast<PointerType>(t)) {
         auto bt = resolveType(node, pt->base);
         if (!bt)
-            throw TypeCheckError(node, "Could not resolve base type of pointer type '" + pt->str() + "'");
+            throw TypeCheckError(current_module, node, "Could not resolve base type of pointer type '" + pt->str() + "'");
         return std::make_shared<PointerType>(bt, pt->pointer_const);
     }
     if (auto at = std::dynamic_pointer_cast<ArrayType>(t)) {
@@ -462,18 +474,18 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
             at->length_expr->inferred_type = inferExpression(at->length_expr);
 
         if (!bt)
-            throw TypeCheckError(node, "Could not resolve array element type for '" + at->str() + "'");
+            throw TypeCheckError(current_module, node, "Could not resolve array element type for '" + at->str() + "'");
         return std::make_shared<ArrayType>(bt, at->length_expr, at->unsized);
     }
     if (auto ft = std::dynamic_pointer_cast<FunctionType>(t)) {
         auto rt = resolveType(node, ft->ret);
         if (!rt)
-            throw TypeCheckError(node, "Could not resolve function return type in '" + ft->str() + "'");
+            throw TypeCheckError(current_module, node, "Could not resolve function return type in '" + ft->str() + "'");
         std::vector<std::shared_ptr<Type>> pts;
         for (const auto &p : ft->params) {
             auto pt = resolveType(node, p);
             if (!pt)
-                throw TypeCheckError(node, "Could not resolve one of the function parameter types in '" + ft->str() + "'");
+                throw TypeCheckError(current_module, node, "Could not resolve one of the function parameter types in '" + ft->str() + "'");
             pts.push_back(pt);
         }
         return std::make_shared<FunctionType>(pts, rt, ft->variadic, ft->is_extern);
@@ -485,18 +497,24 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                 return resolved;
             return qt; // unknown type
         } else {
-            // look in imported modules
-            auto mod_name = qt->module_path[0];
-            auto it = imported_modules.find(mod_name);
-            if (it != imported_modules.end()) {
-                auto imported_checker = it->second->type_checker;
-                // Recursively resolve the rest of the module path
-                return imported_checker->resolveType(node,
-                                                     std::make_shared<QualifiedType>(
-                                                         std::vector<std::string>(qt->module_path.begin() + 1, qt->module_path.end()),
-                                                         qt->type_name));
+            auto og_mod = current_module;
+            auto cur_mod = og_mod;
+            for (const auto &part : qt->module_path) {
+                auto maybe = cur_mod->imports.find(part);
+                if (maybe == cur_mod->imports.end()) {
+                    throw TypeCheckError(current_module, node, "Could not resolve module '" + part + "' in qualified type '" + qt->str() + "'");
+                }
+                cur_mod = maybe->second;
             }
-            return qt; // unknown qualified type
+            auto id = cur_mod->symbols.lookup(qt->type_name);
+            if (!id) {
+                throw TypeCheckError(current_module, node, "Could not resolve type '" + qt->type_name + "' in module '" + cur_mod->canon_name + "' for qualified type '" + qt->str() + "'");
+            }
+            auto resolved = cur_mod->symbols.get(id);
+            if (!resolved) {
+                throw TypeCheckError(current_module, node, "Symbol '" + qt->type_name + "' in module '" + cur_mod->canon_name + "' is not a type for qualified type '" + qt->str() + "'");
+            }
+            return resolved->type;
         }
     }
     if (auto tut = std::dynamic_pointer_cast<TemplateInstanceType>(t)) {
@@ -525,9 +543,9 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
             auto pair = inferTemplateInstantiation(ti);
             auto instantiated_type = pair.first;
             if (!instantiated_type) {
-                throw TypeCheckError(
-                    nullptr,
-                    "Failed to resolve template instantiation type for: " + tut->str());
+                throw TypeCheckError(current_module,
+                                     nullptr,
+                                     "Failed to resolve template instantiation type for: " + tut->str());
             }
             return instantiated_type;
         }
@@ -539,9 +557,9 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
             auto pair = inferTemplateInstantiation(ti); // Will instantiate the template
             auto instantiated_type = pair.first;
             if (!instantiated_type) {
-                throw TypeCheckError(
-                    nullptr,
-                    "Failed to resolve template instantiation type for: " + tut->str());
+                throw TypeCheckError(current_module,
+                                     nullptr,
+                                     "Failed to resolve template instantiation type for: " + tut->str());
             }
             return instantiated_type;
         }
@@ -566,9 +584,9 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                     auto ti = std::make_shared<TemplateInstantiation>(collapsed_struct->name, resolved_args);
                     auto pair = inferTemplateInstantiation(ti);
                     if (!pair.first) {
-                        throw TypeCheckError(
-                            nullptr,
-                            "Failed to resolve template instantiation type for: " + tut->str());
+                        throw TypeCheckError(current_module,
+                                             nullptr,
+                                             "Failed to resolve template instantiation type for: " + tut->str());
                     }
                     return pair.first;
                 }
@@ -576,9 +594,9 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
             }
             return std::make_shared<TemplateInstanceType>(base_template, resolved_args);
         }
-        throw TypeCheckError(
-            nullptr,
-            "Template instantiation base type is not a struct: " + base_type->str());
+        throw TypeCheckError(current_module,
+                             nullptr,
+                             "Template instantiation base type is not a struct: " + base_type->str());
     }
     // primitive types are already resolved
     return t;
@@ -600,6 +618,8 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
     module->typechecking = true;
     current_module = module;
 
+    symbol_table.insertModule(module);
+
     std::vector<std::shared_ptr<StructDeclaration>> struct_decls;
     std::vector<std::shared_ptr<UnionDeclaration>> union_decls;
 
@@ -611,7 +631,8 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
                 // Check if this is a generic struct
                 if (sd->generic_params.size() > 0) {
-                    SymbolId tid = insertTemplateSymbol(sd->name, sd);
+                    SymbolId tid;
+                    insertSymbol(sd->name, nullptr, sd, &tid);
                     m_templates[tid] = sd;
                 } else {
                     // Build a StructType and register
@@ -628,7 +649,8 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 union_decls.push_back(ud);
             } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
                 if (fd->generic_params.size() > 0) {
-                    SymbolId tid = insertTemplateSymbol(fd->name, fd);
+                    SymbolId tid;
+                    insertSymbol(fd->name, fd->type, fd, &tid);
                     m_templates[tid] = fd;
                 } else {
                     auto ty = std::dynamic_pointer_cast<FunctionType>(resolveType(fd, fd->type));
@@ -636,7 +658,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 }
             } else if (auto en = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
                 if (!en->base_type) {
-                    throw TypeCheckError(en, "Enum " + en->name + " has no base type");
+                    throw TypeCheckError(current_module, en, "Enum " + en->name + " has no base type");
                     return;
                 }
                 auto et = en->enum_type;
@@ -648,7 +670,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     auto i = inferExpression(val);
                     auto vtype = resolveType(en, i);
                     if (!vtype->equals(en->base_type)) {
-                        throw TypeCheckError(v.second,
+                        throw TypeCheckError(current_module, v.second,
                                              "Enum variant " + v.first + " has type " + typeName(vtype) +
                                                  ", expected " + typeName(en->base_type));
                     }
@@ -658,45 +680,25 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 insertSymbol(en->name, et, en);
             } else if (auto im = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
                 auto imported_module = module->imports[im->alias];
-                if (!imported_module->type_checker) {
-                    imported_module->type_checker = std::make_shared<TypeChecker>(compilerOptions);
+
+                if (!imported_module) {
+                    throw TypeCheckError(current_module, im, "Failed to resolve imported module: " + im->alias);
                 }
-                imported_module->type_checker->check(imported_module);
-                if (!imported_module->type_checker->ok()) {
-                    for (const auto &e : imported_module->type_checker->errors()) {
-                        throw TypeCheckError(e.first, "In imported module '" + im->alias + "': " + e.second);
-                    }
-                }
-                imported_modules[im->alias] = std::make_shared<ModuleType>(im->alias, imported_module->type_checker);
+
+                symbol_table.insertModule(imported_module);
+
+                auto og_module = current_module;
+
+                // Typecheck module
+                check(imported_module);
+                current_module = og_module;
             } else if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
-                // auto condition = ta->condition;
-                // bool do_continue = true;
-                // if (condition) {
-                //     auto cond_lit_opt = m_const_eval.evaluateExpression(condition);
-                //     if (!cond_lit_opt) {
-                //         for (const auto &err : m_const_eval.errors()) {
-                //             m_errors.emplace_back(err.first, err.second);
-                //         }
-                //         throw TypeCheckError(ta, "Failed to evaluate condition for type alias: " + ta->name);
-                //     }
-                //     auto cond_lit = *cond_lit_opt;
-                //
-                //     if (auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit)) {
-                //         if (bool_lit->lit_type->kind() != TypeKind::Bool) {
-                //             throw TypeCheckError(ta, "Type alias condition is not a boolean");
-                //         }
-                //         do_continue = std::get<bool>(bool_lit->value);
-                //     } else {
-                //         throw TypeCheckError(ta, "Type alias condition is not a literal");
-                //     }
-                // }
-                // if (do_continue) {
                 std::shared_ptr<Type> alias_type = ta->aliased_type;
                 if (ta->generic_params.empty()) {
                     alias_type = resolveType(ta, ta->aliased_type);
                 }
                 if (!alias_type) {
-                    throw TypeCheckError(ta, "Type alias " + ta->name + " has unknown aliased type");
+                    throw TypeCheckError(current_module, ta, "Type alias " + ta->name + " has unknown aliased type");
                     return;
                 }
                 insertSymbol(ta->name, alias_type, ta);
@@ -705,21 +707,21 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 auto cond_lit_opt = m_const_eval.evaluateExpression(wb->condition);
                 if (!m_const_eval.ok()) {
                     for (const auto &err : m_const_eval.errors()) {
-                        m_errors.emplace_back(err.first, err.second);
+                        m_errors.emplace_back(TypeCheckError(current_module, wb->condition, "Failed to evaluate when block condition: " + err.second));
                     }
-                    throw TypeCheckError(wb, "Failed to evaluate condition for when block");
+                    throw TypeCheckError(current_module, wb, "Failed to evaluate condition for when block");
                 }
                 if (!cond_lit_opt) {
                     for (const auto &err : m_const_eval.errors()) {
-                        m_errors.emplace_back(err.first, err.second);
+                        m_errors.emplace_back(TypeCheckError(current_module, wb->condition, "Failed to evaluate when block condition: " + err.second));
                     }
-                    throw TypeCheckError(wb, "Failed to evaluate condition for when block");
+                    throw TypeCheckError(current_module, wb, "Failed to evaluate condition for when block");
                 }
                 auto cond_lit = *cond_lit_opt;
 
                 if (auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit)) {
                     if (bool_lit->lit_type->kind() != TypeKind::Bool) {
-                        throw TypeCheckError(wb, "When block condition is not a boolean");
+                        throw TypeCheckError(current_module, wb, "When block condition is not a boolean");
                     }
                     bool condition_true = std::get<bool>(bool_lit->value);
                     if (condition_true) {
@@ -732,7 +734,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                         i -= 1;
                     }
                 } else {
-                    throw TypeCheckError(wb, "When block condition is not a literal");
+                    throw TypeCheckError(current_module, wb, "When block condition is not a literal");
                 }
             }
         }
@@ -776,13 +778,13 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
             try {
                 checkNode(decl);
             } catch (const TypeCheckError &e) {
-                m_errors.emplace_back(e.node, e.what());
+                m_errors.emplace_back(e);
             }
         }
 
         rebuildModuleMetadata(module);
     } catch (const TypeCheckError &e) {
-        m_errors.emplace_back(e.node, e.what());
+        m_errors.emplace_back(e);
     }
 
     module->typechecking = false;
@@ -836,7 +838,7 @@ void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
         // Already handled in check()
         return;
     }
-    throw TypeCheckError(node, "Unsupported top-level declaration: " + node->toString());
+    throw TypeCheckError(current_module, node, "Unsupported top-level declaration: " + node->toString());
 }
 
 void TypeChecker::checkStructDeclaration(
@@ -853,12 +855,7 @@ void TypeChecker::checkStructDeclaration(
         st->methods = sd->methods;
         st->complete = true;
     } else {
-        // Dump symbol table for debugging
-        std::cerr << "Symbol table contents:\n";
-        for (const auto &entry : symbolTable().entries()) {
-            std::cerr << "  " << entry.name << ": " << (entry.type ? entry.type->str() : "null") << "\n";
-        }
-        throw TypeCheckError(sd, "Internal error: struct " + sd->name + " not found in map");
+        throw TypeCheckError(current_module, sd, "Internal error: struct " + sd->name + " not found in map");
     }
 
     for (const auto &m : sd->methods) {
@@ -878,7 +875,7 @@ void TypeChecker::checkUnionDeclaration(
         ut->fields = std::move(fields);
         ut->complete = true;
     } else {
-        throw TypeCheckError(ud, "Internal error: union " + ud->name + " not found in map");
+        throw TypeCheckError(current_module, ud, "Internal error: union " + ud->name + " not found in map");
     }
 }
 
@@ -889,7 +886,7 @@ void TypeChecker::checkEnumDeclaration(
 void TypeChecker::checkFunctionDeclaration(
     const std::shared_ptr<FunctionDeclaration> &fn) {
     if (!fn->type) {
-        throw TypeCheckError(fn, "Function " + fn->name + " has no type information");
+        throw TypeCheckError(current_module, fn, "Function " + fn->name + " has no type information");
         return;
     }
     fn->type = std::dynamic_pointer_cast<FunctionType>(resolveType(fn, fn->type));
@@ -899,7 +896,7 @@ void TypeChecker::checkFunctionDeclaration(
             (i < fn->param_names.size() ? fn->param_names[i]
                                         : ("arg" + std::to_string(i)));
         if (!insertSymbol(pname, fn->type->params[i], fn)) {
-            throw TypeCheckError(fn,
+            throw TypeCheckError(current_module, fn,
                                  "Duplicate parameter name " + pname + " in function " + fn->name);
         }
     }
@@ -923,7 +920,7 @@ void TypeChecker::checkVariableDeclaration(
 
     if (!var->initializer) {
         if (!insertSymbol(name, var->var_type, var)) {
-            throw TypeCheckError(var, "Duplicate variable declaration: " + name);
+            throw TypeCheckError(current_module, var, "Duplicate variable declaration: " + name);
         }
         return;
     }
@@ -941,9 +938,9 @@ void TypeChecker::checkVariableDeclaration(
             init = var->initializer;
 
             if (!init_type) {
-                throw TypeCheckError(
-                    init,
-                    "Failed to infer type of initializer for variable " + name);
+                throw TypeCheckError(current_module,
+                                     init,
+                                     "Failed to infer type of initializer for variable " + name);
             }
 
             // Type inference for variable
@@ -968,18 +965,18 @@ void TypeChecker::checkVariableDeclaration(
                         std::make_shared<TypeCast>(
                             expr, var->var_type, CastType::Normal);
                 } else if (canExplicitCast(init_type, var->var_type)) {
-                    throw TypeCheckError(
-                        init,
-                        "Explicit cast needed in initializer for variable " + name +
-                            ": cannot implicitly convert " +
-                            typeName(init_type) + " to " +
-                            typeName(var->var_type));
+                    throw TypeCheckError(current_module,
+                                         init,
+                                         "Explicit cast needed in initializer for variable " + name +
+                                             ": cannot implicitly convert " +
+                                             typeName(init_type) + " to " +
+                                             typeName(var->var_type));
                 } else {
-                    throw TypeCheckError(
-                        var,
-                        "Type mismatch in initializer for variable " + name +
-                            ": expected " + typeName(var->var_type) +
-                            " but got " + typeName(init_type));
+                    throw TypeCheckError(current_module,
+                                         var,
+                                         "Type mismatch in initializer for variable " + name +
+                                             ": expected " + typeName(var->var_type) +
+                                             " but got " + typeName(init_type));
                 }
             }
 
@@ -990,7 +987,7 @@ void TypeChecker::checkVariableDeclaration(
                     warn("Failed to evaluate initializer for const variable " + name +
                          ": " + m_const_eval.errors().front().second);
                     // for (const auto &e : m_const_eval.errors()) {
-                    //     throw TypeCheckError(e.first, e.second);
+                    //     throw TypeCheckError(current_module, e.first, e.second);
                     // }
                 } else {
                     var->initializer->constant_evaluated = true;
@@ -1001,25 +998,25 @@ void TypeChecker::checkVariableDeclaration(
 
             auto t = inferStructInit(si, var->var_type);
             if (!t || !t->equals(var->var_type)) {
-                throw TypeCheckError(
-                    init,
-                    "Type mismatch in initializer for variable " + name);
+                throw TypeCheckError(current_module,
+                                     init,
+                                     "Type mismatch in initializer for variable " + name);
             }
         } else {
-            throw TypeCheckError(
-                init,
-                "Unsupported initializer node for variable " + name);
+            throw TypeCheckError(current_module,
+                                 init,
+                                 "Unsupported initializer node for variable " + name);
         }
 
     } catch (const TypeCheckError &e) {
 
-        m_errors.emplace_back(e.node, e.what());
+        m_errors.emplace_back(e);
         // Even if initializer has type errors, we still want to insert the variable into the symbol table, so we don't return early here
     }
     if (!insertSymbol(name, var->var_type, var)) {
-        throw TypeCheckError(
-            var,
-            "Duplicate variable declaration: " + name);
+        throw TypeCheckError(current_module,
+                             var,
+                             "Duplicate variable declaration: " + name);
     }
 }
 
@@ -1037,14 +1034,14 @@ void TypeChecker::handleArrayLiteralAssignment(
 
         if (!m_const_eval.ok()) {
             for (const auto &e : m_const_eval.errors()) {
-                throw TypeCheckError(e.first, e.second);
+                throw TypeCheckError(current_module, e.first, e.second);
             }
         }
 
         if (evaluated == std::nullopt) {
-            throw TypeCheckError(
-                arr_type->length_expr,
-                "Failed to evaluate array length expression");
+            throw TypeCheckError(current_module,
+                                 arr_type->length_expr,
+                                 "Failed to evaluate array length expression");
         }
 
         (*evaluated)->constant_evaluated = true;
@@ -1053,9 +1050,9 @@ void TypeChecker::handleArrayLiteralAssignment(
             std::dynamic_pointer_cast<Literal>(*std::move(evaluated));
 
         if (!lit) {
-            throw TypeCheckError(
-                arr_type->length_expr,
-                "Array length was not a constant expression");
+            throw TypeCheckError(current_module,
+                                 arr_type->length_expr,
+                                 "Array length was not a constant expression");
         }
 
         if (auto v = std::get_if<int64_t>(&lit->value))
@@ -1065,19 +1062,19 @@ void TypeChecker::handleArrayLiteralAssignment(
     }
 
     if (final_len < 0) {
-        throw TypeCheckError(
-            arr_type->length_expr,
-            "Array length cannot be negative");
+        throw TypeCheckError(current_module,
+                             arr_type->length_expr,
+                             "Array length cannot be negative");
     }
 
     int64_t lit_len = static_cast<int64_t>(arr_lit->elements.size());
 
     if (lit_len > final_len) {
-        throw TypeCheckError(
-            arr_lit,
-            "Array literal length mismatch for variable " + name +
-                ": expected " + std::to_string(final_len) +
-                ", got " + std::to_string(lit_len));
+        throw TypeCheckError(current_module,
+                             arr_lit,
+                             "Array literal length mismatch for variable " + name +
+                                 ": expected " + std::to_string(final_len) +
+                                 ", got " + std::to_string(lit_len));
     }
 
     auto i64 = std::make_shared<I64>();
@@ -1104,18 +1101,18 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                     auto cond_lit_opt = m_const_eval.evaluateExpression(when_block->condition);
                     if (!m_const_eval.ok()) {
                         for (const auto &e : m_const_eval.errors()) {
-                            throw TypeCheckError(e.first, e.second);
+                            throw TypeCheckError(current_module, e.first, e.second);
                         }
                     }
                     if (!cond_lit_opt) {
-                        throw TypeCheckError(when_block->condition,
+                        throw TypeCheckError(current_module, when_block->condition,
                                              "Failed to evaluate condition for when block");
                     }
 
                     auto cond_lit = *cond_lit_opt;
                     auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit);
                     if (!bool_lit || bool_lit->lit_type->kind() != TypeKind::Bool) {
-                        throw TypeCheckError(when_block->condition,
+                        throw TypeCheckError(current_module, when_block->condition,
                                              "When block condition is not a boolean");
                     }
 
@@ -1125,9 +1122,9 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                         for (auto &node : when_block->body) {
                             auto body_stmt = std::dynamic_pointer_cast<Statement>(node);
                             if (!body_stmt) {
-                                throw TypeCheckError(
-                                    node,
-                                    "When block body contains non-statement node: " + node->str());
+                                throw TypeCheckError(current_module,
+                                                     node,
+                                                     "When block body contains non-statement node: " + node->str());
                             }
                             replacement.push_back(body_stmt);
                         }
@@ -1146,7 +1143,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
 
                 checkStatement(s);
             } catch (const TypeCheckError &e) {
-                m_errors.emplace_back(e.node, e.what());
+                m_errors.emplace_back(e);
             }
 
             ++i;
@@ -1157,7 +1154,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
     if (auto iff = std::dynamic_pointer_cast<IfStatement>(stmt)) {
         auto t = inferExpression(iff->condition);
         if (!t || !dynamic_cast<Boolean *>(t.get())) {
-            throw TypeCheckError(iff->condition,
+            throw TypeCheckError(current_module, iff->condition,
                                  "Condition in if-statement is not boolean: got " + typeName(t));
         }
         checkStatement(iff->then_branch);
@@ -1173,34 +1170,28 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
         }
         if (!m_expected_return_type) {
             if (ret->value) {
-                throw TypeCheckError(ret->value, "Return with value in void function");
+                throw TypeCheckError(current_module, ret->value, "Return with value in void function");
             }
         } else {
             if (!ret->value) {
                 if (ret->is_error) {
-                    throw TypeCheckError(ret, "Return type mismatch: error return requires a value");
+                    throw TypeCheckError(current_module, ret, "Return type mismatch: error return requires a value");
                 }
                 if (auto expected_error = std::dynamic_pointer_cast<ErrorUnionType>(m_expected_return_type)) {
                     if (!dynamic_cast<Void *>(expected_error->valueType.get())) {
-                        throw TypeCheckError(ret, "Return type mismatch: expected " +
-                                                      typeName(m_expected_return_type) +
-                                                      " but got void return");
+                        throw TypeCheckError(current_module, ret, "Return type mismatch: expected " + typeName(m_expected_return_type) + " but got void return");
                     }
                     return;
                 }
                 if (!dynamic_cast<Void *>(m_expected_return_type.get())) {
-                    throw TypeCheckError(ret, "Return type mismatch: expected " +
-                                                  typeName(m_expected_return_type) +
-                                                  " but got void return");
+                    throw TypeCheckError(current_module, ret, "Return type mismatch: expected " + typeName(m_expected_return_type) + " but got void return");
                 }
             } else {
 
                 auto t = resolveType(ret, ret_inferred);
                 if (ret->is_error) { // Returning an error from the function (oh no!)
                     if (!dynamic_cast<ErrorUnionType *>(m_expected_return_type.get())) {
-                        throw TypeCheckError(ret, "Return type mismatch: expected " +
-                                                      typeName(m_expected_return_type) +
-                                                      " but got error return");
+                        throw TypeCheckError(current_module, ret, "Return type mismatch: expected " + typeName(m_expected_return_type) + " but got error return");
                     }
                     auto exp_error = dynamic_cast<ErrorUnionType *>(
                         m_expected_return_type.get());
@@ -1208,9 +1199,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                         if (canImplicitCast(t, exp_error->errorType)) {
                             ret->value = std::make_shared<TypeCast>(ret->value, exp_error->errorType, CastType::Normal);
                         } else {
-                            throw TypeCheckError(ret, "Return type mismatch: expected " +
-                                                          typeName(exp_error->errorType) + " but got " +
-                                                          typeName(t));
+                            throw TypeCheckError(current_module, ret, "Return type mismatch: expected " + typeName(exp_error->errorType) + " but got " + typeName(t));
                         }
                     }
                     return;
@@ -1220,9 +1209,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                         if (canImplicitCast(t, expected_error->valueType)) {
                             ret->value = std::make_shared<TypeCast>(ret->value, expected_error->valueType, CastType::Normal);
                         } else {
-                            throw TypeCheckError(ret, "Return type mismatch: expected " +
-                                                          typeName(expected_error->valueType) + " but got " +
-                                                          typeName(t));
+                            throw TypeCheckError(current_module, ret, "Return type mismatch: expected " + typeName(expected_error->valueType) + " but got " + typeName(t));
                         }
                     }
                     return;
@@ -1231,9 +1218,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                     if (t && canImplicitCast(t, m_expected_return_type)) {
                         ret->value = std::make_shared<TypeCast>(ret->value, m_expected_return_type, CastType::Normal);
                     } else {
-                        throw TypeCheckError(ret, "Return type mismatch: expected " +
-                                                      typeName(m_expected_return_type) + " but got " +
-                                                      typeName(t));
+                        throw TypeCheckError(current_module, ret, "Return type mismatch: expected " + typeName(m_expected_return_type) + " but got " + typeName(t));
                     }
                 }
             }
@@ -1243,7 +1228,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
     if (auto switch_stmt = std::dynamic_pointer_cast<SwitchStmt>(stmt)) {
         auto cond_type = inferExpression(switch_stmt->condition);
         if (!cond_type) {
-            throw TypeCheckError(switch_stmt->condition, "Failed to infer type of switch condition");
+            throw TypeCheckError(current_module, switch_stmt->condition, "Failed to infer type of switch condition");
         }
         size_t idx = 0;
         for (auto &case_block : switch_stmt->cases) {
@@ -1251,13 +1236,13 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
             for (auto &case_expr : case_block.first) {
                 auto case_type = inferExpression(case_expr);
                 if (!case_type) {
-                    throw TypeCheckError(case_expr, "Failed to infer type of switch case expression");
+                    throw TypeCheckError(current_module, case_expr, "Failed to infer type of switch case expression");
                 }
                 if (!case_type->equals(cond_type)) {
                     if (canImplicitCast(case_type, cond_type)) {
                         case_expr = std::make_shared<TypeCast>(case_expr, cond_type, CastType::Normal);
                     } else {
-                        throw TypeCheckError(case_expr,
+                        throw TypeCheckError(current_module, case_expr,
                                              "Switch case type mismatch: expected " + typeName(cond_type) +
                                                  " but got " + typeName(case_type));
                     }
@@ -1267,11 +1252,11 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                 auto case_lit_opt = m_const_eval.evaluateExpression(case_expr);
                 if (!m_const_eval.ok()) {
                     for (const auto &e : m_const_eval.errors()) {
-                        throw TypeCheckError(e.first, e.second);
+                        throw TypeCheckError(current_module, e.first, e.second);
                     }
                 }
                 if (!case_lit_opt) {
-                    throw TypeCheckError(case_expr, "Failed to evaluate switch case expression");
+                    throw TypeCheckError(current_module, case_expr, "Failed to evaluate switch case expression");
                 }
                 (*case_lit_opt)->constant_evaluated = true;
                 case_block.first[jdx] = *case_lit_opt;
@@ -1306,7 +1291,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                 return;
             }
 
-            throw TypeCheckError(asg,
+            throw TypeCheckError(current_module, asg,
                                  "Assignment type mismatch: " + typeName(lt) + " = " + typeName(rt));
         }
         return;
@@ -1329,7 +1314,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
     if (auto wh = std::dynamic_pointer_cast<WhileStatement>(stmt)) {
         auto t = inferExpression(wh->condition);
         if (!t || !dynamic_cast<Boolean *>(t.get())) {
-            throw TypeCheckError(wh->condition,
+            throw TypeCheckError(current_module, wh->condition,
                                  "Condition in while-statement is not boolean: got " + typeName(t));
         }
         checkStatement(wh->body);
@@ -1350,17 +1335,17 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
         auto cond_lit_opt = m_const_eval.evaluateExpression(when_block->condition);
         if (!m_const_eval.ok()) {
             for (const auto &e : m_const_eval.errors()) {
-                throw TypeCheckError(e.first, e.second);
+                throw TypeCheckError(current_module, e.first, e.second);
             }
         }
         if (!cond_lit_opt) {
-            throw TypeCheckError(when_block->condition, "Failed to evaluate condition for when block");
+            throw TypeCheckError(current_module, when_block->condition, "Failed to evaluate condition for when block");
         }
         auto cond_lit = *cond_lit_opt;
 
         if (auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit)) {
             if (bool_lit->lit_type->kind() != TypeKind::Bool) {
-                throw TypeCheckError(when_block->condition, "When block condition is not a boolean");
+                throw TypeCheckError(current_module, when_block->condition, "When block condition is not a boolean");
             }
             bool condition_true = std::get<bool>(bool_lit->value);
             if (condition_true) {
@@ -1371,9 +1356,9 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                 for (auto &node : when_block->body) {
                     auto body_stmt = std::dynamic_pointer_cast<Statement>(node);
                     if (!body_stmt) {
-                        throw TypeCheckError(
-                            node,
-                            "When block body contains non-statement node: " + node->str());
+                        throw TypeCheckError(current_module,
+                                             node,
+                                             "When block body contains non-statement node: " + node->str());
                     }
                     replacement_block->statements.push_back(body_stmt);
                 }
@@ -1387,7 +1372,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                 stmt = empty_block;
             }
         } else {
-            throw TypeCheckError(when_block->condition, "When block condition is not a literal");
+            throw TypeCheckError(current_module, when_block->condition, "When block condition is not a literal");
         }
 
         return;
@@ -1398,7 +1383,7 @@ std::shared_ptr<Type>
 TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
                              const std::shared_ptr<Type> &expected) {
     if (!expr)
-        throw TypeCheckError(expr, "Cannot infer type of null expression");
+        throw TypeCheckError(current_module, expr, "Cannot infer type of null expression");
     if (auto va = std::dynamic_pointer_cast<VarAccess>(expr))
         return inferVarAccess(va);
     if (auto lit = std::dynamic_pointer_cast<Literal>(expr))
@@ -1458,13 +1443,13 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         if (!va) {
             auto mod = std::dynamic_pointer_cast<ModuleAccess>(ea->enum_expr);
             if (!mod) {
-                throw TypeCheckError(ea, "Enum access base is not allowed: " + ea->enum_expr->str());
+                throw TypeCheckError(current_module, ea, "Enum access base is not allowed: " + ea->enum_expr->str());
             }
             // Get the enum from the other module
             auto mod_type = inferModuleAccess(mod);
             auto enum_type = std::dynamic_pointer_cast<EnumType>(mod_type);
             if (!enum_type) {
-                throw TypeCheckError(ea, "Enum access base is not an enum: " + ea->enum_expr->str());
+                throw TypeCheckError(current_module, ea, "Enum access base is not an enum: " + ea->enum_expr->str());
             }
             enum_name = enum_type->name;
             res = enum_type;
@@ -1472,7 +1457,7 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
             enum_name = va->name;
             auto enum_type = lookupEnumType(enum_name);
             if (!enum_type) {
-                throw TypeCheckError(ea, "Unknown enum: " + enum_name);
+                throw TypeCheckError(current_module, ea, "Unknown enum: " + enum_name);
             }
             res = std::dynamic_pointer_cast<EnumType>(resolveType(ea, enum_type));
         }
@@ -1488,36 +1473,59 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
     if (auto al = std::dynamic_pointer_cast<ArrayLiteral>(expr))
         return inferArrayLiteral(al, expected);
     // Unknown expression kind
-    throw TypeCheckError(expr, "Type inference: unhandled expression type: " + expr->str());
+    throw TypeCheckError(current_module, expr, "Type inference: unhandled expression type: " + expr->str());
+}
+
+std::shared_ptr<Module> TypeChecker::resolveModulePath(std::shared_ptr<ASTNode> node, const std::vector<std::string> &path) {
+    std::shared_ptr<Module> current = current_module;
+    for (const auto &part : path) {
+        auto it = current->imports.find(part);
+        std::cout << "Resolving module path: " << part << " in module " << current->canon_name << std::endl;
+        if (it == current->imports.end()) {
+            throw TypeCheckError(current_module, node, "Module '" + part + "' not found in imports of module '" + current->canon_name + "'");
+        }
+        current = it->second;
+    }
+    return current;
 }
 
 std::shared_ptr<Type> TypeChecker::inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma) {
     if (ma->module_path.size() == 0) {
         if (ma->member_name.empty()) {
-            throw TypeCheckError(ma, "Invalid module access with empty module path and member name");
+            throw TypeCheckError(current_module, ma, "Invalid module access with empty module path and member name");
         }
         if (ma->member_name == "") {
-            throw TypeCheckError(ma, "Invalid module access with empty member name");
+            throw TypeCheckError(current_module, ma, "Invalid module access with empty member name");
         }
         if (lookupSymbolInScope(ma->member_name) == std::nullopt) {
-            throw TypeCheckError(ma, "Unknown symbol in imported module: " + ma->member_name);
+            throw TypeCheckError(current_module, ma, "Unknown symbol in imported module: " + ma->member_name);
         }
         return inferVarAccess(std::make_shared<VarAccess>(ma->member_name));
     }
-    auto next_module_name = ma->module_path[0];
-    auto maybe_mod = imported_modules.find(next_module_name);
-    if (maybe_mod == imported_modules.end()) {
-        throw TypeCheckError(ma, "Unknown module: " + next_module_name);
+
+    auto mod = resolveModulePath(ma, ma->module_path);
+    if (ma->member_name.empty()) {
+        throw TypeCheckError(current_module, ma, "Invalid module access with empty member name");
     }
-
-    std::shared_ptr<TypeChecker> mod_checker = maybe_mod->second->type_checker;
-    // Recurse into sub-module access
-
-    auto sub_ma = std::make_shared<ModuleAccess>(
-        std::vector<std::string>(ma->module_path.begin() + 1, ma->module_path.end()),
-        ma->member_name);
-    auto result = mod_checker->inferModuleAccess(sub_ma);
-    return result;
+    auto it = mod->exports.find(ma->member_name);
+    // Print all exports of the module for debugging
+    std::cout << "Module '" << mod->canon_name << "' exports:" << std::endl;
+    for (const auto &export_pair : mod->exports) {
+        std::cout << "  " << export_pair.first << ": " << export_pair.second->str() << std::endl;
+    }
+    if (it == mod->exports.end()) {
+        // symbol_table.dump();
+        throw TypeCheckError(current_module, ma, "Unknown symbol in imported module: " + ma->member_name);
+    }
+    if (mod->typechecked == false) {
+        throw TypeCheckError(current_module, ma, "Module '" + mod->canon_name + "' has not been type-checked yet");
+    }
+    auto exported = it->second;
+    auto og_mod = current_module;
+    current_module = mod;
+    auto t = inferVarAccess(std::make_shared<VarAccess>(ma->member_name));
+    current_module = og_mod;
+    return t;
 }
 
 std::shared_ptr<Type>
@@ -1530,14 +1538,13 @@ TypeChecker::inferTypeCast(const std::shared_ptr<TypeCast> &tc) {
     }
     auto ot = inferExpression(tc->expr);
     if (!ot)
-        throw TypeCheckError(tc, "Failed to infer type of expression in type cast");
+        throw TypeCheckError(current_module, tc, "Failed to infer type of expression in type cast");
 
     if (canExplicitCast(ot, tc->target_type)) {
         tc->inferred_type = resolveType(tc, tc->target_type);
         return tc->target_type;
     }
-    throw TypeCheckError(tc, "Invalid type cast from " + typeName(ot) + " to " +
-                                 tc->target_type->str());
+    throw TypeCheckError(current_module, tc, "Invalid type cast from " + typeName(ot) + " to " + tc->target_type->str());
 }
 
 std::shared_ptr<Type>
@@ -1548,11 +1555,11 @@ TypeChecker::inferVarAccess(const std::shared_ptr<VarAccess> &v) {
         maybe = lookupSymbolInScope(v->name);
     }
     if (!maybe) {
-        throw TypeCheckError(v, "Unknown variable: " + v->name);
+        throw TypeCheckError(current_module, v, "Unknown variable: " + v->name);
     }
     auto entry = symbolTable().get(*maybe);
     if (entry && !entry->type) {
-        throw TypeCheckError(v, "Template symbol used as a value: " + v->name);
+        throw TypeCheckError(current_module, v, "Variable has no resolvable type: " + v->name + " (could it be a template?)");
     }
     v->inferred_type = resolveType(v, entry ? entry->type : nullptr);
     return v->inferred_type;
@@ -1563,7 +1570,7 @@ TypeChecker::inferLiteral(const std::shared_ptr<Literal> &lit,
                           const std::shared_ptr<Type> &expected) {
     auto preType = resolveType(lit, lit->lit_type);
     if (!preType) {
-        throw TypeCheckError(lit, "Unknown literal type");
+        throw TypeCheckError(current_module, lit, "Unknown literal type");
     }
 
     if (expected && expected->isNumeric() && lit->lit_type->isNumeric()) {
@@ -1597,16 +1604,16 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
             auto evaluated = m_const_eval.evaluateExpression(expected_arr->length_expr);
             if (!m_const_eval.ok()) {
                 for (const auto &e : m_const_eval.errors()) {
-                    throw TypeCheckError(e.first, e.second);
+                    throw TypeCheckError(current_module, e.first, e.second);
                 }
             }
             if (!evaluated) {
-                throw TypeCheckError(al, "Failed to evaluate expected array length");
+                throw TypeCheckError(current_module, al, "Failed to evaluate expected array length");
             }
 
             auto len_lit = std::dynamic_pointer_cast<Literal>(*evaluated);
             if (!len_lit) {
-                throw TypeCheckError(al, "Expected array length was not a constant literal");
+                throw TypeCheckError(current_module, al, "Expected array length was not a constant literal");
             }
 
             if (auto v = std::get_if<int64_t>(&len_lit->value)) {
@@ -1615,7 +1622,7 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
                 final_len = static_cast<int64_t>(*v);
             }
             if (final_len < 0) {
-                throw TypeCheckError(al, "Array length cannot be negative");
+                throw TypeCheckError(current_module, al, "Array length cannot be negative");
             }
         }
     }
@@ -1625,15 +1632,15 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
     }
 
     if (al->elements.empty() && !expected_arr) {
-        throw TypeCheckError(al, "Cannot infer type of empty array literal");
+        throw TypeCheckError(current_module, al, "Cannot infer type of empty array literal");
     }
 
     if (!expected_arr && al->elements.empty()) {
-        throw TypeCheckError(al, "Cannot infer type of empty array literal");
+        throw TypeCheckError(current_module, al, "Cannot infer type of empty array literal");
     }
 
     if (expected_arr && static_cast<int64_t>(al->elements.size()) > final_len) {
-        throw TypeCheckError(al,
+        throw TypeCheckError(current_module, al,
                              "Array literal length mismatch: expected at most " +
                                  std::to_string(final_len) + ", got " +
                                  std::to_string(al->elements.size()));
@@ -1643,14 +1650,13 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
         for (size_t i = 0; i < al->elements.size(); ++i) {
             auto t = inferExpression(al->elements[i], expected_elem);
             if (!t) {
-                throw TypeCheckError(al, "Failed to infer type of array literal element");
+                throw TypeCheckError(current_module, al, "Failed to infer type of array literal element");
             }
             if (!t->equals(expected_elem)) {
                 if (canImplicitCast(t, expected_elem)) {
                     al->elements[i] = std::make_shared<TypeCast>(al->elements[i], expected_elem, CastType::Normal);
                 } else {
-                    throw TypeCheckError(al, "Array literal element type mismatch: " +
-                                                 typeName(expected_elem) + " expected, got " + typeName(t));
+                    throw TypeCheckError(current_module, al, "Array literal element type mismatch: " + typeName(expected_elem) + " expected, got " + typeName(t));
                 }
             }
         }
@@ -1663,7 +1669,7 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
 
     if (al->elements.empty()) {
         if (!expected_arr) {
-            throw TypeCheckError(al, "Cannot infer type of empty array literal");
+            throw TypeCheckError(current_module, al, "Cannot infer type of empty array literal");
         }
 
         al->defined_len = static_cast<size_t>(final_len);
@@ -1678,7 +1684,7 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
         // Pass expected element type to each element
         auto t = inferExpression(el, expected_elem ? expected_elem : elem_type);
         if (!t)
-            throw TypeCheckError(al, "Failed to infer type of array literal element");
+            throw TypeCheckError(current_module, al, "Failed to infer type of array literal element");
 
         if (!elem_type) {
             elem_type = t;
@@ -1694,8 +1700,7 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
                     }
                     elem_type = t;
                 } else {
-                    throw TypeCheckError(al, "Array literal element type mismatch: " +
-                                                 typeName(elem_type) + " vs " + typeName(t));
+                    throw TypeCheckError(current_module, al, "Array literal element type mismatch: " + typeName(elem_type) + " vs " + typeName(t));
                 }
             }
         }
@@ -1714,7 +1719,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
     auto lt = resolveType(bin, inferExpression(bin->left));
     auto rt = resolveType(bin, inferExpression(bin->right));
     if (!lt || !rt)
-        throw TypeCheckError(bin, "Failed to infer types of binary operation operands");
+        throw TypeCheckError(current_module, bin, "Failed to infer types of binary operation operands");
 
     // simple numeric ops
     if (bin->op == "+" || bin->op == "-" || bin->op == "*" || bin->op == "/" || bin->op == "%" ||
@@ -1722,8 +1727,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
         bin->op == ">>") {
 
         if (!lt->isGeneralNumeric() || !rt->isGeneralNumeric()) { // Allow pointers here
-            throw TypeCheckError(bin, "Arithmetic operators require numeric operands: got " +
-                                          typeName(lt) + " " + bin->op + " " + typeName(rt));
+            throw TypeCheckError(current_module, bin, "Arithmetic operators require numeric operands: got " + typeName(lt) + " " + bin->op + " " + typeName(rt));
         }
         if (!lt->equals(rt)) {
             // If one is pointer and the other is integer, allow it (pointer arithmetic)
@@ -1738,8 +1742,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
                 bin->left = std::make_shared<TypeCast>(bin->left, rt, CastType::Normal);
                 lt = rt;
             } else {
-                throw TypeCheckError(bin, "Arithmetic operator type mismatch: " + typeName(lt) + " " +
-                                              bin->op + " " + typeName(rt));
+                throw TypeCheckError(current_module, bin, "Arithmetic operator type mismatch: " + typeName(lt) + " " + bin->op + " " + typeName(rt));
             }
         }
         bin->inferred_type = resolveType(bin->left, lt);
@@ -1750,8 +1753,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
     if (bin->op == "&&" || bin->op == "||") {
         if (!dynamic_cast<Boolean *>(lt.get()) ||
             !dynamic_cast<Boolean *>(rt.get())) {
-            throw TypeCheckError(bin, "Logical operators require boolean operands: got " +
-                                          typeName(lt) + " " + bin->op + " " + typeName(rt));
+            throw TypeCheckError(current_module, bin, "Logical operators require boolean operands: got " + typeName(lt) + " " + bin->op + " " + typeName(rt));
         }
         auto b = std::make_shared<Boolean>();
         bin->inferred_type = resolveType(bin, b);
@@ -1763,8 +1765,7 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
         bin->op == "<=" || bin->op == ">=") {
         if (!lt->equals(rt) && !canImplicitCast(rt, lt) &&
             !canImplicitCast(lt, rt)) {
-            throw TypeCheckError(bin, "Comparison operands must have same type: " + typeName(lt) +
-                                          " vs " + typeName(rt));
+            throw TypeCheckError(current_module, bin, "Comparison operands must have same type: " + typeName(lt) + " vs " + typeName(rt));
         } else if (!lt->equals(rt)) {
             // try implicit cast
             if (canImplicitCast(rt, lt)) {
@@ -1786,25 +1787,25 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
               std::dynamic_pointer_cast<OffsetAccess>(bin->left) ||
               std::dynamic_pointer_cast<Dereference>(bin->left) ||
               std::dynamic_pointer_cast<ModuleAccess>(bin->left))) {
-            throw TypeCheckError(bin->left,
+            throw TypeCheckError(current_module, bin->left,
                                  "Left operand of assignment is not an lvalue: " + bin->left->str());
         }
         if (lt->is_const) {
-            throw TypeCheckError(bin->left, "Cannot assign to const value");
+            throw TypeCheckError(current_module, bin->left, "Cannot assign to const value");
         }
         if (auto deref = std::dynamic_pointer_cast<Dereference>(bin->left)) {
             // make sure we're not assigning to a const pointer
             auto pt = inferExpression(deref->pointer);
             if (!pt)
-                throw TypeCheckError(deref->pointer,
+                throw TypeCheckError(current_module, deref->pointer,
                                      "Failed to infer type of pointer in dereference");
             auto ptype = std::dynamic_pointer_cast<PointerType>(pt);
             if (!ptype) {
-                throw TypeCheckError(deref->pointer,
+                throw TypeCheckError(current_module, deref->pointer,
                                      "Dereference of non-pointer type: " + typeName(pt));
             }
             if (ptype->pointer_const) {
-                throw TypeCheckError(deref->pointer, "Cannot modify value through const pointer");
+                throw TypeCheckError(current_module, deref->pointer, "Cannot modify value through const pointer");
             }
         }
         if (!lt->equals(rt)) {
@@ -1813,21 +1814,21 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
                 bin->inferred_type = resolveType(bin, lt);
                 return lt;
             }
-            throw TypeCheckError(bin,
+            throw TypeCheckError(current_module, bin,
                                  "Assignment type mismatch: " + typeName(lt) + " = " + typeName(rt));
         }
         bin->inferred_type = resolveType(bin->left, lt);
         return lt;
     }
 
-    throw TypeCheckError(bin, "Unhandled binary operator: " + bin->op);
+    throw TypeCheckError(current_module, bin, "Unhandled binary operator: " + bin->op);
 }
 
 std::shared_ptr<Type>
 TypeChecker::inferUnaryOp(const std::shared_ptr<UnaryOperation> &un) {
     auto ot = inferExpression(un->operand);
     if (!ot)
-        throw TypeCheckError(un, "Failed to infer type of unary operation operand");
+        throw TypeCheckError(current_module, un, "Failed to infer type of unary operation operand");
 
     if (un->op == "-" || un->op == "+" || un->op == "~") {
         // numeric
@@ -1836,7 +1837,7 @@ TypeChecker::inferUnaryOp(const std::shared_ptr<UnaryOperation> &un) {
     }
     if (un->op == "!") {
         if (!dynamic_cast<Boolean *>(ot.get())) {
-            throw TypeCheckError(un, "Logical not expects boolean operand, got " + typeName(ot));
+            throw TypeCheckError(current_module, un, "Logical not expects boolean operand, got " + typeName(ot));
         }
         un->inferred_type = resolveType(un, ot);
         return ot;
@@ -1849,30 +1850,30 @@ TypeChecker::inferUnaryOp(const std::shared_ptr<UnaryOperation> &un) {
     }
     if (un->op == "++") {
         if (!ot->isGeneralNumeric()) {
-            throw TypeCheckError(un, "Increment operator expects numeric operand, got " + typeName(ot));
+            throw TypeCheckError(current_module, un, "Increment operator expects numeric operand, got " + typeName(ot));
         }
         un->inferred_type = resolveType(un, ot);
         return ot;
     }
     if (un->op == "--") {
         if (!ot->isGeneralNumeric()) {
-            throw TypeCheckError(un, "Decrement operator expects numeric operand, got " + typeName(ot));
+            throw TypeCheckError(current_module, un, "Decrement operator expects numeric operand, got " + typeName(ot));
         }
         un->inferred_type = resolveType(un, ot);
         return ot;
     }
-    throw TypeCheckError(un, "Unhandled unary operator: " + un->op);
+    throw TypeCheckError(current_module, un, "Unhandled unary operator: " + un->op);
 }
 
 std::shared_ptr<Type>
 TypeChecker::inferDereference(const std::shared_ptr<Dereference> &d) {
     auto ot = inferExpression(d->pointer);
     if (!ot)
-        throw TypeCheckError(d, "Failed to infer type of pointer in dereference");
+        throw TypeCheckError(current_module, d, "Failed to infer type of pointer in dereference");
 
     auto pt = std::dynamic_pointer_cast<PointerType>(ot);
     if (!pt) {
-        throw TypeCheckError(d, "Dereference of non-pointer type: " + typeName(ot));
+        throw TypeCheckError(current_module, d, "Dereference of non-pointer type: " + typeName(ot));
     }
     d->inferred_type = resolveType(d, pt->base);
     return pt->base;
@@ -1882,7 +1883,7 @@ std::shared_ptr<Type>
 TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
     auto bt = inferExpression(mc->object);
     if (!bt)
-        throw TypeCheckError(mc, "Failed to infer type of method call object");
+        throw TypeCheckError(current_module, mc, "Failed to infer type of method call object");
     auto st = std::dynamic_pointer_cast<StructType>(bt);
     if (!st) {
         auto pt = std::dynamic_pointer_cast<PointerType>(bt);
@@ -1890,71 +1891,112 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
             st = std::dynamic_pointer_cast<StructType>(resolveType(mc, pt->base));
 
         if (!pt) {
-            throw TypeCheckError(mc, "Method call on non-struct type: " + typeName(bt));
+            throw TypeCheckError(current_module, mc, "Method call on non-struct type: " + typeName(bt));
         }
     }
     auto it = st->methods.find(mc->method);
     if (it == st->methods.end()) {
-        throw TypeCheckError(mc, "Struct " + st->name + " has no method " + mc->method);
+        throw TypeCheckError(current_module, mc, "Struct " + st->name + " has no method " + mc->method);
     }
     auto ftype = std::dynamic_pointer_cast<FunctionType>(resolveType(mc, it->second->type));
     // check arity (naive, no implicit conversions)
     if (!ftype->variadic &&
         mc->args.size() !=
             (ftype->params.size() - 1)) {
-        throw TypeCheckError(mc, "Method call argument count mismatch: expected " +
-                                     std::to_string(ftype->params.size() - 1) + " got " +
-                                     std::to_string(mc->args.size()));
+        throw TypeCheckError(current_module, mc, "Method call argument count mismatch: expected " + std::to_string(ftype->params.size() - 1) + " got " + std::to_string(mc->args.size()));
     }
     size_t n = ftype->params.size();
     for (size_t i = 0; i < mc->args.size(); ++i) {
         auto at = inferExpression(mc->args[i]);
 
         if (!at)
-            throw TypeCheckError(mc, "Failed to infer type of method call argument " +
-                                         std::to_string(i));
+            throw TypeCheckError(current_module, mc, "Failed to infer type of method call argument " + std::to_string(i));
         if (i + 1 < ftype->params.size() && !at->equals(ftype->params[i + 1])) {
             if (canImplicitCast(at, ftype->params[i + 1])) {
                 mc->args[i] = std::make_shared<TypeCast>(mc->args[i], ftype->params[i + 1], CastType::Normal);
             } else
-                throw TypeCheckError(mc, "Method call argument " + std::to_string(i) +
-                                             " type mismatch: expected " + typeName(ftype->params[i + 1]) +
-                                             " got " + typeName(at));
+                throw TypeCheckError(current_module, mc, "Method call argument " + std::to_string(i) + " type mismatch: expected " + typeName(ftype->params[i + 1]) + " got " + typeName(at));
         }
     }
     mc->inferred_type = resolveType(mc, ftype->ret);
     return ftype->ret;
 }
-std::shared_ptr<Type>
-TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call,
-                           const std::shared_ptr<Type> &expected) {
+
+std::shared_ptr<Type> TypeChecker::tryInferGenericFunctionCall(const std::shared_ptr<FuncCall> &fc, const std::shared_ptr<FunctionType> &ft) {
+    // assumes ft is a generic function type
+    // 1. infer argument types
+    // 2. match against generic parameters to build associations between Generic -> concrete
+    // 3. convert to template instantiation and infer that instead
+
+    std::vector<std::shared_ptr<Type>> arg_types;
+    for (auto &arg : fc->args) {
+        auto at = inferExpression(arg);
+        if (!at)
+            throw TypeCheckError(current_module, arg, "Failed to infer type of function call argument");
+        arg_types.push_back(at);
+    }
+    // build generic associations
+    std::unordered_map<std::string, std::shared_ptr<Type>> generic_associations;
+    for (size_t i = 0; i < ft->params.size(); ++i) {
+        auto pt = ft->params[i];
+        if (auto gt = std::dynamic_pointer_cast<GenericType>(pt)) {
+            // if we already have an association for this generic, check it matches
+            auto it = generic_associations.find(gt->name);
+            if (it != generic_associations.end()) {
+                if (!arg_types[i]->equals(it->second))
+                    throw TypeCheckError(current_module, fc, "Generic type association mismatch for " + gt->name + ": expected " + typeName(it->second) + " got " + typeName(arg_types[i]));
+            } else {
+                generic_associations[gt->name] = arg_types[i];
+            }
+        } else if (!pt->equals(arg_types[i])) {
+            if (canImplicitCast(arg_types[i], pt)) {
+                fc->args[i] = std::make_shared<TypeCast>(fc->args[i], pt, CastType::Normal);
+            } else
+                throw TypeCheckError(current_module, fc, "Function call argument " + std::to_string(i) + " type mismatch: expected " + typeName(pt) + " got " + typeName(arg_types[i]));
+        }
+    }
+    // HACk for a seconds
+    std::vector<std::shared_ptr<Type>> template_args;
+    for (auto &ga : generic_associations) {
+        template_args.push_back(ga.second);
+    }
+    auto prevFunc = fc->func;
+    // *fc->func = std::make_shared<TemplateInstantiation>(prevFunc->name, template_args);
+    return nullptr; // TODO: implement template instantiation and inference
+}
+
+std::shared_ptr<Type> TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call,
+                                                 const std::shared_ptr<Type> &expected) {
     // infer function expression type
     std::shared_ptr<FunctionType> ftype = nullptr;
 
     auto ft = inferExpression(call->func);
     if (!ft)
-        throw TypeCheckError(call, "Failed to infer type of function in function call");
+        throw TypeCheckError(current_module, call, "Failed to infer type of function in function call");
     ftype = std::dynamic_pointer_cast<FunctionType>(ft);
     if (!ftype) {
         if (auto pt = std::dynamic_pointer_cast<PointerType>(ft)) {
             ftype = std::dynamic_pointer_cast<FunctionType>(resolveType(call, pt->base));
 
             if (!ftype) {
-                throw TypeCheckError(call,
+                throw TypeCheckError(current_module, call,
                                      "Attempted to call non-function pointer type: " + typeName(ft));
             }
         } else {
-            throw TypeCheckError(call, "Attempted to call non-function type: " + typeName(ft));
+            throw TypeCheckError(current_module, call, "Attempted to call non-function type: " + typeName(ft));
         }
+    }
+
+    if (containsGenericType(ftype)) {
+        std::cout << "Attempting to infer generic function call for " << typeName(ft) << "\n";
+        tryInferGenericFunctionCall(call, ftype); // Destructive, will modify call in-place if successful
     }
 
     // check arity (naive, no implicit conversions)
     if (!ftype->variadic &&
         call->args.size() !=
             (ftype->params.size())) { // if method, first param is 'self'
-        throw TypeCheckError(call, "Function call argument count mismatch: expected " +
-                                       std::to_string(ftype->params.size()) + " got " +
-                                       std::to_string(call->args.size()));
+        throw TypeCheckError(current_module, call, "Function call argument count mismatch: expected " + std::to_string(ftype->params.size()) + " got " + std::to_string(call->args.size()));
     }
 
     size_t n = ftype->params.size();
@@ -1963,16 +2005,13 @@ TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call,
         std::shared_ptr<Type> expected_arg_type = (i < ftype->params.size()) ? ftype->params[i] : nullptr;
         auto at = inferExpression(call->args[i], expected_arg_type);
         if (!at)
-            throw TypeCheckError(call, "Failed to infer type of function call argument " +
-                                           std::to_string(i));
+            throw TypeCheckError(current_module, call, "Failed to infer type of function call argument " + std::to_string(i));
 
         if (i < ftype->params.size() && !at->equals(ftype->params[i])) {
             if (canImplicitCast(at, ftype->params[i])) {
                 call->args[i] = std::make_shared<TypeCast>(call->args[i], ftype->params[i], CastType::Normal);
             } else
-                throw TypeCheckError(call, "Function call argument " + std::to_string(i) +
-                                               " type mismatch: expected " + typeName(ftype->params[i]) +
-                                               " got " + typeName(at));
+                throw TypeCheckError(current_module, call, "Function call argument " + std::to_string(i) + " type mismatch: expected " + typeName(ftype->params[i]) + " got " + typeName(at));
         }
     }
     call->func->inferred_type = resolveType(call->func, ft);
@@ -1984,11 +2023,11 @@ std::shared_ptr<Type> TypeChecker::inferErrorUnionFieldAccess(const std::shared_
     auto expr = std::dynamic_pointer_cast<Expression>(fa->base);
     auto base = resolveType(expr, inferExpression(expr));
     if (!base) {
-        throw TypeCheckError(fa, "Failed to infer type of error union field access base");
+        throw TypeCheckError(current_module, fa, "Failed to infer type of error union field access base");
     }
     auto eut = std::dynamic_pointer_cast<ErrorUnionType>(base);
     if (!eut) {
-        throw TypeCheckError(fa, "Error union field access on non-error-union type: " + typeName(base));
+        throw TypeCheckError(current_module, fa, "Error union field access on non-error-union type: " + typeName(base));
     }
     if (fa->field == "err") {
         fa->inferred_type = resolveType(fa, eut->errorType);
@@ -2002,18 +2041,18 @@ std::shared_ptr<Type> TypeChecker::inferErrorUnionFieldAccess(const std::shared_
         fa->inferred_type = std::make_shared<Boolean>();
         return fa->inferred_type;
     }
-    throw TypeCheckError(fa, "Error union has no field " + fa->field);
+    throw TypeCheckError(current_module, fa, "Error union has no field " + fa->field);
 }
 
 std::shared_ptr<Type> TypeChecker::inferArrayFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
     auto expr = std::dynamic_pointer_cast<Expression>(fa->base);
     auto base = inferExpression(expr);
     if (!base) {
-        throw TypeCheckError(fa, "Failed to infer type of error union field access base");
+        throw TypeCheckError(current_module, fa, "Failed to infer type of error union field access base");
     }
     auto arrty = std::dynamic_pointer_cast<ArrayType>(base);
     if (!arrty) {
-        throw TypeCheckError(fa, "Error union field access on non-error-union type: " + typeName(base));
+        throw TypeCheckError(current_module, fa, "Error union field access on non-error-union type: " + typeName(base));
     }
     if (fa->field == "ptr") {
         fa->inferred_type = std::make_shared<PointerType>(resolveType(fa, arrty->element_type));
@@ -2023,7 +2062,7 @@ std::shared_ptr<Type> TypeChecker::inferArrayFieldAccess(const std::shared_ptr<F
         fa->inferred_type = std::make_shared<I64>();
         return fa->inferred_type;
     }
-    throw TypeCheckError(fa, "Array has no field " + fa->field);
+    throw TypeCheckError(current_module, fa, "Array has no field " + fa->field);
 }
 
 std::shared_ptr<Type>
@@ -2031,12 +2070,12 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
     if (auto baseExpr = std::dynamic_pointer_cast<Expression>(fa->base)) {
         auto bt = resolveType(fa, inferExpression(baseExpr));
         if (!bt)
-            throw TypeCheckError(fa, "Failed to infer type of field access base");
+            throw TypeCheckError(current_module, fa, "Failed to infer type of field access base");
         auto st = std::dynamic_pointer_cast<StructType>(bt);
         if (st) {
             auto ft = st->getFieldType(fa->field);
             if (!ft) {
-                throw TypeCheckError(fa, fa->str() + " has no field " + fa->field);
+                throw TypeCheckError(current_module, fa, fa->str() + " has no field " + fa->field);
             }
             fa->inferred_type = resolveType(fa, ft);
             return ft;
@@ -2045,11 +2084,11 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
         if (pt) {
             st = std::dynamic_pointer_cast<StructType>(resolveType(fa, pt->base));
             if (!st) {
-                throw TypeCheckError(fa, "Field access on pointer to non-struct type: " + typeName(pt->base));
+                throw TypeCheckError(current_module, fa, "Field access on pointer to non-struct type: " + typeName(pt->base));
             }
             auto ft = st->getFieldType(fa->field);
             if (!ft) {
-                throw TypeCheckError(fa, fa->str() + " has no field " + fa->field);
+                throw TypeCheckError(current_module, fa, fa->str() + " has no field " + fa->field);
             }
             fa->inferred_type = resolveType(fa, ft);
             return ft;
@@ -2067,26 +2106,28 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
             // field access on union type: get the field from the union
             auto ft = ut->getFieldType(fa->field);
             if (!ft) {
-                throw TypeCheckError(fa, "Union has no field " + fa->field);
+                throw TypeCheckError(current_module, fa, "Union has no field " + fa->field);
             }
             fa->inferred_type = resolveType(fa, ft);
             return ft;
         }
         auto mt = std::dynamic_pointer_cast<ModuleType>(bt);
         if (mt) {
-            auto im_type_checker = mt->type_checker;
-            auto maybe = im_type_checker->lookupSymbolInScope(fa->field);
-            if (!maybe) {
-                throw TypeCheckError(fa, "Unknown symbol in module " + mt->name + ": " + fa->field);
+            auto maybe_id = symbol_table.lookupModule(mt->module_id)->second->symbols.lookup(fa->field);
+            if (maybe_id == INVALID_SYMBOL_ID) {
+                throw TypeCheckError(current_module, fa, "Unknown symbol in module " + mt->name + ": " + fa->field);
             }
-            auto entry = im_type_checker->symbolTable().get(*maybe);
-            auto entry_type = entry ? entry->type : nullptr;
-            fa->inferred_type = resolveType(fa, entry_type);
-            return entry_type;
+            auto id = maybe_id;
+            auto sym = symbol_table.lookupModule(mt->module_id)->second->symbols.get(id);
+            if (!sym) {
+                throw TypeCheckError(current_module, fa, "Failed to lookup symbol in module " + mt->name + ": " + fa->field);
+            }
+            fa->inferred_type = resolveType(fa, sym->type);
+            return sym->type;
         }
-        throw TypeCheckError(fa, "Field access on disallowed type: " + typeName(bt));
+        throw TypeCheckError(current_module, fa, "Field access on disallowed type: " + typeName(bt));
     }
-    throw TypeCheckError(fa->base, "FieldAccess base is not an expression: " + fa->base->str());
+    throw TypeCheckError(current_module, fa->base, "FieldAccess base is not an expression: " + fa->base->str());
 }
 
 std::shared_ptr<Type>
@@ -2096,11 +2137,11 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
         auto bt = inferExpression(baseExpr);
         inferExpression(oa->index);
         if (!bt)
-            throw TypeCheckError(oa, "Failed to infer type of offset access base");
+            throw TypeCheckError(current_module, oa, "Failed to infer type of offset access base");
         if (auto at = std::dynamic_pointer_cast<ArrayType>(bt)) {
             auto idxt = inferExpression(oa->index);
             if (!idxt)
-                throw TypeCheckError(oa, "Failed to infer type of offset access index");
+                throw TypeCheckError(current_module, oa, "Failed to infer type of offset access index");
             oa->inferred_type = resolveType(oa, at->element_type);
 
             return at->element_type;
@@ -2111,9 +2152,9 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
             oa->inferred_type = bt;
             return bt;
         }
-        throw TypeCheckError(oa, "Offset access on non-array/pointer type: " + typeName(bt));
+        throw TypeCheckError(current_module, oa, "Offset access on non-array/pointer type: " + typeName(bt));
     } else {
-        throw TypeCheckError(oa->base, "OffsetAccess base is not an expression: " + oa->base->str());
+        throw TypeCheckError(current_module, oa->base, "OffsetAccess base is not an expression: " + oa->base->str());
     }
 }
 
@@ -2133,7 +2174,7 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
         at = std::dynamic_pointer_cast<ArrayType>(_st);
     }
     if (!st && !at) {
-        throw TypeCheckError(init, "Struct initializer with non-struct type: " + typeName(_st));
+        throw TypeCheckError(current_module, init, "Struct initializer with non-struct type: " + typeName(_st));
     }
 
     if (at) {
@@ -2144,7 +2185,7 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
         auto len_it = init->field_values.find("len");
         if (ptr_it == init->field_values.end() || len_it == init->field_values.end() ||
             init->field_values.size() != 2) {
-            throw TypeCheckError(init, "Array initializer expects fields ptr and len");
+            throw TypeCheckError(current_module, init, "Array initializer expects fields ptr and len");
         }
 
         bool all_are_const = true;
@@ -2159,14 +2200,13 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
             auto fieldType = resolveType(p.second, fieldTypeRaw);
             auto typeActual = inferExpression(p.second, fieldType);
             if (!typeActual) {
-                throw TypeCheckError(init, "Failed to infer type of array field " + p.first + " initializer");
+                throw TypeCheckError(current_module, init, "Failed to infer type of array field " + p.first + " initializer");
             }
             if (!typeActual->equals(fieldType)) {
                 if (canImplicitCast(typeActual, fieldType)) {
                     p.second = std::make_shared<TypeCast>(p.second, fieldType, CastType::Normal);
                 } else {
-                    throw TypeCheckError(init, "Array field " + p.first + " type mismatch: expected " +
-                                                   typeName(fieldType) + " got " + typeName(typeActual));
+                    throw TypeCheckError(current_module, init, "Array field " + p.first + " type mismatch: expected " + typeName(fieldType) + " got " + typeName(typeActual));
                 }
             }
         }
@@ -2211,7 +2251,7 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
 
         auto fieldTypeRaw = st->getFieldType(p.first);
         if (!fieldTypeRaw) {
-            throw TypeCheckError(init,
+            throw TypeCheckError(current_module, init,
                                  "Unknown field '" + p.first + "' in struct initializer for " +
                                      st->name);
         }
@@ -2219,15 +2259,12 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
         auto fieldType = resolveType(p.second, fieldTypeRaw);
         auto typeActual = inferExpression(p.second, fieldType);
         if (!typeActual)
-            throw TypeCheckError(init, "Failed to infer type of struct " + st->name +
-                                           " field " + p.first + " initializer");
+            throw TypeCheckError(current_module, init, "Failed to infer type of struct " + st->name + " field " + p.first + " initializer");
         if (!typeActual->equals(fieldType)) {
             if (canImplicitCast(typeActual, fieldType)) {
                 p.second = std::make_shared<TypeCast>(p.second, fieldType, CastType::Normal);
             } else {
-                throw TypeCheckError(init, "Struct " + st->name + " field " + p.first +
-                                               " type mismatch: expected " + typeName(fieldType) + " got " +
-                                               typeName(typeActual));
+                throw TypeCheckError(current_module, init, "Struct " + st->name + " field " + p.first + " type mismatch: expected " + typeName(fieldType) + " got " + typeName(typeActual));
             }
         }
     }
@@ -2243,23 +2280,26 @@ ASTNodePtr TypeChecker::lookupConstVariableInModulePath(const std::vector<std::s
         // lookup in current module's global scope
         auto maybe = lookupSymbolInScope(var_name);
         if (current_module->exports.find(var_name) == current_module->exports.end()) {
-            throw TypeCheckError(nullptr, "Variable " + var_name + " is not exported from module " + current_module->path);
+            throw TypeCheckError(current_module, nullptr, "Variable " + var_name + " is not exported from module " + current_module->path);
         }
         if (!maybe) {
-            throw TypeCheckError(nullptr, "Unknown variable in current module: " + var_name);
+            throw TypeCheckError(current_module, nullptr, "Unknown variable in current module: " + var_name);
         }
         auto entry = symbolTable().get(*maybe);
         return entry ? entry->decl : nullptr;
     }
-    auto next_module_name = module_path[0];
-    auto maybe_mod = imported_modules.find(next_module_name);
-    if (maybe_mod == imported_modules.end()) {
-        throw TypeCheckError(nullptr, "Unknown module: " + next_module_name);
+
+    auto mod = resolveModulePath(nullptr, module_path);
+    if (!mod) {
+        throw TypeCheckError(current_module, nullptr, "Unknown module: " + module_path.back());
     }
-
-    std::shared_ptr<TypeChecker> mod_checker = maybe_mod->second->type_checker;
-    // Recurse into sub-module access
-
-    auto sub_module_path = std::vector<std::string>(module_path.begin() + 1, module_path.end());
-    return mod_checker->lookupConstVariableInModulePath(sub_module_path, var_name);
+    auto maybe = mod->exports.find(var_name);
+    if (maybe == mod->exports.end()) {
+        throw TypeCheckError(current_module, nullptr, "Variable " + var_name + " is not exported from module " + mod->path);
+    }
+    auto decl = maybe->second;
+    if (!decl) {
+        throw TypeCheckError(current_module, nullptr, "Exported symbol " + var_name + " in module " + mod->path + " not found");
+    }
+    return decl;
 }

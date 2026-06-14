@@ -1,9 +1,9 @@
 #pragma once
+#include <filesystem>
 #ifndef BACKEND_H
 #define BACKEND_H
 
 #include "ast/ast.h"
-#include "module_resolver.h"
 #include <memory>
 
 typedef enum {
@@ -167,6 +167,8 @@ typedef struct {
     bool dump_ast_asa;
     Target target;
 } CompilerOptions;
+
+class Module;
 
 class Backend {
   public:

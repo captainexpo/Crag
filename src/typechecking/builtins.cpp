@@ -15,36 +15,36 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::expan
         assert(expr_arg != nullptr);
         auto inferred_type = resolveType(call ,inferExpression(expr_arg));
         if (!inferred_type) {
-            throw TypeCheckError(call, "Failed to infer type of sizeof argument");
+            throw TypeCheckError(current_module, call, "Failed to infer type of sizeof argument");
         }
         auto lit = std::make_shared<Literal>(static_cast<uint64_t>(getTypeSize(inferred_type)), std::make_shared<USize>());
         lit->inferred_type = std::make_shared<USize>();
         return std::make_pair(std::make_shared<USize>(), lit);
     } else {
-        throw TypeCheckError(call, "Invalid argument to sizeof");
+        throw TypeCheckError(current_module, call, "Invalid argument to sizeof");
     }
 }
 
 std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::expandSlice(
     const std::shared_ptr<FuncCall> &call) {
     if (call->args.size() != 2) {
-        throw TypeCheckError(call, "slice expects exactly 2 arguments: slice(ptr, len)");
+        throw TypeCheckError(current_module, call, "slice expects exactly 2 arguments: slice(ptr, len)");
     }
 
     auto ptr_expr = std::dynamic_pointer_cast<Expression>(call->args[0]);
     auto len_expr = std::dynamic_pointer_cast<Expression>(call->args[1]);
     if (!ptr_expr || !len_expr) {
-        throw TypeCheckError(call, "slice arguments must be expressions");
+        throw TypeCheckError(current_module, call, "slice arguments must be expressions");
     }
 
     auto ptr_type = resolveType(call, inferExpression(ptr_expr));
     if (!ptr_type) {
-        throw TypeCheckError(call, "Failed to infer type of slice pointer argument");
+        throw TypeCheckError(current_module, call, "Failed to infer type of slice pointer argument");
     }
 
     auto ptr = std::dynamic_pointer_cast<PointerType>(ptr_type);
     if (!ptr) {
-        throw TypeCheckError(call, "slice expects a pointer as its first argument");
+        throw TypeCheckError(current_module, call, "slice expects a pointer as its first argument");
     }
 
     auto elem_type = resolveType(call, ptr->base);

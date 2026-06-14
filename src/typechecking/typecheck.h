@@ -13,12 +13,20 @@
 #include <unordered_map>
 #include <vector>
 
+#define DUMP_SYMBOL_TABLE(table)                                                                                    \
+    std::cerr << "Symbol table contents:\n";                                                                        \
+    for (int i = 0; i < table.entries().size(); ++i) {                                                              \
+        const auto &entry = table.entries()[i];                                                                     \
+        std::cerr << "  " << entry.name << " (" << i << "): " << (entry.type ? entry.type->str() : "null") << "\n"; \
+    }
+
 class TypeCheckError : public std::runtime_error {
   public:
-    TypeCheckError(ASTNodePtr node, const std::string &msg)
-        : std::runtime_error(msg), node(std::move(node)) {}
+    TypeCheckError(std::shared_ptr<Module> module, ASTNodePtr node, const std::string &msg)
+        : std::runtime_error(msg), node(std::move(node)), module(std::move(module)) {}
 
     ASTNodePtr node;
+    std::shared_ptr<Module> module;
 };
 
 struct CastResult {
@@ -43,9 +51,8 @@ typedef struct TypeScope {
     }
 } TypeScope;
 
-
 typedef struct TemplateInstanceResult {
-    std::shared_ptr<Type> type; // Used for type of declaration or when the template is used as a type
+    std::shared_ptr<Type> type;              // Used for type of declaration or when the template is used as a type
     std::shared_ptr<Expression> replacement; // Used when the template is used as a value (e.g. function template)
 } TemplateInstanceResult;
 
@@ -59,23 +66,31 @@ class TypeChecker {
                                                const std::string &var_name);
 
     // Errors collected during checking
-    const std::vector<std::pair<ASTNodePtr, std::string>> &errors() const {
+    const std::vector<TypeCheckError> &errors() const {
         return m_errors;
     }
-    bool ok() const { return m_errors.empty(); }
 
-    std::unordered_map<std::string, std::shared_ptr<ModuleType>> imported_modules;
+    bool ok() const { return m_errors.empty(); }
 
     CompilerOptions compilerOptions;
 
+    std::shared_ptr<Module> currentModule() const {
+        return current_module;
+    }
+
+    GlobalSymbolTable &globalSymbols() {
+        return symbol_table;
+    }
+
   private:
-    friend class ModuleType; // For module-level type checking and access
+    friend class ModuleType;     // For module-level type checking and access
     friend class ConstEvaluator; // For constant evaluation
 
+    GlobalSymbolTable symbol_table;
 
     std::shared_ptr<Module> current_module;
 
-    std::vector<std::pair<ASTNodePtr, std::string>> m_errors; // Collected errors
+    std::vector<TypeCheckError> m_errors; // Collected errors
 
     ConstEvaluator m_const_eval;
 
@@ -107,14 +122,15 @@ class TypeChecker {
     // Scope helpers
     void pushScope();
     void popScope();
-    bool insertSymbol(const std::string &name, std::shared_ptr<Type> t, ASTNodePtr decl);
-    bool insertGlobalSymbol(const std::string &name, std::shared_ptr<Type> t, ASTNodePtr decl);
+    bool insertSymbol(const std::string &name, std::shared_ptr<Type> t, ASTNodePtr decl, SymbolId *out_id = nullptr);
+    SymbolId insertGlobalSymbol(const std::string &name, std::shared_ptr<Type> t, ASTNodePtr decl);
     SymbolId insertTemplateSymbol(const std::string &name, const std::shared_ptr<Declaration> &decl);
     std::optional<SymbolId> lookupSymbolInScope(const std::string &name) const;
 
     // Type helpers
     std::string typeName(const std::shared_ptr<Type> &t) const;
     std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t);
+    std::shared_ptr<Module> resolveModulePath(std::shared_ptr<ASTNode> node, const std::vector<std::string> &path);
 
     bool canImplicitCast(const std::shared_ptr<Type> &from, const std::shared_ptr<Type> &to);
 
@@ -143,6 +159,7 @@ class TypeChecker {
     std::shared_ptr<Type> inferUnaryOp(const std::shared_ptr<UnaryOperation> &un);
     std::shared_ptr<Type> inferFuncCall(const std::shared_ptr<FuncCall> &call,
                                         const std::shared_ptr<Type> &expected = nullptr);
+    std::shared_ptr<Type> tryInferGenericFunctionCall(const std::shared_ptr<FuncCall> &fc, const std::shared_ptr<FunctionType> &ft);
     std::shared_ptr<Type> inferMethodCall(const std::shared_ptr<MethodCall> &mc);
     std::shared_ptr<Type> inferFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma);
@@ -157,6 +174,9 @@ class TypeChecker {
         const std::string &name,
         const std::shared_ptr<ArrayLiteral> &arr_lit,
         const std::shared_ptr<ArrayType> &arr_type);
+
+    std::shared_ptr<Type> getCastType(std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &from,
+                                                   const std::shared_ptr<Type> &to);
 
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandSizeOf(const std::shared_ptr<FuncCall> &call);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandSlice(const std::shared_ptr<FuncCall> &call);

@@ -21,19 +21,3 @@ pub fn abs(x: i32) -> i32 {
     }
     return x;
 }
-
-pub fn max(a: i32, b: i32) -> i32 {
-    if (a > b) {
-        return a;
-    }
-    return b;
-}
-
-pub fn min(a: i32, b: i32) -> i32 {
-    if (a < b) {
-        return a;
-    }
-    return b;
-}
-
-

@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 import glob
 import re
@@ -7,7 +8,6 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import Any, Optional
 from pathlib import Path
 import time
-
 
 def color_text(text: Any, rgb: tuple[int, int, int]) -> str:
     text = str(text)
@@ -280,14 +280,15 @@ def main():
         f"Passed: {color_text(passed, C_GREEN)}, Failed: {color_text(failed, C_RED)}, Skipped: {color_text(skipped, C_YELLOW)}"
     )
 
-    if skipped > 0:
-        print("Skipped details:")
-        for output in skips:
-            print(output)
-    if failed > 0:
-        print("Failure details:")
-        for output in fails:
-            print(output)
+    if sys.argv[-1] != "--supress":
+        if skipped > 0:
+            print("Skipped details:")
+            for output in skips:
+                print(output)
+        if failed > 0:
+            print("Failure details:")
+            for output in fails:
+                print(output)
 
     exit(failed)
 

@@ -14,6 +14,7 @@ fn _start() -> void @noprefix @naked @noreturn {
 }
 
 fn main(args: []*u8, envp: *const u8) -> i32;
+
 extern fn __global_var_init__() -> void @noprefix @weak;
 extern fn fflush(stream: *void) -> i32;
 

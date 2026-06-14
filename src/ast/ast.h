@@ -119,6 +119,8 @@ struct Type {
     virtual bool isGeneralNumeric() const { return isNumeric() || kind() == TypeKind::Pointer; }
 };
 
+bool typeContainsGeneric(const std::shared_ptr<Type> &t);
+
 enum class NodeKind {
     Program,
     BinaryOp,
@@ -521,10 +523,12 @@ struct QualifiedType : Type {
 
 struct ModuleType : Type {
     TypeKind kind() const override { return TypeKind::Unknown; }
-    std::string name;
-    std::shared_ptr<struct TypeChecker> type_checker;
 
-    ModuleType(std::string name, std::shared_ptr<struct TypeChecker> tc) : name(std::move(name)), type_checker(tc) {}
+    std::string name;
+
+    uint32_t module_id;
+
+    ModuleType(std::string name, uint32_t id) : name(std::move(name)), module_id(id) {}
 
     std::string str() const override {
         return "Module<" + name + ">";
@@ -539,11 +543,10 @@ struct ModuleType : Type {
 
     std::shared_ptr<Type> lookup() {
         return nullptr;
-        // return type_checker->lookup(
     }
 
     std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
-        return std::make_shared<ModuleType>(name, type_checker);
+        return std::make_shared<ModuleType>(name, module_id);
     }
 };
 
@@ -1374,8 +1377,7 @@ struct StructDeclaration : public TypeDecl {
     std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
     std::vector<std::string> generic_params;
 
-    std::pair<std::string, std::shared_ptr<Type>>
-    getField(const std::string &fname) const {
+    std::pair<std::string, std::shared_ptr<Type>> getField(const std::string &fname) const {
         for (const auto &field : fields) {
             if (field.first == fname)
                 return field;

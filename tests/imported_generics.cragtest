@@ -8,7 +8,6 @@ import "imported_generic.crag" as ig;
 extern fn printf(fmt: *u8, ...) -> i32;
 
 fn main() -> i32 {
-
     let v = ig.Vec2::<f64> { x: 3.0, y: 4.0 };
     printf("%f %f\n", v.x, v.y);
 
@@ -17,7 +16,6 @@ fn main() -> i32 {
 
     return 0;
 }
-
 
 //END CODE
 //BEGIN EXPECT

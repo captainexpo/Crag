@@ -7,3 +7,34 @@ pub const sin = &cmath.sin;
 pub const cos = &cmath.cos;
 pub const atan2 = &cmath.atan2;
 pub const sqrt = &cmath.sqrt;
+
+pub fn max<T>(a: T, b: T) -> T{
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+pub fn max<T>(a: T, b: T) -> T{
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+pub fn abs<T>(a: T) -> T{
+    if (a < 0) {
+        return -a;
+    }
+    return a;
+}
+
+pub fn sign<T>(a: T) -> T{
+    if (a < 0) {
+        return -1;
+    }
+    if (a > 0) {
+        return 1;
+    }
+    return 0;
+}

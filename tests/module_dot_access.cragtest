@@ -1,6 +1,6 @@
 //NAME: Module Dot Access
 //DESC: Dot-style module access for values and types
-//REQUIRES:mod_math.crag
+//REQUIRES:mod_test_requires/mod_math.crag
 //BEGIN CODE
 
 extern fn printf(fmt: *u8, ...) -> i32;

@@ -4,7 +4,7 @@
 #define MODULE_RESOLVER_H
 
 #include "ast/ast.h"
-#include "typechecking/tables.h"
+#include "module.h"
 #include "parser.h"
 #include "utils.h"
 #include <filesystem>
@@ -17,52 +17,7 @@
 
 class TypeChecker;
 
-struct Module {
-  public:
-    std::string canon_name;
-    std::string path;
-    std::shared_ptr<Program> ast;
-    std::unordered_map<std::string, std::shared_ptr<ASTNode>> exports;
-    std::unordered_map<std::string, std::shared_ptr<Module>> imports;
-
-    std::string source_code;
-
-    std::unordered_set<std::string> externLinkage; // Probably an inaccurate name, but who cares
-
-    SymbolTable symbols;
-    std::shared_ptr<TypeChecker> type_checker;
-    bool typechecking = false;
-    bool typechecked = false;
-
-    std::string canonicalizeName(const std::string &s) const {
-        return canon_name + "." + s;
-    }
-
-    std::shared_ptr<Module> getImportedModule(std::vector<std::string> path) const {
-        if (path.empty()) {
-            return nullptr;
-        }
-        // Remove first element
-        auto cur_find = path[0];
-
-        if (path.size() == 1) {
-            if (auto it = imports.find(cur_find); it != imports.end()) {
-                return it->second;
-            } else {
-                return nullptr;
-            }
-        }
-
-        // Recursive resolution of imports
-        if (auto it = imports.find(cur_find); it != imports.end()) {
-            auto next_module = it->second;
-            path.erase(path.begin());
-            return next_module->getImportedModule(path);
-        }
-        return nullptr;
-    }
-};
-
+class SymbolTable;
 inline std::string canonicalModuleName(const std::filesystem::path &abs_path) {
 #if 0
     // example: /a/b/c/foo.cr → a.b.c.foo
@@ -140,7 +95,7 @@ class ModuleResolver {
 
         if (!parser.ok()) {
             for (const auto &err : parser.errors()) {
-                prettyError(err.line, err.col, err.message, source);
+                prettyError(err.line, err.col, err.message, source, abs_path.filename().string());
                 // cout source file
                 std::cerr << "Error parsing module " << abs_path << ": "
                           << err.message << "\n";
@@ -150,9 +105,11 @@ class ModuleResolver {
 
         auto module = std::make_shared<Module>();
         module->path = abs_path.string();
+        module->name = abs_path.filename().string();
         module->canon_name = canonicalModuleName(abs_path);
         module->ast = ast;
         module->source_code = source;
+        module->id = m_next_module_id++;
 
         dependencyGraph[module->canon_name];
         m_module_cache[module->path] = module;
@@ -165,7 +122,7 @@ class ModuleResolver {
                 auto imported = loadModule(importDecl->path, module_dir);
 
                 module->imports[importDecl->alias] = imported;
-                dependencyGraph[module->canon_name] .push_back(imported->canon_name);
+                dependencyGraph[module->canon_name].push_back(imported->canon_name);
                 continue;
             }
 
@@ -299,6 +256,7 @@ class ModuleResolver {
     std::unordered_map<std::string, std::shared_ptr<Module>> m_module_cache;
     std::unordered_map<std::string, std::string> m_shortcuts;
     std::unordered_map<std::string, std::filesystem::path> m_shortcut_base_dirs; // Base directory for each shortcut
+    uint32_t m_next_module_id = 0;
 
     void initializeBuiltinShortcuts() {
         m_shortcuts["stdlib"] = "<STDLIB>/std.crag";
@@ -409,8 +367,7 @@ class ModuleResolver {
         // Prefer a stdlib bundled with the current working tree during local development.
         const std::filesystem::path local_candidates[] = {
             std::filesystem::path("stdlib"),
-            std::filesystem::path("../stdlib")
-        };
+            std::filesystem::path("../stdlib")};
         for (const auto &candidate : local_candidates) {
             std::filesystem::path stdlib_path = candidate / "std.crag";
             std::error_code ec;

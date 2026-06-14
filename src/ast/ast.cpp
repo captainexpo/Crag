@@ -159,3 +159,34 @@ int getTypeSize(const std::shared_ptr<Type> &type) {
 
     throw std::runtime_error("Unsupported type for getTypeSize: " + type->str());
 }
+
+bool typeContainsGeneric(const std::shared_ptr<Type> &t) {
+    if (auto gt = std::dynamic_pointer_cast<GenericType>(t)) {
+        return true;
+    }
+    if (auto st = std::dynamic_pointer_cast<StructType>(t)) {
+        for (const auto &field : st->fields) {
+            if (typeContainsGeneric(field.second)) {
+                return true;
+            }
+        }
+    }
+    if (auto at = std::dynamic_pointer_cast<ArrayType>(t)) {
+        return typeContainsGeneric(at->element_type);
+    }
+    if (auto et = std::dynamic_pointer_cast<EnumType>(t)) {
+        return typeContainsGeneric(et->base_type);
+    }
+    if (auto eut = std::dynamic_pointer_cast<ErrorUnionType>(t)) {
+        return typeContainsGeneric(eut->valueType) || typeContainsGeneric(eut->errorType);
+    }
+    if (auto ft = std::dynamic_pointer_cast<FunctionType>(t)) {
+        for (const auto &param : ft->params) {
+            if (typeContainsGeneric(param)) {
+                return true;
+            }
+        }
+        return typeContainsGeneric(ft->ret);
+    }
+    return false;
+}

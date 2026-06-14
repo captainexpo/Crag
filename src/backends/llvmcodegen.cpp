@@ -1,5 +1,4 @@
 #include "llvmcodegen.h"
-#include "../module_resolver.h"
 #include "src/ast/ast.h"
 #include <algorithm>
 #include <filesystem>

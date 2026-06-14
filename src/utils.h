@@ -1,4 +1,5 @@
 #pragma once
+#include <vector>
 #ifndef UTILS_H
 #define UTILS_H
 
@@ -21,7 +22,7 @@
     } while (false)
 #endif
 
-void prettyError(int line, int col, const std::string &msg, const std::string &source);
+void prettyError(int line, int col, const std::string &msg, const std::string &source, const std::string &filename = "unknown");
 
 void fail(const std::string &message);
 void warn(const std::string &message);
@@ -52,5 +53,4 @@ static std::string runAndCapture(const std::string& cmd) {
 
     return result;
 }
-
 #endif

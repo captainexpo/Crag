@@ -89,50 +89,36 @@ static bool isTemplateDeclaration(const std::shared_ptr<Declaration> &decl) {
 std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti) {
     std::string qualified_name = formatQualifiedTemplateName(ti->module_path, ti->template_name);
 
-    TypeChecker *target_checker = this;
-    if (!ti->module_path.empty()) {
-        auto module_it = imported_modules.find(ti->module_path[0]);
-        if (module_it == imported_modules.end()) {
-            throw TypeCheckError(ti, "Unknown module in template: " + ti->module_path[0]);
-        }
+    auto target_mod = resolveModulePath(ti, ti->module_path);
 
-        std::shared_ptr<TypeChecker> module_checker = module_it->second->type_checker;
-        for (size_t i = 1; i < ti->module_path.size(); ++i) {
-            auto sub_module_it = module_checker->imported_modules.find(ti->module_path[i]);
-            if (sub_module_it == module_checker->imported_modules.end()) {
-                throw TypeCheckError(ti, "Unknown module in path: " + ti->module_path[i]);
-            }
-            module_checker = sub_module_it->second->type_checker;
-        }
-        target_checker = module_checker.get();
-    }
+    auto og_current_mod = current_module;
+    current_module = target_mod;
 
     std::vector<std::shared_ptr<Type>> params;
     params.reserve(ti->type_args.size());
     for (const auto &arg : ti->type_args) {
-        params.push_back(target_checker->resolveType(ti, arg));
+        params.push_back(resolveType(ti, arg));
     }
 
-    SymbolId template_id = ti->template_id != UINT32_MAX ? static_cast<SymbolId>(ti->template_id) : INVALID_SYMBOL_ID;
-    if (template_id == INVALID_SYMBOL_ID) {
-        if (!target_checker->m_scopes.empty()) {
-            template_id = target_checker->m_scopes.front().find(ti->template_name);
-        }
-        if (template_id == INVALID_SYMBOL_ID) {
-            throw TypeCheckError(ti, "Unknown template: " + qualified_name);
-        }
-        ti->template_id = template_id;
-    }
+    SymbolId template_id = symbolTable().lookup(ti->template_name);
+    // if (template_id == INVALID_SYMBOL_ID) {
+    //     error(ti, "Template '" + qualified_name + "' not found");
+    //     return {nullptr, nullptr};
+    // }
+    auto entry = symbolTable().get(template_id);
 
-    auto entry = target_checker->symbolTable().get(template_id);
+    symbol_table.dump();
+
     auto decl = entry ? std::dynamic_pointer_cast<Declaration>(entry->decl) : nullptr;
+    std::cout << "Inferring template instantiation: " << qualified_name << "<";
+    std::cout << "Template ID: " << template_id << ", Decl: " << (templateDeclName(decl)) << ">\n";
     if (!decl || !isTemplateDeclaration(decl)) {
-        throw TypeCheckError(ti, "Unknown template: " + qualified_name);
+        throw TypeCheckError(current_module, ti, "Unknown template: " + qualified_name);
     }
 
     if (auto alias_decl = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
         if (alias_decl->generic_params.size() != params.size()) {
-            throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + templateDeclName(decl) +
+            throw TypeCheckError(current_module, ti, "Template instantiation parameter count mismatch for " + templateDeclName(decl) +
                                         ": expected " + std::to_string(alias_decl->generic_params.size()) +
                                         ", got " + std::to_string(params.size()));
         }
@@ -143,10 +129,10 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         }
         auto alias_type = alias_decl->aliased_type->instantiate();
         replaceInTypePreserveTemplates(alias_type, generic_map);
-        auto resolved = target_checker->resolveType(alias_decl, alias_type);
+        auto resolved = resolveType(alias_decl, alias_type);
 
         if (auto st = std::dynamic_pointer_cast<StructType>(resolved)) {
-            auto complete = target_checker->lookupStructType(st->name);
+            auto complete = lookupStructType(st->name);
             if (complete) {
                 resolved = complete;
                 insertGlobalSymbol(st->name, complete, nullptr);
@@ -157,36 +143,38 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         return std::make_pair(resolved, std::make_shared<TypeExpression>(resolved));
     }
 
-    if (target_checker != this) {
-        auto ti_copy = std::make_shared<TemplateInstantiation>(templateDeclName(decl), params);
-        ti_copy->line = ti->line;
-        ti_copy->col = ti->col;
-        ti_copy->template_id = template_id;
+    // if (target_checker != this) {
+    //     auto ti_copy = std::make_shared<TemplateInstantiation>(templateDeclName(decl), params);
+    //     ti_copy->line = ti->line;
+    //     ti_copy->col = ti->col;
+    //     ti_copy->template_id = template_id;
+    //
+    //     auto result = inferTemplateInstantiation(ti_copy);
+    //
+    //     if (auto fn_type = std::dynamic_pointer_cast<FunctionType>(result.first)) {
+    //         if (auto st = std::dynamic_pointer_cast<StructType>(fn_type->ret)) {
+    //             auto complete = lookupStructType(st->name);
+    //             if (complete) {
+    //                 fn_type->ret = complete;
+    //                 insertGlobalSymbol(st->name, complete, nullptr);
+    //             }
+    //         }
+    //     } else if (auto st = std::dynamic_pointer_cast<StructType>(result.first)) {
+    //         auto complete = lookupStructType(st->name);
+    //         if (complete) {
+    //             result.first = complete;
+    //             insertGlobalSymbol(st->name, complete, nullptr);
+    //         }
+    //     }
+    //
+    //     ti->inferred_type = result.first;
+    //     std::string mangled_name = mangleTemplateName(templateDeclName(decl), params);
+    //     auto ma = std::make_shared<ModuleAccess>(ti->module_path, mangled_name);
+    //     ma->inferred_type = result.first;
+    //     return std::make_pair(result.first, ma);
+    // }
 
-        auto result = target_checker->inferTemplateInstantiation(ti_copy);
-
-        if (auto fn_type = std::dynamic_pointer_cast<FunctionType>(result.first)) {
-            if (auto st = std::dynamic_pointer_cast<StructType>(fn_type->ret)) {
-                auto complete = target_checker->lookupStructType(st->name);
-                if (complete) {
-                    fn_type->ret = complete;
-                    insertGlobalSymbol(st->name, complete, nullptr);
-                }
-            }
-        } else if (auto st = std::dynamic_pointer_cast<StructType>(result.first)) {
-            auto complete = target_checker->lookupStructType(st->name);
-            if (complete) {
-                result.first = complete;
-                insertGlobalSymbol(st->name, complete, nullptr);
-            }
-        }
-
-        ti->inferred_type = result.first;
-        std::string mangled_name = mangleTemplateName(templateDeclName(decl), params);
-        auto ma = std::make_shared<ModuleAccess>(ti->module_path, mangled_name);
-        ma->inferred_type = result.first;
-        return std::make_pair(result.first, ma);
-    }
+    current_module = og_current_mod;
 
     auto to_instantiate = decl;
 
@@ -204,7 +192,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
 
         std::shared_ptr<FunctionDeclaration> declCopy = std::dynamic_pointer_cast<FunctionDeclaration>(fd->instantiate());
         if (fd->generic_params.size() != params.size()) {
-            throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + fd->name +
+            throw TypeCheckError(current_module, ti, "Template instantiation parameter count mismatch for " + fd->name +
                                          ": expected " + std::to_string(fd->generic_params.size()) +
                                          ", got " + std::to_string(params.size()));
         }
@@ -225,7 +213,8 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         checkFunctionDeclaration(declCopy);
         m_expected_return_type = saved_expected_return_type;
         ti->inferred_type = declCopy->type;
-        insertGlobalSymbol(new_name, ti->inferred_type, declCopy);
+        auto id = insertGlobalSymbol(new_name, ti->inferred_type, declCopy);
+        ti->template_id = id;
         current_module->ast->declarations.push_back(declCopy);
         return std::make_pair(
             ti->inferred_type,
@@ -243,7 +232,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
 
         std::shared_ptr<StructDeclaration> declCopy = std::dynamic_pointer_cast<StructDeclaration>(sd->instantiate());
         if (sd->generic_params.size() != params.size()) {
-            throw TypeCheckError(ti, "Template instantiation parameter count mismatch for " + sd->name +
+            throw TypeCheckError(current_module, ti, "Template instantiation parameter count mismatch for " + sd->name +
                                          ": expected " + std::to_string(sd->generic_params.size()) +
                                          ", got " + std::to_string(params.size()));
         }
@@ -258,7 +247,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
 
         auto st = std::make_shared<StructType>(new_name);
         st->complete = false;
-        insertGlobalSymbol(new_name, st, sd);
+        auto id =  insertGlobalSymbol(new_name, st, sd);
 
         auto old_expected_return_type = m_expected_return_type;
         m_expected_return_type = nullptr;
@@ -267,12 +256,13 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         current_module->ast->declarations.push_back(declCopy);
 
         ti->inferred_type = st;
+        ti->template_id = id;
         m_expected_return_type = old_expected_return_type;
         return std::make_pair(
             ti->inferred_type,
             std::make_shared<TypeExpression>(ti->inferred_type));
     }
-    throw TypeCheckError(ti, "Unsupported template kind: " + to_instantiate->str());
+    throw TypeCheckError(current_module, ti, "Unsupported template kind: " + to_instantiate->str());
 }
 
 void replaceInType(std::shared_ptr<Type> &type, const std::unordered_map<std::string, std::shared_ptr<Type>> &generic_map) {
@@ -551,6 +541,6 @@ void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map
         return;
     }
 
-    throw TypeCheckError(node, "replaceGenericTypes: unhandled AST node type: " + node->str());
+    throw std::runtime_error("Unknown AST node type in replaceGenericTypes");
 }
 
