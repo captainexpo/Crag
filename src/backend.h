@@ -8,7 +8,6 @@
 
 typedef enum {
     LLVM,
-    // TODO: QBE,
 } BackendType;
 
 enum OptLevel {

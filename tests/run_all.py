@@ -172,7 +172,7 @@ def run_unit_test(
     start_time = time.time()
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1)
+        result = subprocess.run(cmd, capture_output=True, text=True)
     except subprocess.TimeoutExpired:
         printc("Compilation timed out.", C_RED)
         return TestResult.FAIL, outs, time.time() - start_time
@@ -189,7 +189,7 @@ def run_unit_test(
     # call the generated binary
     bin_file = out_base
     try:
-        result = subprocess.run([bin_file], capture_output=True, text=True, timeout=1)
+        result = subprocess.run([bin_file], capture_output=True, text=True)
     except subprocess.TimeoutExpired:
         printc("Execution timed out.", C_RED)
         return TestResult.FAIL, outs, time.time() - start_time

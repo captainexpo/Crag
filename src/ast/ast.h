@@ -2,6 +2,7 @@
 
 // #include "src/module_resolver.h"
 // #include "src/typechecking/typecheck.h"
+
 #include <optional>
 #ifndef AST_H
 #define AST_H
@@ -386,7 +387,7 @@ struct F64 : Type {
 
 struct Boolean : Type {
     TypeKind kind() const override { return TypeKind::Bool; }
-    std::string str() const override { return "BOOL"; }
+    std::string str() const override { return "Bool"; }
     bool equals(const std::shared_ptr<Type> &other) const override {
         return other->kind() == TypeKind::Bool;
     }

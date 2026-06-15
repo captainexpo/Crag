@@ -13,7 +13,7 @@
 #include <llvm/Support/TargetSelect.h>
 #include <memory>
 
-//#define DBG_PRINT_AST
+// #define DBG_PRINT_AST
 
 void initializeLLVM() {
     static bool initialized = false;
@@ -71,10 +71,13 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
     }
     if (!typeChecker->ok()) {
         std::cout << typeChecker->errors().size() << " errors during type checking:\n";
-        typeChecker->globalSymbols().dump();
+        // typeChecker->globalSymbols().dump();
         for (const auto &err : typeChecker->errors()) {
-            prettyError(err.node ? err.node->line : -1,
-                        err.node ? err.node->col : -1, err.what(), err.module->source_code, err.module->name);
+            prettyError(err.node != nullptr ? err.node->line : -1,
+                        err.node != nullptr ? err.node->col : -1,
+                        err.what(),
+                        err.module->source_code,
+                        err.module->name);
         }
         return nullptr;
     }
@@ -89,7 +92,6 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
         return nullptr;
     }
 #endif
-
 
     if (moduleResolver.hasDependencyCycle()) {
         std::cerr << "Error: Cyclic dependencies detected among modules.\n";
@@ -109,7 +111,6 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
             std::cerr << "In module '" << module->canon_name << "'\n";
             std::cerr << codegen->errors().size() << " errors during code generation:\n";
             for (const auto &err : codegen->errors()) {
-                std::cerr << err.what() << "\n";
                 prettyError(err.node() ? err.node()->line : -1,
                             err.node() ? err.node()->col : -1, err.what(), module->source_code, module->canon_name);
             }

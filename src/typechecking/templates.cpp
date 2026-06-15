@@ -107,7 +107,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
     // }
     auto entry = symbolTable().get(template_id);
 
-    symbol_table.dump();
+    // symbol_table.dump();
 
     auto decl = entry ? std::dynamic_pointer_cast<Declaration>(entry->decl) : nullptr;
     std::cout << "Inferring template instantiation: " << qualified_name << "<";

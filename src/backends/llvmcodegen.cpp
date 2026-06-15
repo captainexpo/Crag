@@ -474,21 +474,42 @@ void LLVMCodegen::compileObjectFileToExecutable(
     const std::filesystem::path &runtime_path,
     bool no_runtime,
     std::optional<std::vector<std::string>> backend_args) {
+
     std::string linker = "cc";
+    bool nocstdlib = backend_args &&
+        std::find(backend_args->begin(), backend_args->end(), "--nocstdlib") != backend_args->end();
 
-    bool nocstdlib = std::find(backend_args->begin(), backend_args->end(), "--nocstdlib") != backend_args->end();
+    bool isMacOS = m_options.target.os == OSTarget::MacOS;
 
-    std::string cmd = linker + " " + object_filepath + " -o " + executable_filepath.string() + " -lm -nostdlib -Wl,--entry=_start " + (!nocstdlib ? "-lc " : "");
+    std::string cmd = linker + " " + object_filepath + " -o " + executable_filepath.string();
+
+    if (isMacOS) {
+        // macOS: ld doesn't support -nostdlib the same way, uses -e instead of --entry
+        // -lSystem is needed even for "bare" binaries to get dyld bootstrapping
+        cmd += " -lm";
+        cmd += " -e __start";
+        if (!nocstdlib)
+            cmd += " -lc";
+        // On Apple Silicon / macOS 12+ the SDK path must be explicit
+        cmd += " -L/usr/lib";
+    } else {
+        // Linux
+        cmd += " -lm -nostdlib -Wl,--entry=_start";
+        if (!nocstdlib)
+            cmd += " -lc";
+    }
+
     if (backend_args) {
         for (const auto &arg : *backend_args) {
-            cmd += arg + " ";
+            if (arg == "--nocstdlib") continue; // already handled above
+            cmd += " " + arg;
         }
     }
 
     if (!no_runtime) {
-        std::string runtimeLib = runtime_path.string();
-        cmd += " " + runtimeLib;
+        cmd += " " + runtime_path.string();
     }
+
     int result = std::system(cmd.c_str());
     if (result != 0) {
         throw CodeGenError(nullptr, "Linking failed with command: " + cmd);
@@ -879,7 +900,7 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
 
     if (std::find(func->attributes.begin(), func->attributes.end(), "weak") != func->attributes.end()) {
         if (func->is_extern) {
-            function->setLinkage(llvm::Function::ExternalWeakLinkage);
+            function->setLinkage(llvm::Function::WeakAnyLinkage);
         } else {
             throw CodeGenError(func, "Only extern functions can be marked as weak");
         }
@@ -895,7 +916,7 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
 }
 
 llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclaration> func, llvm::Function *function) {
-    if (func->is_extern || !func->body) {
+    if (!func->body) {
         return function; // No body to generate
     }
 
@@ -978,7 +999,7 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
         m_error_union_return_type = nullptr;
     }
     generateStatement(func->body);
-    if (m_builder->GetInsertBlock()->getTerminator() == nullptr){
+    if (m_builder->GetInsertBlock()->getTerminator() == nullptr) {
         emitDefaultReturn(func);
     }
     m_error_union_return_type = nullptr;
@@ -1850,7 +1871,7 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
     // Zero out the array memory using memset
     m_builder->CreateCall(memsetFunction, {m_builder->CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context)),
                                            llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0),
-                                           llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len * m_llvm_module->getDataLayout().getTypeAllocSize(elemType)),
+                                           llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len * (size_t)(m_llvm_module->getDataLayout().getTypeAllocSize(elemType))),
                                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 0)});
 
     // Store elements in array using correct GEP (2 indices for array)
@@ -3252,8 +3273,14 @@ llvm::Value *LLVMCodegen::generateAsmStatement(
         }
     }
 
-    llvm::InlineAsm::AsmDialect dialect = llvm::InlineAsm::AD_Intel; // Default
+    llvm::InlineAsm::AsmDialect dialect;
+    if (m_options.target.arch == X86 || m_options.target.arch == X86_64)
+        dialect = llvm::InlineAsm::AD_Intel; // Default
+    else
+        dialect = llvm::InlineAsm::AD_ATT; // Default
+                                                                       //
     if (stmt->options.find(AsmStmt::AsmOption::AttSyntax) != stmt->options.end()) {
+
         dialect = llvm::InlineAsm::AD_ATT;
     }
 

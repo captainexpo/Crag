@@ -42,15 +42,14 @@ static unsigned getFloatBitWidth(const std::shared_ptr<Type> &t) {
     if (!t)
         return 0;
     switch (t->kind()) {
-        case TypeKind::F32:
-            return 32;
         case TypeKind::F64:
             return 64;
+        case TypeKind::F32:
+            return 32;
         default:
             return 0;
     }
 }
-
 
 std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
     if (!expr)
@@ -316,6 +315,12 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
             if (m_intrinsics.find(va->name) != m_intrinsics.end()) {
                 return m_intrinsics[va->name];
             }
+
+            if (va->name == "@current_mod") {
+                return std::make_shared<Literal>((uint64_t)(m_type_checker->current_module->id),
+                        std::make_shared<U64>());
+            }
+
             error(va, "Variable is not compile-time known: " + va->name);
             return std::nullopt;
         }
@@ -418,7 +423,7 @@ ConstEvaluator::evaluateBinaryLiterals(LiteralPtr lhs,
     if (isNumericConst(lhs->value) && isNumericConst(rhs->value)) {
         if (!lhs->lit_type || !rhs->lit_type || !lhs->lit_type->equals(rhs->lit_type)) {
             // Try to cast to a common type for mixed-type operations (e.g. int + float)
-            if (m_type_checker->canImplicitCast(lhs->lit_type, rhs->lit_type)){
+            if (m_type_checker->canImplicitCast(lhs->lit_type, rhs->lit_type)) {
                 auto casted = castLiteral(lhs, rhs->lit_type);
                 if (casted) {
                     lhs = casted;
@@ -438,7 +443,6 @@ ConstEvaluator::evaluateBinaryLiterals(LiteralPtr lhs,
                 error(nullptr, "Type mismatch between operands in binary operation and no implicit cast available");
                 return std::nullopt;
             }
-
         }
 
         auto resultType = lhs->lit_type;
@@ -657,5 +661,3 @@ std::shared_ptr<Literal> ConstEvaluator::castLiteral(const LiteralPtr &lit, cons
     }
     return castedLiteral;
 }
-
-

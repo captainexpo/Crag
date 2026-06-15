@@ -263,7 +263,7 @@ class ModuleResolver {
         m_shortcuts["string"] = "<STDLIB>/string.crag";
         m_shortcuts["vector"] = "<STDLIB>/vector.crag";
         m_shortcuts["random"] = "<STDLIB>/random.crag";
-        m_shortcuts["libc"] = "<STDLIB>/libc.crag";
+        m_shortcuts["libc"] = "<STDLIB>/libc/libc.crag";
     }
 
     void loadUserShortcuts() {

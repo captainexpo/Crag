@@ -89,6 +89,7 @@ class TypeChecker {
     GlobalSymbolTable symbol_table;
 
     std::shared_ptr<Module> current_module;
+    std::shared_ptr<Module> main_module;
 
     std::vector<TypeCheckError> m_errors; // Collected errors
 

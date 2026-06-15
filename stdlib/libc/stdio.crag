@@ -20,8 +20,25 @@ struct File {
     _tmpfname: *u8,
 }
 
-pub extern const stderr: *File;
-pub extern const stdout: *File;
+when @target_os == "macos"{
+    extern const __stderrp: *File;
+    extern const __stdoutp: *File;
+
+    pub let stderr: *File = __stderrp;
+    pub let stdout: *File = __stdoutp;
+}
+
+when @target_os == "linux"{
+    pub extern const stderr: *File;
+    pub extern const stdout: *File;
+}
+
+when @target_os == "windows"{
+    extern fn __acrt_iob_func(idx: u32) -> *File;
+
+    pub let stderr: *File = __acrt_iob_func(2);
+    pub let stdout: *File = __acrt_iob_func(1);
+}
 
 // File utility functions
 pub extern fn fopen(filename: *const u8, mode: *const u8) -> *void;

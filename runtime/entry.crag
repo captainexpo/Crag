@@ -1,3 +1,50 @@
+fn main(args: []*u8, envp: *const u8) -> i32;
+
+extern fn __global_var_init__() -> void @noprefix @weak {
+    return;
+}
+
+extern fn fflush(stream: *void) -> i32;
+
+fn __main_setup(argc: i32, argv: **u8, envp: *const u8) -> i32 @noprefix {
+    let args = slice(argv, argc);
+    if (&__global_var_init__ != null)
+        __global_var_init__();
+    let status = main(args, envp);
+    fflush(null);
+    return status;
+}
+
+when @target_arch == "arm64" {
+
+fn _start() -> void @noprefix @naked @noreturn {
+    asm volatile (
+        "mov x29, #0\n"
+        "ldr x0, [sp]\n"
+        "add x1, sp, #8\n"
+        "add x2, x1, x0, lsl #3\n"
+        "add x2, x2, #8\n"
+        "bl ___main_setup\n"
+        "mov x0, x0\n"
+        "bl __exit\n",
+        options(nomem, nostack, noreturn)
+    );
+}
+
+fn _exit(status: i32) -> void @inline @noprefix @noreturn {
+    asm volatile (
+        "mov x16, #1\n"
+        "orr x16, x16, #0x2000000\n"
+        "svc #0x80\n",
+        in("x0") status,
+        options(nomem, nostack, noreturn),
+    );
+}
+
+}
+
+when @target_arch != "arm64" {
+
 fn _start() -> void @noprefix @naked @noreturn {
     asm volatile (
         "xor ebp, ebp\n"
@@ -13,20 +60,6 @@ fn _start() -> void @noprefix @naked @noreturn {
     );
 }
 
-fn main(args: []*u8, envp: *const u8) -> i32;
-
-extern fn __global_var_init__() -> void @noprefix @weak;
-extern fn fflush(stream: *void) -> i32;
-
-fn __main_setup(argc: i32, argv: **u8, envp: *const u8) -> i32 @noprefix {
-    let args = slice(argv, argc);
-    if (&__global_var_init__ != null)
-        __global_var_init__();
-    let status = main(args, envp);
-    fflush(null);
-    return status;
-}
-
 fn _exit(status: i32) -> void @inline @noprefix @noreturn {
     asm volatile (
         "mov rax, 60\n"
@@ -34,4 +67,5 @@ fn _exit(status: i32) -> void @inline @noprefix @noreturn {
         in("rdi") status,
         options(intel_syntax, nomem, nostack, noreturn),
     );
+}
 }

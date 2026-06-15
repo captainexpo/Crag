@@ -8,9 +8,9 @@ when @target_ptr_width == 32
 pub using time_t = i32;
 
 pub fn now() -> time_t {
-    return ctime::time(null);
+    return ctime.time(null);
 }
 
 pub fn sleep(seconds: i32) -> void {
-    cunistd::sleep(seconds);
+    cunistd.sleep(seconds);
 }

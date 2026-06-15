@@ -35,21 +35,21 @@ pub struct Str {
 
     fn concat(self: *Str, other: Str) -> u8!StrError {
         let new_length: usize = self.length + other.length;
-        let new_value: *u8 = libc::stdlib::malloc(new_length + 1) as *u8;
+        let new_value: *u8 = libc.stdlib.malloc(new_length + 1) as *u8;
         if (new_value == null) {
             return! StrError:ALLOC_ERROR;
         }
 
         if (self.value != null) {
-            libc::string::memcpy(new_value as *void, self.value as *void, self.length);
+            libc.string.memcpy(new_value as *void, self.value as *void, self.length);
         }
         if (other.value != null) {
-            libc::string::memcpy(new_value + self.length as *u8 as *void, other.value as *void, other.length);
+            libc.string.memcpy(new_value + self.length as *u8 as *void, other.value as *void, other.length);
         }
         new_value[new_length] = 0;
 
         if (self.is_heap && self.value != null) {
-            libc::stdlib::free(self.value);
+            libc.stdlib.free(self.value);
         }
 
         self.value = new_value;
@@ -63,12 +63,12 @@ pub struct Str {
         }
 
         let sub_length: usize = end - start;
-        let sub_value: *u8 = libc::stdlib::malloc(sub_length + 1) as *u8;
+        let sub_value: *u8 = libc.stdlib.malloc(sub_length + 1) as *u8;
         if (sub_value == null) {
             return! StrError:ALLOC_ERROR;
         }
 
-        libc::string::memcpy(sub_value as *void, (self.value + start as *u8) as *void, sub_length);
+        libc.string.memcpy(sub_value as *void, (self.value + start as *u8) as *void, sub_length);
         sub_value[sub_length] = 0;
 
         return Str{value: sub_value, length: sub_length, is_heap: true};
@@ -76,7 +76,7 @@ pub struct Str {
 
     fn free(self: *Str) -> void {
         if (self.value != null && self.is_heap) {
-            libc::stdlib::free(self.value);
+            libc.stdlib.free(self.value);
             self.value = null;
             self.length = 0;
         }

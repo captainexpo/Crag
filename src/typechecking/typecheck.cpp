@@ -441,7 +441,7 @@ static void substituteGenericTypes(std::shared_ptr<Type> &type,
 
 std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t) {
     if (!t) {
-        throw TypeCheckError(current_module, node, "Internal type-checker error: attempted to resolve a null type");
+        throw TypeCheckError(current_module, node, "Attempted to resolve a null type");
     }
 
     // Resolve bound generics if any (used in instantiation paths)
@@ -611,8 +611,17 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
         current_module = module;
         return;
     }
+
     if (module->typechecking) {
         return;
+    }
+
+    if (!main_module) {
+        main_module = module;
+        m_const_eval.addIntrinsic(
+            "@main_mod",
+            std::make_shared<Literal>((uint64_t)main_module->id,
+                                      std::make_shared<U64>()));
     }
 
     module->typechecking = true;
@@ -691,6 +700,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
                 // Typecheck module
                 check(imported_module);
+
                 current_module = og_module;
             } else if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
                 std::shared_ptr<Type> alias_type = ta->aliased_type;
@@ -1509,10 +1519,10 @@ std::shared_ptr<Type> TypeChecker::inferModuleAccess(const std::shared_ptr<Modul
     }
     auto it = mod->exports.find(ma->member_name);
     // Print all exports of the module for debugging
-    std::cout << "Module '" << mod->canon_name << "' exports:" << std::endl;
-    for (const auto &export_pair : mod->exports) {
-        std::cout << "  " << export_pair.first << ": " << export_pair.second->str() << std::endl;
-    }
+    // std::cout << "Module '" << mod->canon_name << "' exports:" << std::endl;
+    // for (const auto &export_pair : mod->exports) {
+    //     std::cout << "  " << export_pair.first << ": " << export_pair.second->str() << std::endl;
+    // }
     if (it == mod->exports.end()) {
         // symbol_table.dump();
         throw TypeCheckError(current_module, ma, "Unknown symbol in imported module: " + ma->member_name);
