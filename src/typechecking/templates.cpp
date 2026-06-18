@@ -230,6 +230,19 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
                 std::make_shared<TypeExpression>(ti->inferred_type));
         }
 
+        // If this struct has no generic params (already a concrete instantiation) but was
+        // called with type args, it means a nested alias chain resolved to an already-
+        // instantiated struct name. Look it up directly by its existing name.
+        if (sd->generic_params.empty() && !params.empty()) {
+            auto existing_by_name = lookupStructType(sd->name);
+            if (existing_by_name) {
+                ti->inferred_type = existing_by_name;
+                return std::make_pair(
+                    ti->inferred_type,
+                    std::make_shared<TypeExpression>(ti->inferred_type));
+            }
+        }
+
         for (const auto &field : sd->fields) {
             std::cout << "Field: " << field.first << " : " << field.second->str() << "\n";
         }
@@ -293,14 +306,7 @@ void replaceInType(std::shared_ptr<Type> &type, const std::unordered_map<std::st
         for (auto &arg : ti->type_args) {
             replaceInType(arg, generic_map);
         }
-
-        if (auto base_struct = std::dynamic_pointer_cast<StructType>(ti->base)) {
-            std::string mangled_name = mangleTemplateName(base_struct->name, ti->type_args);
-
-            type = std::make_shared<StructType>(mangled_name);
-        } else {
-            replaceInType(ti->base, generic_map);
-        }
+        replaceInType(ti->base, generic_map);
     } else if (auto ft = std::dynamic_pointer_cast<FunctionType>(type)) {
         for (auto &param : ft->params) {
             replaceInType(param, generic_map);
