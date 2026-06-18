@@ -3,6 +3,7 @@
 #include "lexer.h"
 #include <algorithm>
 #include <cstddef>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
@@ -227,8 +228,7 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
             throw ParseError(
                 "Unexpected token in type: " + describeToken(current),
                 current.line,
-                current.column
-            );
+                current.column);
     }
 
     if (top_level && peek().type == TokenType::QUESTION) {
@@ -236,8 +236,7 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
         throw ParseError(
             "Nullable types not supported yet",
             current.line,
-            current.column
-        );
+            current.column);
     }
 
     if (peek().type == TokenType::DOUBLE_COLON) {
@@ -307,13 +306,11 @@ std::shared_ptr<PointerType> Parser::parse_pointer_type() {
         consume(TokenType::CONST);
         return std::make_shared<PointerType>(
             parse_non_error_type(false),
-            true
-        );
+            true);
     }
 
     return std::make_shared<PointerType>(
-        parse_non_error_type(false)
-    );
+        parse_non_error_type(false));
 }
 
 std::shared_ptr<ArrayType> Parser::parse_array_type() {
@@ -335,8 +332,7 @@ std::shared_ptr<ArrayType> Parser::parse_array_type() {
     return std::make_shared<ArrayType>(
         elem_type,
         size,
-        unsized
-    );
+        unsized);
 }
 
 std::shared_ptr<PointerType> Parser::parse_function_ptr_type() {
@@ -623,7 +619,7 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
     for (size_t i = 0; i < fields.size(); ++i)
         fmap.push_back({fields[i].first, fields[i].second});
     auto st = std::make_shared<StructType>(name, fmap);
-    st->methods = methods;
+
     declared_structs[name] = st;
     auto struct_decl = std::make_shared<StructDeclaration>(name, fields);
     struct_decl->methods = methods;
@@ -1288,7 +1284,7 @@ std::shared_ptr<ForStatement> Parser::parse_for_statement() {
 }
 
 std::shared_ptr<SwitchStmt> Parser::parse_switch_statement() {
-    auto t =consume(TokenType::SWITCH);
+    auto t = consume(TokenType::SWITCH);
     consume(TokenType::LPAREN);
     auto condition = parse_expression();
     consume(TokenType::RPAREN);
@@ -1296,11 +1292,9 @@ std::shared_ptr<SwitchStmt> Parser::parse_switch_statement() {
     std::vector<
         std::pair<
             std::vector<
-                std::shared_ptr<Expression>
-            >,
-        std::shared_ptr<Statement>
-        >
-    > cases;
+                std::shared_ptr<Expression>>,
+            std::shared_ptr<Statement>>>
+        cases;
 
     std::shared_ptr<Statement> default_case = nullptr;
     while (peek().type != TokenType::RBRACE && peek().type != TokenType::EOF_T) {
@@ -1545,8 +1539,7 @@ std::shared_ptr<AsmStmt> Parser::parse_asm_statement() {
             }
 
             operands.push_back(AsmOperand(type, expr, constraint));
-        }
-        else {
+        } else {
             break;
         }
     }

@@ -2,6 +2,7 @@
 #define TABLES_H
 
 #include "../ast/ast.h"
+#include <deque>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -29,33 +30,38 @@ inline SymbolId makeSymbolId(SymbolId module_id, SymbolId symbol_index) {
 
 class Module;
 
+enum class SymbolKind {
+    Variable,
+    Function,
+    Type,
+    Module,
+};
+
 struct Symbol {
+    SymbolKind kind;
     std::string name;
     std::shared_ptr<Type> type;
     std::shared_ptr<ASTNode> decl;
+    SymbolId id = INVALID_SYMBOL_ID;
 };
 
 class SymbolTable {
   public:
     SymbolId insert(Symbol symbol);
 
-    SymbolId lookup(const std::string &name) const;
+    std::optional<const Symbol> get(SymbolId id);
 
-    Symbol *get(SymbolId id);
-
-    const Symbol *get(SymbolId id) const;
+    std::optional<const Symbol> get(SymbolId id) const;
 
     bool remove(SymbolId id);
 
-    const std::vector<Symbol> &entries() const;
+    const std::deque<Symbol> &entries() const;
 
     // Id for the module this table belongs to, set by the global symbol table when the module is inserted
     SymbolId table_id;
 
   private:
-    std::vector<Symbol> symbols;
-
-    std::unordered_map<std::string, SymbolId> name_lookup;
+    std::deque<Symbol> symbols;
 };
 
 class GlobalSymbolTable {
@@ -63,6 +69,8 @@ class GlobalSymbolTable {
     SymbolId insertModule(std::shared_ptr<Module> module);
 
     std::pair<SymbolTable, std::shared_ptr<Module>> *lookupModule(uint32_t module_id);
+
+    std::optional<const Symbol> lookupSymbol(SymbolId id) const;
 
     const std::pair<SymbolTable, std::shared_ptr<Module>> *lookupModule(uint32_t module_id) const;
 

@@ -25,16 +25,16 @@ pub struct Arena {
     }
 
     fn destroy(self: *Arena) -> void {
-        //cstd.stdlib.free(self.ptr);
+        cstd.stdlib.free(self.ptr);
     }
 }
 
 
 pub fn arena_new(size: usize) -> Arena {
-//    let ptr = cstd.stdlib.malloc(size) as *void;
-//    if (ptr == null) {
-//        io::panic("Failed to allocate memory for arena");
-//    }
-//    return Arena { ptr: ptr, size: size, used: 0 };
+    let ptr = cstd.stdlib.malloc(size) as *void;
+    if (ptr == null) {
+        io::panic("Failed to allocate memory for arena");
+    }
+    return Arena { ptr: ptr, size: size, used: 0 };
 }
 

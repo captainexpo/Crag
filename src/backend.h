@@ -172,7 +172,7 @@ class Module;
 class Backend {
   public:
     virtual ~Backend() = default;
-    virtual void generate(std::shared_ptr<Module> module) = 0;
+    virtual void generate(std::shared_ptr<Module> module, class GlobalSymbolTable *symbol_table) = 0;
     virtual void emitIrToFile(const std::string &filepath) = 0;
     virtual void emitObjectToFile(const std::string &filepath) = 0;
     virtual void compileObjectFileToExecutable(const std::string &object_filepath,

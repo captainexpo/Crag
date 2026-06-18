@@ -1,42 +1,33 @@
 #include "tables.h"
+#include <iostream>
 #include "../module.h"
 
 SymbolId SymbolTable::insert(Symbol symbol) {
-    SymbolId id = symbols.size();
+    SymbolId id = makeSymbolId(table_id, symbols.size());
+    symbol.id = id;
 
     symbols.push_back(std::move(symbol));
-
-    name_lookup[symbols[id].name] = makeSymbolId(table_id, id);
 
     return id;
 }
 
-SymbolId SymbolTable::lookup(const std::string &name) const {
-    auto it = name_lookup.find(name);
-
-    if (it == name_lookup.end())
-        return INVALID_SYMBOL_ID;
-
-    return makeSymbolId(table_id, extractSymbolIndex(it->second));
-}
-
-Symbol *SymbolTable::get(SymbolId id) {
+std::optional<const Symbol> SymbolTable::get(SymbolId id) {
     id = extractSymbolIndex(id); // Ensure we only use the symbol index part of the ID
     if (id >= symbols.size())
-        return nullptr;
+        return std::nullopt;
 
-    return &symbols[id];
+    return symbols[id];
 }
 
-const Symbol *SymbolTable::get(SymbolId id) const {
+std::optional<const Symbol> SymbolTable::get(SymbolId id) const {
     id = extractSymbolIndex(id); // Ensure we only use the symbol index part of the ID
     if (id >= symbols.size())
-        return nullptr;
+        return std::nullopt;
 
-    return &symbols[id];
+    return symbols[id];
 }
 
-const std::vector<Symbol> &SymbolTable::entries() const {
+const std::deque<Symbol> &SymbolTable::entries() const {
     return symbols;
 }
 
@@ -44,9 +35,6 @@ bool SymbolTable::remove(SymbolId id) {
     id = extractSymbolIndex(id); // Ensure we only use the symbol index part of the ID
     if (id >= symbols.size())
         return false;
-
-    // Remove from name lookup
-    name_lookup.erase(symbols[id].name);
 
     // TODO: Actually remove from vector and update indices
     // Mark as removed
@@ -73,7 +61,7 @@ void GlobalSymbolTable::dump() const {
         std::cerr << "Module " << module->canon_name << " (ID: " << module_id << "):\n";
         for (int i = 0; i < table.entries().size(); ++i) {
             const auto &entry = table.entries()[i];
-            std::cerr << "  " << entry.name << " (" << module_id << ", " << i << "): " << (entry.type ? entry.type->str() : "null") << "\n";
+            std::cerr << "  " << entry.name << " (" << module_id << ", " << i << ", " << entry.id << ", " << &entry << "): " << (entry.type ? entry.type->str() : "null") << "\n";
         }
     }
 }
@@ -95,3 +83,18 @@ const std::pair<SymbolTable, std::shared_ptr<Module>> *GlobalSymbolTable::lookup
 
     return &it->second;
 }
+
+std::optional<const Symbol> GlobalSymbolTable::lookupSymbol(SymbolId id) const {
+    uint32_t module_id = extractModuleId(id);
+    auto mod = lookupModule(module_id);
+    if (!mod) {
+        return std::nullopt;
+    }
+    const auto &[table, module] = *mod;
+    std::optional<Symbol> s = table.get(id);
+    if (!s) {
+        return std::nullopt;
+    }
+    return *s;
+}
+

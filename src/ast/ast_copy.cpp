@@ -15,6 +15,7 @@ std::shared_ptr<ASTNode> Program::instantiate(std::vector<std::shared_ptr<Type>>
     for (const auto &decl : declarations) {
         c->declarations.push_back(decl->instantiate(gp_replace));
     }
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -27,6 +28,7 @@ std::shared_ptr<ASTNode> TypeCast::instantiate(std::vector<std::shared_ptr<Type>
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -36,6 +38,7 @@ std::shared_ptr<ASTNode> VarAccess::instantiate(std::vector<std::shared_ptr<Type
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->is_extern = is_extern;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -45,6 +48,7 @@ std::shared_ptr<ASTNode> Dereference::instantiate(std::vector<std::shared_ptr<Ty
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -59,6 +63,7 @@ std::shared_ptr<ASTNode> FuncCall::instantiate(std::vector<std::shared_ptr<Type>
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -74,6 +79,7 @@ std::shared_ptr<ASTNode> MethodCall::instantiate(std::vector<std::shared_ptr<Typ
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -84,6 +90,7 @@ std::shared_ptr<ASTNode> EnumAccess::instantiate(std::vector<std::shared_ptr<Typ
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -94,6 +101,7 @@ std::shared_ptr<ASTNode> FieldAccess::instantiate(std::vector<std::shared_ptr<Ty
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -103,6 +111,7 @@ std::shared_ptr<ASTNode> TemplateInstantiation::instantiate(std::vector<std::sha
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->template_id = template_id;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -111,6 +120,7 @@ std::shared_ptr<ASTNode> ModuleAccess::instantiate(std::vector<std::shared_ptr<T
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -121,6 +131,7 @@ std::shared_ptr<ASTNode> OffsetAccess::instantiate(std::vector<std::shared_ptr<T
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -132,6 +143,7 @@ std::shared_ptr<ASTNode> BinaryOperation::instantiate(std::vector<std::shared_pt
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -142,6 +154,7 @@ std::shared_ptr<ASTNode> UnaryOperation::instantiate(std::vector<std::shared_ptr
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -150,6 +163,7 @@ std::shared_ptr<ASTNode> Literal::instantiate(std::vector<std::shared_ptr<Type>>
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -163,6 +177,7 @@ std::shared_ptr<ASTNode> ArrayLiteral::instantiate(std::vector<std::shared_ptr<T
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->len = len;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -178,6 +193,7 @@ std::shared_ptr<ASTNode> StructInitializer::instantiate(std::vector<std::shared_
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->struct_type = struct_type != nullptr ? struct_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -189,6 +205,7 @@ std::shared_ptr<ASTNode> Block::instantiate(std::vector<std::shared_ptr<Type>> g
     for (const auto &stmt : statements) {
         c->statements.push_back(std::dynamic_pointer_cast<Statement>(stmt->instantiate(gp_replace)));
     }
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -200,6 +217,7 @@ std::shared_ptr<ASTNode> IfStatement::instantiate(std::vector<std::shared_ptr<Ty
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -212,6 +230,7 @@ std::shared_ptr<ASTNode> ForStatement::instantiate(std::vector<std::shared_ptr<T
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -222,6 +241,7 @@ std::shared_ptr<ASTNode> WhileStatement::instantiate(std::vector<std::shared_ptr
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -232,6 +252,7 @@ std::shared_ptr<ASTNode> ReturnStatement::instantiate(std::vector<std::shared_pt
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->is_error = is_error;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -240,6 +261,7 @@ std::shared_ptr<ASTNode> BreakStatement::instantiate(std::vector<std::shared_ptr
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -248,6 +270,7 @@ std::shared_ptr<ASTNode> ContinueStatement::instantiate(std::vector<std::shared_
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -257,6 +280,7 @@ std::shared_ptr<ASTNode> ExpressionStatement::instantiate(std::vector<std::share
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -267,6 +291,7 @@ std::shared_ptr<ASTNode> Assignment::instantiate(std::vector<std::shared_ptr<Typ
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -283,6 +308,7 @@ std::shared_ptr<ASTNode> FunctionDeclaration::instantiate(std::vector<std::share
     c->is_pub = is_pub;
     c->generic_params = generic_params;
     c->attributes = attributes;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -297,6 +323,7 @@ std::shared_ptr<ASTNode> VariableDeclaration::instantiate(std::vector<std::share
     c->is_pub = is_pub;
     c->is_const = is_const;
     c->is_extern = is_extern;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -307,6 +334,7 @@ std::shared_ptr<ASTNode> TypeAliasDeclaration::instantiate(std::vector<std::shar
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->is_pub = is_pub;
     c->generic_params = generic_params;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -316,6 +344,7 @@ std::shared_ptr<ASTNode> ImportDeclaration::instantiate(std::vector<std::shared_
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->is_pub = is_pub;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -324,6 +353,7 @@ std::shared_ptr<ASTNode> TypeExpression::instantiate(std::vector<std::shared_ptr
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -339,6 +369,7 @@ std::shared_ptr<ASTNode> EnumDeclaration::instantiate(std::vector<std::shared_pt
     c->is_pub = is_pub;
     c->generic_params = generic_params;
     c->enum_type = enum_type != nullptr ? std::dynamic_pointer_cast<EnumType>(enum_type->instantiate(gp_replace)) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -354,10 +385,12 @@ std::shared_ptr<ASTNode> StructDeclaration::instantiate(std::vector<std::shared_
     c->is_pub = is_pub;
     c->generic_params = generic_params;
     c->is_extern = is_extern;
+
     for (const auto &[mname, method] : methods) {
         c->methods[mname] = std::dynamic_pointer_cast<FunctionDeclaration>(method->instantiate(gp_replace));
     }
     // std::cout << "Copied struct declaration: " << c->str() << "\n";
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -373,6 +406,7 @@ std::shared_ptr<ASTNode> UnionDeclaration::instantiate(std::vector<std::shared_p
     c->is_pub = is_pub;
     c->generic_params = generic_params;
     c->is_extern = is_extern;
+    c->symbol_id = symbol_id;
     return c;
 }
 
@@ -381,9 +415,9 @@ std::shared_ptr<ASTNode> AsmStmt::instantiate(std::vector<std::shared_ptr<Type>>
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
-
 
 std::shared_ptr<ASTNode> WhenBlock::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
     std::vector<ASTNodePtr> containees;
@@ -412,6 +446,6 @@ std::shared_ptr<ASTNode> SwitchStmt::instantiate(std::vector<std::shared_ptr<Typ
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
     return c;
 }
-

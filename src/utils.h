@@ -1,27 +1,25 @@
 #pragma once
-#include <vector>
 #ifndef UTILS_H
 #define UTILS_H
 
 #include <cstring>
-#include <iostream>
 #include <string>
-
-#ifndef NDEBUG
-#define ASSERT(condition, message)                                             \
-    do {                                                                       \
-        if (!(condition)) {                                                    \
-            std::cerr << "Assertion `" #condition "` failed in " << __FILE__   \
-                      << " line " << __LINE__ << ": " << message << std::endl; \
-            std::terminate();                                                  \
-        }                                                                      \
-    } while (false)
-#else
-#define ASSERT(condition, message) \
-    do {                           \
-    } while (false)
-#endif
-
+//
+// #ifndef NDEBUG
+// #define ASSERT(condition, message)                                             \
+//     do {                                                                       \
+//         if (!(condition)) {                                                    \
+//             std::cerr << "Assertion `" #condition "` failed in " << __FILE__   \
+//                       << " line " << __LINE__ << ": " << message << std::endl; \
+//             std::terminate();                                                  \
+//         }                                                                      \
+//     } while (false)
+// #else
+// #define ASSERT(condition, message) \
+//     do {                           \
+//     } while (false)
+// #endif
+//
 void prettyError(int line, int col, const std::string &msg, const std::string &source, const std::string &filename = "unknown");
 
 void fail(const std::string &message);
@@ -53,4 +51,18 @@ static std::string runAndCapture(const std::string& cmd) {
 
     return result;
 }
+
+enum class Color {
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    White,
+    Default
+} ;
+
+std::string colorString(const std::string &message, Color color);
+
 #endif

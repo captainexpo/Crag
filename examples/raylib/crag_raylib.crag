@@ -160,7 +160,7 @@ pub enum ConfigFlags(i32) {
 
 // Trace log level
 // NOTE: Organized by priority level
-enum TraceLogLevel(i32) {
+pub enum TraceLogLevel(i32) {
     LOG_ALL = 0,        // Display all logs
     LOG_TRACE,          // Trace logging, intended for internal use only
     LOG_DEBUG,          // Debug logging, used for internal debugging, it should be disabled on release builds
@@ -173,7 +173,7 @@ enum TraceLogLevel(i32) {
 
 // Keyboard keys (US keyboard layout)
 // NOTE: Use GetKeyPressed() to allow redefining required keys for alternative layouts
-enum Key (i32) {
+pub enum Key (i32) {
     NULL            = 0,        // Key: NULL, used for no key pressed
     // Alphanumeric keys
     APOSTROPHE      = 39,       // Key: '

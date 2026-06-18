@@ -3,12 +3,12 @@
 // #include "src/module_resolver.h"
 // #include "src/typechecking/typecheck.h"
 
-#include <optional>
 #ifndef AST_H
 #define AST_H
 
 #include "../utils.h"
 #include <cassert>
+#include <optional>
 
 #include <cstdint>
 #include <map>
@@ -161,13 +161,16 @@ enum class NodeKind {
     ImportDeclaration,
     TypeAliasDeclaration,
     TypeExpression,
-    Unknown
+    Unknown,
 };
+
 
 struct ASTNode : std::enable_shared_from_this<ASTNode> {
     int line = 0;
     int col = 0;
     std::shared_ptr<Type> inferred_type = nullptr;
+
+    uint64_t symbol_id = INT64_MAX; // For declarations and variable accesses
 
     bool constant_evaluated = false;
 
@@ -440,10 +443,10 @@ struct ArrayType : Type {
 
     ArrayType(std::shared_ptr<Type> b, std::shared_ptr<Expression> len, bool us)
         : element_type(std::move(b)), length_expr(len), unsized(us) {
-        if (us)
-            ASSERT(len == nullptr, "Unsized array must have length of nullptr: " + str());
-        else
-            ASSERT(len != nullptr, "Sized array must have valid length expression: " + str());
+        // if (us)
+        //     ASSERT(len == nullptr, "Unsized array must have length of nullptr: " + str());
+        // else
+        //     ASSERT(len != nullptr, "Sized array must have valid length expression: " + str());
     }
 
     std::string str() const override {
@@ -1132,7 +1135,6 @@ struct StructInitializer : public Expression {
 struct TypeDecl : Declaration {
     std::string name;
     std::vector<std::string> generic_params;
-    // virtual std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) = 0;
 };
 
 struct Block : public Statement {
@@ -1269,6 +1271,8 @@ struct FunctionDeclaration : public TypeDecl {
     std::vector<std::string> param_names;
     std::shared_ptr<Statement> body;
     std::set<std::string> attributes;
+
+    std::vector<uint64_t> param_symbols;
 
     FunctionDeclaration(std::string n, std::shared_ptr<FunctionType> t,
                         std::vector<std::string> params,

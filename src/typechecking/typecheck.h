@@ -19,7 +19,6 @@
         const auto &entry = table.entries()[i];                                                                     \
         std::cerr << "  " << entry.name << " (" << i << "): " << (entry.type ? entry.type->str() : "null") << "\n"; \
     }
-
 class TypeCheckError : public std::runtime_error {
   public:
     TypeCheckError(std::shared_ptr<Module> module, ASTNodePtr node, const std::string &msg)
@@ -48,6 +47,12 @@ typedef struct TypeScope {
         if (it == symbols.end())
             return INVALID_SYMBOL_ID;
         return it->second;
+    }
+    void dump() const {
+        std::cerr << "TypeScope contents:\n";
+        for (const auto &entry : symbols) {
+            std::cerr << "  " << entry.first << ": " << entry.second << "\n";
+        }
     }
 } TypeScope;
 
@@ -85,6 +90,15 @@ class TypeChecker {
   private:
     friend class ModuleType;     // For module-level type checking and access
     friend class ConstEvaluator; // For constant evaluation
+    friend struct CurrentModuleGuard;
+
+    struct CurrentModuleGuard {
+        TypeChecker *tc;
+        std::shared_ptr<Module> saved;
+        CurrentModuleGuard(TypeChecker *tc_, std::shared_ptr<Module> saved_)
+            : tc(tc_), saved(saved_) {}
+        ~CurrentModuleGuard() { tc->current_module = saved; }
+    };
 
     GlobalSymbolTable symbol_table;
 
@@ -95,8 +109,9 @@ class TypeChecker {
 
     ConstEvaluator m_const_eval;
 
-    // Scope / symbol table: stack of name -> Type
-    std::vector<TypeScope> m_scopes;
+    // Scope / symbol table: stack of name -> Type.
+    // Map of module id -> vec of scopes
+    std::unordered_map<SymbolId, std::vector<TypeScope>> m_mod_scopes;
 
     std::unordered_map<SymbolId, std::shared_ptr<Declaration>> m_templates;
 
@@ -114,19 +129,18 @@ class TypeChecker {
 
     void ensureGlobalVariableVisible(const std::string &name);
 
-    std::shared_ptr<Type> lookupNamedType(const std::string &name) const;
-    std::shared_ptr<StructType> lookupStructType(const std::string &name) const;
-    std::shared_ptr<UnionType> lookupUnionType(const std::string &name) const;
-    std::shared_ptr<EnumType> lookupEnumType(const std::string &name) const;
-    std::shared_ptr<FunctionType> lookupFunctionType(const std::string &name) const;
+    std::shared_ptr<Type> lookupNamedType(const std::string &name);
+    std::shared_ptr<StructType> lookupStructType(const std::string &name);
+    std::shared_ptr<UnionType> lookupUnionType(const std::string &name);
+    std::shared_ptr<EnumType> lookupEnumType(const std::string &name);
+    std::shared_ptr<FunctionType> lookupFunctionType(const std::string &name);
+    std::optional<Symbol> lookupNamedSymbol(const std::string &name);
 
     // Scope helpers
     void pushScope();
     void popScope();
-    bool insertSymbol(const std::string &name, std::shared_ptr<Type> t, ASTNodePtr decl, SymbolId *out_id = nullptr);
-    SymbolId insertGlobalSymbol(const std::string &name, std::shared_ptr<Type> t, ASTNodePtr decl);
-    SymbolId insertTemplateSymbol(const std::string &name, const std::shared_ptr<Declaration> &decl);
-    std::optional<SymbolId> lookupSymbolInScope(const std::string &name) const;
+    bool insertSymbol(const std::string &name, SymbolKind kind, std::shared_ptr<Type> t, ASTNodePtr decl, SymbolId *out_id = nullptr);
+    std::optional<SymbolId> lookupSymbolInScope(const std::string &name);
 
     // Type helpers
     std::string typeName(const std::shared_ptr<Type> &t) const;
@@ -149,7 +163,7 @@ class TypeChecker {
     void checkEnumDeclaration(const std::shared_ptr<EnumDeclaration> &en);
 
     std::shared_ptr<Type> inferTypeCast(const std::shared_ptr<TypeCast> &tc);
-    std::shared_ptr<Type> inferVarAccess(const std::shared_ptr<VarAccess> &v);
+    std::shared_ptr<Type> inferVarAccess(std::shared_ptr<VarAccess> &v);
     std::shared_ptr<Type> inferDereference(const std::shared_ptr<Dereference> &d);
     std::shared_ptr<Type> inferLiteral(const std::shared_ptr<Literal> &lit,
                                        const std::shared_ptr<Type> &expected = nullptr);
@@ -177,12 +191,17 @@ class TypeChecker {
         const std::shared_ptr<ArrayType> &arr_type);
 
     std::shared_ptr<Type> getCastType(std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &from,
-                                                   const std::shared_ptr<Type> &to);
+                                      const std::shared_ptr<Type> &to);
 
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandSizeOf(const std::shared_ptr<FuncCall> &call);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandSlice(const std::shared_ptr<FuncCall> &call);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandOffsetOf(const std::shared_ptr<FuncCall> &call);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandAlignOf(const std::shared_ptr<FuncCall> &call);
+
+    inline std::vector<TypeScope> &currentScopes() {
+        auto mod_id = current_module->id;
+        return m_mod_scopes[mod_id];
+    }
 };
 
 void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map<std::string, std::shared_ptr<Type>> &generic_map);

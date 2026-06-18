@@ -1,8 +1,21 @@
 extern fn malloc(size: usize) -> *u8;
+
 pub fn alloc_arr<T>(len: usize) -> []T {
     return slice(malloc(len * sizeof(T)) as *T, len);
 }
 
 pub fn alloc<T>() -> *T {
     return malloc(sizeof(T)) as *T;
+}
+
+when @current_mod == @main_mod {
+    extern fn printf(format: *const u8, ...) -> i32;
+    extern fn strcpy(dest: *u8, src: *const u8) -> *u8;
+
+    fn main() -> i32 {
+        let p1 = alloc_arr::<u8>(1024);
+        strcpy(p1.ptr, "Hello World!");
+        printf("%s\n", p1.ptr);
+        return 0;
+    }
 }

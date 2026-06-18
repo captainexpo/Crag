@@ -1,4 +1,5 @@
 #pragma once
+#include "src/typechecking/tables.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/TargetParser/Triple.h"
 #ifndef IR_H
@@ -42,24 +43,24 @@ enum RuntimePanicType {
     // Add others as needed
 };
 
+struct CGSymbol {
+    llvm::Value *value;
+    llvm::Type *type;               // original type, needed for opaque pointers
+    std::shared_ptr<Type> ast_type; // original AST type, needed for type info
+};
+
 class Scope {
   public:
     Scope(std::shared_ptr<Scope> parent = nullptr) : m_parent(parent) {}
 
     bool is_global() const { return m_parent == nullptr; }
 
-    struct Symbol {
-        llvm::Value *value;
-        llvm::Type *type;               // original type, needed for opaque pointers
-        std::shared_ptr<Type> ast_type; // original AST type, needed for type info
-    };
-
     void set(const std::string &name, llvm::Value *value, llvm::Type *type,
              std::shared_ptr<Type> ast_type) {
         table[name] = {value, type, ast_type};
     }
 
-    Symbol *get(const std::string &name) {
+    CGSymbol *get(const std::string &name) {
         auto it = table.find(name);
         if (it != table.end())
             return &it->second;
@@ -77,7 +78,7 @@ class Scope {
             m_parent->dump();
         }
     }
-    std::map<std::string, Symbol> table;
+    std::map<std::string, CGSymbol> table;
 
   private:
     std::shared_ptr<Scope> m_parent;
@@ -101,7 +102,7 @@ class LLVMCodegen : public Backend {
         if (options.do_runtime_safety)
             emitBuiltinDeclarations();
     }
-    void generate(std::shared_ptr<Module> module) override;
+    void generate(std::shared_ptr<Module> module, class GlobalSymbolTable *symbol_table) override;
     void emitIrToFile(const std::string &filepath) override;
     void emitObjectToFile(const std::string &filepath) override;
     void compileObjectFileToExecutable(const std::string &object_filepath,
@@ -145,6 +146,10 @@ class LLVMCodegen : public Backend {
 
     std::vector<LoopInfo> m_loop_stack;
     std::vector<CodeGenError> m_errors;
+
+    GlobalSymbolTable *m_type_table = nullptr;
+
+    std::unordered_map<SymbolId, CGSymbol> m_symbol_map;
 
     llvm::LLVMContext context;
     std::unique_ptr<llvm::Module> m_llvm_module;
@@ -197,6 +202,13 @@ class LLVMCodegen : public Backend {
             return name;
         }
         return m_current_module->canonicalizeName(name);
+    }
+
+    inline void setSymValue(SymbolId symbol, llvm::Value *value, llvm::Type *type, std::shared_ptr<Type> ast_type) {
+        if (symbol == INVALID_SYMBOL_ID) {
+            throw std::runtime_error("Attempting to set value for symbol with invalid ID" + std::to_string(symbol) + " Type=" + ast_type->str());
+        }
+        m_symbol_map[symbol] = {value, type, ast_type};
     }
 
     llvm::Type *getLLVMType(const std::shared_ptr<Type> &type, const ASTNodePtr &node);
@@ -301,5 +313,13 @@ class LLVMCodegen : public Backend {
     llvm::Type *getABICoercionType(llvm::Type *structType);
     llvm::Value *coerceToABI(llvm::Value *structValue, llvm::Type *structType);
     llvm::Value *coerceFromABI(llvm::Value *abiValue, llvm::Type *structType);
+
+    std::optional<CGSymbol> tryGetCGSymbol(SymbolId symbol) {
+        auto it = m_symbol_map.find(symbol);
+        if (it != m_symbol_map.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
 };
 #endif

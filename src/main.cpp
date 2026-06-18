@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "utils.h"
 #include "compiler.h"
 
 #include <argparse/argparse.hpp>
@@ -285,7 +286,7 @@ int main(int argc, char **argv) {
     std::shared_ptr<Backend> codegen = compileModule(inputFilepath, options);
 
     if (codegen == nullptr) {
-        std::cerr << "Compilation failed.\n";
+        std::cerr << colorString("Compilation failed.\n", Color::Red);
         return 1;
     }
 

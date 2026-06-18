@@ -71,7 +71,6 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
     }
     if (!typeChecker->ok()) {
         std::cout << typeChecker->errors().size() << " errors during type checking:\n";
-        // typeChecker->globalSymbols().dump();
         for (const auto &err : typeChecker->errors()) {
             prettyError(err.node != nullptr ? err.node->line : -1,
                         err.node != nullptr ? err.node->col : -1,
@@ -105,14 +104,13 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
     for (std::string path : order) {
         auto module = moduleResolver.getModule(path);
         // std::cout << "Generating code for module: " << path << "\n";
-        codegen->generate(module);
+        codegen->generate(module, &typeChecker->globalSymbols());
         // Check for errors after each module
         if (!codegen->ok()) {
-            std::cerr << "In module '" << module->canon_name << "'\n";
             std::cerr << codegen->errors().size() << " errors during code generation:\n";
             for (const auto &err : codegen->errors()) {
                 prettyError(err.node() ? err.node()->line : -1,
-                            err.node() ? err.node()->col : -1, err.what(), module->source_code, module->canon_name);
+                            err.node() ? err.node()->col : -1, err.what(), module->source_code, module->name);
             }
             has_errors = true;
         }

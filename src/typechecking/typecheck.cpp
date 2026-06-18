@@ -9,6 +9,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 
 // TODO: FFS don't do this, but it's the easiest way to solve the conflict between the when blocks and the module resolver.
 void rebuildModuleMetadata(const std::shared_ptr<Module> &module) {
@@ -66,13 +67,13 @@ TypeChecker::TypeChecker(CompilerOptions options) : m_const_eval(*new ConstEvalu
 
     m_expected_return_type = nullptr;
     m_errors.clear();
-    m_scopes.clear();
+    m_mod_scopes.clear();
     m_templates.clear();
     m_current_generic_types.clear();
     m_struct_methods.clear();
     compilerOptions = options;
 
-    pushScope();
+    // pushScope();
 }
 
 SymbolTable &TypeChecker::symbolTable() {
@@ -83,62 +84,74 @@ const SymbolTable &TypeChecker::symbolTable() const {
     return symbol_table.lookupModule(current_module->id)->first;
 }
 
-std::shared_ptr<Type> TypeChecker::lookupNamedType(const std::string &name) const {
-    if (m_scopes.empty())
-        goto error;
-
-    {
-        SymbolId id = m_scopes.front().find(name);
-        if (id == INVALID_SYMBOL_ID)
-            goto error;
-        auto entry = symbolTable().get(id);
-        if (!entry || !entry->type)
-            goto error;
-        return entry->type;
+std::shared_ptr<Type> TypeChecker::lookupNamedType(const std::string &name) {
+    if (currentScopes().empty()) {
+        throw std::runtime_error("No current scopes in lookupNamedType");
     }
-
-error:
+    // Iteratively check scopes from innermost to outermost
+    for (auto it = currentScopes().rbegin(); it != currentScopes().rend(); ++it) {
+        auto &scope = *it;
+        SymbolId id = scope.find(name);
+        if (id != INVALID_SYMBOL_ID) {
+            auto entry = symbolTable().get(id);
+            if (entry) {
+                return (*entry).type;
+            }
+        }
+    }
     return nullptr;
 }
 
-std::shared_ptr<StructType> TypeChecker::lookupStructType(const std::string &name) const {
+std::optional<Symbol> TypeChecker::lookupNamedSymbol(const std::string &name) {
+    if (currentScopes().empty()) {
+        throw std::runtime_error("No current scopes in lookupNamedSymbol");
+    }
+    // Iteratively check scopes from innermost to outermost
+    for (auto it = currentScopes().rbegin(); it != currentScopes().rend(); ++it) {
+        auto &scope = *it;
+        SymbolId id = scope.find(name);
+        if (id != INVALID_SYMBOL_ID) {
+            return symbol_table.lookupSymbol(id);
+        }
+    }
+    return std::nullopt;
+}
+
+std::shared_ptr<StructType> TypeChecker::lookupStructType(const std::string &name) {
     return std::dynamic_pointer_cast<StructType>(lookupNamedType(name));
 }
 
-std::shared_ptr<UnionType> TypeChecker::lookupUnionType(const std::string &name) const {
+std::shared_ptr<UnionType> TypeChecker::lookupUnionType(const std::string &name) {
     return std::dynamic_pointer_cast<UnionType>(lookupNamedType(name));
 }
 
-std::shared_ptr<EnumType> TypeChecker::lookupEnumType(const std::string &name) const {
+std::shared_ptr<EnumType> TypeChecker::lookupEnumType(const std::string &name) {
     return std::dynamic_pointer_cast<EnumType>(lookupNamedType(name));
 }
 
-std::shared_ptr<FunctionType> TypeChecker::lookupFunctionType(const std::string &name) const {
+std::shared_ptr<FunctionType> TypeChecker::lookupFunctionType(const std::string &name) {
     return std::dynamic_pointer_cast<FunctionType>(lookupNamedType(name));
 }
 
-void TypeChecker::pushScope() { m_scopes.emplace_back(); }
+void TypeChecker::pushScope() { currentScopes().emplace_back(); }
 
 void TypeChecker::popScope() {
-    if (!m_scopes.empty()) {
-        // Remove all symbols in the current scope from the symbol table
-        for (const auto &entry : m_scopes.back().symbols) {
-            symbolTable().remove(entry.second);
-        }
-        m_scopes.pop_back();
+    if (!currentScopes().empty()) {
+        currentScopes().pop_back();
     }
 }
 
-bool TypeChecker::insertSymbol(const std::string &name,
+bool TypeChecker::insertSymbol(const std::string &name, SymbolKind kind,
                                std::shared_ptr<Type> t, ASTNodePtr decl, SymbolId *id_out) {
-    if (m_scopes.empty())
+    if (currentScopes().empty())
         pushScope();
-    auto &top = m_scopes.back();
+
+    auto &top = currentScopes().back();
 
     if (top.find(name) != INVALID_SYMBOL_ID)
         return false;
 
-    SymbolId id = symbolTable().insert({name, t, decl});
+    SymbolId id = symbolTable().insert({kind, name, t, decl});
 
     top.symbols[name] = id;
     if (id_out)
@@ -146,38 +159,12 @@ bool TypeChecker::insertSymbol(const std::string &name,
     return true;
 }
 
-SymbolId TypeChecker::insertGlobalSymbol(const std::string &name,
-                                         std::shared_ptr<Type> t, ASTNodePtr decl) {
-    if (m_scopes.empty())
-        pushScope();
-    auto &global = m_scopes.front();
-    if (global.find(name) != INVALID_SYMBOL_ID)
-        return false;
-
-    SymbolId id = symbolTable().insert({name, t, decl});
-    global.symbols[name] = id;
-    return id;
-}
-
-SymbolId TypeChecker::insertTemplateSymbol(const std::string &name,
-                                           const std::shared_ptr<Declaration> &decl) {
-    if (m_scopes.empty())
-        pushScope();
-    auto &global = m_scopes.front();
-    if (global.find(name) != INVALID_SYMBOL_ID)
-        return global.find(name);
-
-    SymbolId id = symbolTable().insert({name, nullptr, decl});
-    global.symbols[name] = id;
-    return id;
-}
-
 void TypeChecker::ensureGlobalVariableVisible(const std::string &name) {
-    if (!current_module || !current_module->ast || m_scopes.empty()) {
+    if (!current_module || !current_module->ast || currentScopes().empty()) {
         return;
     }
 
-    if (m_scopes.front().find(name) != INVALID_SYMBOL_ID) {
+    if (currentScopes().front().find(name) != INVALID_SYMBOL_ID) {
         return;
     }
 
@@ -187,23 +174,23 @@ void TypeChecker::ensureGlobalVariableVisible(const std::string &name) {
             continue;
         }
 
-        auto saved_scopes = m_scopes;
-        while (m_scopes.size() > 1) {
-            m_scopes.pop_back();
+        auto saved_scopes = currentScopes();
+        while (currentScopes().size() > 1) {
+            currentScopes().pop_back();
         }
         try {
             checkVariableDeclaration(vd);
         } catch (...) {
-            m_scopes = std::move(saved_scopes);
+            currentScopes() = std::move(saved_scopes);
             throw;
         }
-        m_scopes = std::move(saved_scopes);
+        currentScopes() = std::move(saved_scopes);
         return;
     }
 }
 
-std::optional<SymbolId> TypeChecker::lookupSymbolInScope(const std::string &name) const {
-    for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
+std::optional<SymbolId> TypeChecker::lookupSymbolInScope(const std::string &name) {
+    for (auto it = currentScopes().rbegin(); it != currentScopes().rend(); ++it) {
         SymbolId id = it->find(name);
 
         if (id != INVALID_SYMBOL_ID)
@@ -459,7 +446,6 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
         if (resolved) {
             return resolved;
         }
-        // throw TypeCheckError(current_module, node, "resolveType: unknown struct type: " + st->name);
         return st; // unknown struct type
     }
     if (auto pt = std::dynamic_pointer_cast<PointerType>(t)) {
@@ -506,11 +492,11 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                 }
                 cur_mod = maybe->second;
             }
-            auto id = cur_mod->symbols.lookup(qt->type_name);
-            if (!id) {
-                throw TypeCheckError(current_module, node, "Could not resolve type '" + qt->type_name + "' in module '" + cur_mod->canon_name + "' for qualified type '" + qt->str() + "'");
+            auto resolved_id = m_mod_scopes[cur_mod->id].front().find(qt->type_name);
+            if (resolved_id == INVALID_SYMBOL_ID) {
+                throw TypeCheckError(current_module, node, "Could not resolve type '" + qt->type_name + "' in module '" + cur_mod->name + "'");
             }
-            auto resolved = cur_mod->symbols.get(id);
+            auto resolved = symbol_table.lookupSymbol(resolved_id);
             if (!resolved) {
                 throw TypeCheckError(current_module, node, "Symbol '" + qt->type_name + "' in module '" + cur_mod->canon_name + "' is not a type for qualified type '" + qt->str() + "'");
             }
@@ -595,7 +581,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
             return std::make_shared<TemplateInstanceType>(base_template, resolved_args);
         }
         throw TypeCheckError(current_module,
-                             nullptr,
+                                node,
                              "Template instantiation base type is not a struct: " + base_type->str());
     }
     // primitive types are already resolved
@@ -604,6 +590,10 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
 
 // Entry point
 void TypeChecker::check(std::shared_ptr<Module> module) {
+
+    // auto old_scopes = std::move(currentScopes());
+    // currentScopes() = std::vector<TypeScope>();
+
     if (!module || !module->ast)
         return;
 
@@ -627,6 +617,8 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
     module->typechecking = true;
     current_module = module;
 
+    pushScope();
+
     symbol_table.insertModule(module);
 
     std::vector<std::shared_ptr<StructDeclaration>> struct_decls;
@@ -634,36 +626,39 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
     try {
         for (int i = 0; i < module->ast->declarations.size(); ++i) {
-            // std::cout << "Processing declaration " << module->ast->declarations[i]->str() << "\n\n";
             auto decl = module->ast->declarations[i];
             if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
 
                 // Check if this is a generic struct
                 if (sd->generic_params.size() > 0) {
                     SymbolId tid;
-                    insertSymbol(sd->name, nullptr, sd, &tid);
+                    insertSymbol(sd->name, SymbolKind::Type, nullptr, sd, &tid);
                     m_templates[tid] = sd;
                 } else {
                     // Build a StructType and register
                     auto st = std::make_shared<StructType>(sd->name);
                     st->complete = false;
-                    insertSymbol(sd->name, st, sd);
+                    insertSymbol(sd->name, SymbolKind::Type, st, sd);
                     struct_decls.push_back(sd);
                 }
             } else if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(decl)) {
                 // Build a UnionType and register
                 auto ut = std::make_shared<UnionType>(ud->name);
                 ut->complete = false;
-                insertSymbol(ud->name, ut, ud);
+                insertSymbol(ud->name, SymbolKind::Type, ut, ud);
                 union_decls.push_back(ud);
             } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
                 if (fd->generic_params.size() > 0) {
                     SymbolId tid;
-                    insertSymbol(fd->name, fd->type, fd, &tid);
+                    insertSymbol(fd->name, SymbolKind::Function, fd->type, fd, &tid);
+                    decl->symbol_id = tid;
                     m_templates[tid] = fd;
                 } else {
                     auto ty = std::dynamic_pointer_cast<FunctionType>(resolveType(fd, fd->type));
-                    insertSymbol(fd->name, ty, fd);
+
+                    SymbolId fid;
+                    insertSymbol(fd->name, SymbolKind::Function, ty, fd, &fid);
+                    decl->symbol_id = fid;
                 }
             } else if (auto en = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
                 if (!en->base_type) {
@@ -685,8 +680,11 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     }
                 }
 
+                SymbolId eid;
+                insertSymbol(en->name, SymbolKind::Type, et, en, &eid);
+
+                en->symbol_id = eid;
                 en->inferred_type = et;
-                insertSymbol(en->name, et, en);
             } else if (auto im = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
                 auto imported_module = module->imports[im->alias];
 
@@ -694,14 +692,18 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     throw TypeCheckError(current_module, im, "Failed to resolve imported module: " + im->alias);
                 }
 
-                symbol_table.insertModule(imported_module);
+                if (!imported_module->typechecked) {
+                    symbol_table.insertModule(imported_module);
 
-                auto og_module = current_module;
+                    auto og_module = current_module;
+                    // Typecheck module
+                    check(imported_module);
+                    if (!ok()) {
+                        return;
+                    }
 
-                // Typecheck module
-                check(imported_module);
-
-                current_module = og_module;
+                    current_module = og_module;
+                }
             } else if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
                 std::shared_ptr<Type> alias_type = ta->aliased_type;
                 if (ta->generic_params.empty()) {
@@ -711,8 +713,9 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     throw TypeCheckError(current_module, ta, "Type alias " + ta->name + " has unknown aliased type");
                     return;
                 }
-                insertSymbol(ta->name, alias_type, ta);
-                // }
+                SymbolId aid;
+                insertSymbol(ta->name, SymbolKind::Type, alias_type, ta, &aid);
+                ta->symbol_id = aid;
             } else if (auto wb = std::dynamic_pointer_cast<WhenBlock>(decl)) {
                 auto cond_lit_opt = m_const_eval.evaluateExpression(wb->condition);
                 if (!m_const_eval.ok()) {
@@ -751,7 +754,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
         for (const auto &decl : module->ast->declarations) {
             if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(decl)) {
-                auto global_symbol = m_scopes.front().find(vd->name);
+                auto global_symbol = currentScopes().front().find(vd->name);
                 if (global_symbol != INVALID_SYMBOL_ID) {
                     auto entry = symbolTable().get(global_symbol);
                     if (entry && entry->decl == vd) {
@@ -799,6 +802,12 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
     module->typechecking = false;
     module->typechecked = true;
+    // while (currentScopes().size() > 1) {
+    //     popScope();
+    // }
+    // currentScopes() = std::move(old_scopes);
+    // Dump whole symbol table for debugging
+    // symbol_table.dump();
 }
 
 void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
@@ -809,8 +818,8 @@ void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
         return;
     }
     if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(node)) {
-        if (!m_scopes.empty()) {
-            auto global_symbol = m_scopes.front().find(vd->name);
+        if (!currentScopes().empty()) {
+            auto global_symbol = currentScopes().front().find(vd->name);
             if (global_symbol != INVALID_SYMBOL_ID) {
                 auto entry = symbolTable().get(global_symbol);
                 if (entry && entry->decl == vd) {
@@ -818,7 +827,7 @@ void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
                 }
             }
         }
-        if (m_scopes.size() != 1) {
+        if (currentScopes().size() != 1) {
             return;
         }
         checkVariableDeclaration(vd);
@@ -864,6 +873,7 @@ void TypeChecker::checkStructDeclaration(
         st->fields = std::move(fields);
         st->methods = sd->methods;
         st->complete = true;
+        std::cout << "Completed struct type: " << st->str() << std::endl;
     } else {
         throw TypeCheckError(current_module, sd, "Internal error: struct " + sd->name + " not found in map");
     }
@@ -905,10 +915,12 @@ void TypeChecker::checkFunctionDeclaration(
         std::string pname =
             (i < fn->param_names.size() ? fn->param_names[i]
                                         : ("arg" + std::to_string(i)));
-        if (!insertSymbol(pname, fn->type->params[i], fn)) {
+        SymbolId psid;
+        if (!insertSymbol(pname, SymbolKind::Variable, fn->type->params[i], fn, &psid)) {
             throw TypeCheckError(current_module, fn,
                                  "Duplicate parameter name " + pname + " in function " + fn->name);
         }
+        fn->param_symbols.push_back(psid);
     }
 
     m_expected_return_type = resolveType(fn, fn->type->ret);
@@ -928,10 +940,12 @@ void TypeChecker::checkVariableDeclaration(
     if (var->var_type)
         var->var_type = resolveType(var, var->var_type);
 
+    SymbolId symbol_id = INVALID_SYMBOL_ID;
     if (!var->initializer) {
-        if (!insertSymbol(name, var->var_type, var)) {
+        if (!insertSymbol(name, SymbolKind::Variable, var->var_type, var, &symbol_id)) {
             throw TypeCheckError(current_module, var, "Duplicate variable declaration: " + name);
         }
+        var->symbol_id = symbol_id;
         return;
     }
 
@@ -1023,11 +1037,13 @@ void TypeChecker::checkVariableDeclaration(
         m_errors.emplace_back(e);
         // Even if initializer has type errors, we still want to insert the variable into the symbol table, so we don't return early here
     }
-    if (!insertSymbol(name, var->var_type, var)) {
+    if (!insertSymbol(name, SymbolKind::Variable, var->var_type, var, &symbol_id)) {
         throw TypeCheckError(current_module,
                              var,
                              "Duplicate variable declaration: " + name);
     }
+
+    var->symbol_id = symbol_id;
 }
 
 void TypeChecker::handleArrayLiteralAssignment(
@@ -1476,7 +1492,6 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
     }
     if (auto ta = std::dynamic_pointer_cast<TemplateInstantiation>(expr)) {
         std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> pair = inferTemplateInstantiation(ta);
-        // std::cout << "Inferred template instantiation type: " << (pair.first ? pair.first->str() : "null") << std::endl;
         expr = pair.second;
         return pair.first;
     }
@@ -1490,7 +1505,6 @@ std::shared_ptr<Module> TypeChecker::resolveModulePath(std::shared_ptr<ASTNode> 
     std::shared_ptr<Module> current = current_module;
     for (const auto &part : path) {
         auto it = current->imports.find(part);
-        std::cout << "Resolving module path: " << part << " in module " << current->canon_name << std::endl;
         if (it == current->imports.end()) {
             throw TypeCheckError(current_module, node, "Module '" + part + "' not found in imports of module '" + current->canon_name + "'");
         }
@@ -1500,42 +1514,61 @@ std::shared_ptr<Module> TypeChecker::resolveModulePath(std::shared_ptr<ASTNode> 
 }
 
 std::shared_ptr<Type> TypeChecker::inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma) {
-    if (ma->module_path.size() == 0) {
-        if (ma->member_name.empty()) {
-            throw TypeCheckError(current_module, ma, "Invalid module access with empty module path and member name");
-        }
-        if (ma->member_name == "") {
-            throw TypeCheckError(current_module, ma, "Invalid module access with empty member name");
-        }
-        if (lookupSymbolInScope(ma->member_name) == std::nullopt) {
-            throw TypeCheckError(current_module, ma, "Unknown symbol in imported module: " + ma->member_name);
-        }
-        return inferVarAccess(std::make_shared<VarAccess>(ma->member_name));
-    }
-
+    // if (ma->module_path.size() == 0) {
+    //     if (ma->member_name.empty()) {
+    //         throw TypeCheckError(current_module, ma, "Invalid module access with empty module path and member name");
+    //     }
+    //     if (ma->member_name == "") {
+    //         throw TypeCheckError(current_module, ma, "Invalid module access with empty member name");
+    //     }
+    //     if (lookupSymbolInScope(ma->member_name) == std::nullopt) {
+    //         throw TypeCheckError(current_module, ma, "Unknown symbol in imported module: " + ma->member_name);
+    //     }
+    //     auto og_mod = current_module;
+    //     current_module = mod;
+    //     auto t = inferVarAccess(std::make_shared<VarAccess>(ma->member_name));
+    //     current_module = og_mod;
+    //     return t;
+    // }
+    //
     auto mod = resolveModulePath(ma, ma->module_path);
     if (ma->member_name.empty()) {
         throw TypeCheckError(current_module, ma, "Invalid module access with empty member name");
     }
     auto it = mod->exports.find(ma->member_name);
-    // Print all exports of the module for debugging
-    // std::cout << "Module '" << mod->canon_name << "' exports:" << std::endl;
-    // for (const auto &export_pair : mod->exports) {
-    //     std::cout << "  " << export_pair.first << ": " << export_pair.second->str() << std::endl;
-    // }
+
     if (it == mod->exports.end()) {
-        // symbol_table.dump();
         throw TypeCheckError(current_module, ma, "Unknown symbol in imported module: " + ma->member_name);
     }
     if (mod->typechecked == false) {
         throw TypeCheckError(current_module, ma, "Module '" + mod->canon_name + "' has not been type-checked yet");
     }
     auto exported = it->second;
-    auto og_mod = current_module;
-    current_module = mod;
-    auto t = inferVarAccess(std::make_shared<VarAccess>(ma->member_name));
-    current_module = og_mod;
-    return t;
+    // auto og_mod = current_module;
+    // current_module = mod;
+    // auto va = std::make_shared<VarAccess>(ma->member_name);
+    // va->line = ma->line;
+    // va->col = ma->col;
+    // std::shared_ptr<Type> t;
+
+    auto sym_id = m_mod_scopes[mod->id].front().find(ma->member_name);
+
+    if (sym_id == INVALID_SYMBOL_ID) {
+        throw TypeCheckError(current_module, ma, "Symbol '" + ma->member_name + "' not found in module '" + mod->canon_name + "'");
+    }
+
+    auto s = symbol_table.lookupSymbol(sym_id);
+
+    if (!s) {
+        // symbol_table.dump();
+        throw TypeCheckError(current_module, ma, "Symbol " + ma->member_name + " not found in module '" + mod->name + "'");
+    }
+    Symbol sym = *s;
+
+    ma->symbol_id = sym_id;
+    ma->inferred_type = sym.type;
+
+    return sym.type;
 }
 
 std::shared_ptr<Type>
@@ -1557,27 +1590,32 @@ TypeChecker::inferTypeCast(const std::shared_ptr<TypeCast> &tc) {
     throw TypeCheckError(current_module, tc, "Invalid type cast from " + typeName(ot) + " to " + tc->target_type->str());
 }
 
-std::shared_ptr<Type>
-TypeChecker::inferVarAccess(const std::shared_ptr<VarAccess> &v) {
+std::shared_ptr<Type> TypeChecker::inferVarAccess(std::shared_ptr<VarAccess> &v) {
     auto maybe = lookupSymbolInScope(v->name);
-    if (!maybe) {
+    if (maybe == std::nullopt) {
         ensureGlobalVariableVisible(v->name);
         maybe = lookupSymbolInScope(v->name);
     }
-    if (!maybe) {
+    // if (maybe == std::nullopt) {
+    //     maybe = symbol_table.lookupSymbolId(current_module->id, v->name);
+    // }
+    if (maybe == std::nullopt || maybe == INVALID_SYMBOL_ID) {
         throw TypeCheckError(current_module, v, "Unknown variable: " + v->name);
     }
     auto entry = symbolTable().get(*maybe);
     if (entry && !entry->type) {
         throw TypeCheckError(current_module, v, "Variable has no resolvable type: " + v->name + " (could it be a template?)");
     }
+    if (!entry) {
+        throw TypeCheckError(current_module, v, "Variable not found in symbol table: " + v->name);
+    }
+    v->symbol_id = *maybe;
     v->inferred_type = resolveType(v, entry ? entry->type : nullptr);
     return v->inferred_type;
 }
 
-std::shared_ptr<Type>
-TypeChecker::inferLiteral(const std::shared_ptr<Literal> &lit,
-                          const std::shared_ptr<Type> &expected) {
+std::shared_ptr<Type> TypeChecker::inferLiteral(const std::shared_ptr<Literal> &lit,
+                                                const std::shared_ptr<Type> &expected) {
     auto preType = resolveType(lit, lit->lit_type);
     if (!preType) {
         throw TypeCheckError(current_module, lit, "Unknown literal type");
@@ -1904,8 +1942,14 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
             throw TypeCheckError(current_module, mc, "Method call on non-struct type: " + typeName(bt));
         }
     }
+    st = std::dynamic_pointer_cast<StructType>(resolveType(mc, st));
     auto it = st->methods.find(mc->method);
     if (it == st->methods.end()) {
+        std::cout << "Available methods on " << typeName(st) << ": ";
+        for (const auto &m : st->methods) {
+            std::cout << m.first << " ";
+        }
+        std::cout << std::endl;
         throw TypeCheckError(current_module, mc, "Struct " + st->name + " has no method " + mc->method);
     }
     auto ftype = std::dynamic_pointer_cast<FunctionType>(resolveType(mc, it->second->type));
@@ -1998,7 +2042,6 @@ std::shared_ptr<Type> TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall>
     }
 
     if (containsGenericType(ftype)) {
-        std::cout << "Attempting to infer generic function call for " << typeName(ft) << "\n";
         tryInferGenericFunctionCall(call, ftype); // Destructive, will modify call in-place if successful
     }
 
@@ -2123,17 +2166,19 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
         }
         auto mt = std::dynamic_pointer_cast<ModuleType>(bt);
         if (mt) {
-            auto maybe_id = symbol_table.lookupModule(mt->module_id)->second->symbols.lookup(fa->field);
+            auto maybe_id = m_mod_scopes[mt->module_id].front().find(fa->field);
+            // auto maybe_id = symbol_table.lookupModule(mt->module_id)->second->symbols.find(fa->field);
             if (maybe_id == INVALID_SYMBOL_ID) {
                 throw TypeCheckError(current_module, fa, "Unknown symbol in module " + mt->name + ": " + fa->field);
             }
             auto id = maybe_id;
-            auto sym = symbol_table.lookupModule(mt->module_id)->second->symbols.get(id);
-            if (!sym) {
+            auto s = symbol_table.lookupModule(mt->module_id)->second->symbols.get(id);
+            if (!s) {
                 throw TypeCheckError(current_module, fa, "Failed to lookup symbol in module " + mt->name + ": " + fa->field);
             }
-            fa->inferred_type = resolveType(fa, sym->type);
-            return sym->type;
+            Symbol sym = *s;
+            fa->inferred_type = resolveType(fa, sym.type);
+            return sym.type;
         }
         throw TypeCheckError(current_module, fa, "Field access on disallowed type: " + typeName(bt));
     }

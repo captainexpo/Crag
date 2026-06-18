@@ -28,7 +28,7 @@ when @target_os == "macos"{
     pub let stdout: *File = __stdoutp;
 }
 
-when @target_os == "linux"{
+when @target_os == "linux" {
     pub extern const stderr: *File;
     pub extern const stdout: *File;
 }
