@@ -1,0 +1,48 @@
+// NAME: Native str type
+// DESC: Tests the native str type: literals, concatenation, indexing, .len, .ptr, equality
+// BEGIN CODE
+extern fn printf(fmt: *const u8, ...) -> i32;
+
+fn main() -> i32 {
+    // str literal and .len
+    let greeting: str = "hello";
+    printf("len=%d\n", greeting.len);
+
+    // indexing
+    let ch: u8 = greeting[1];
+    printf("ch=%c\n", ch);
+
+    // concatenation
+    let a: str = "foo";
+    let b: str = "bar";
+    let c: str = a + b;
+    printf("%s\n", c);
+    printf("concat_len=%d\n", c.len);
+
+    // equality
+    let x: str = "abc";
+    let y: str = "abc";
+    let z: str = "xyz";
+    if (x == y) {
+        printf("equal\n");
+    }
+    if (x != z) {
+        printf("not_equal\n");
+    }
+
+    // coercion to *const u8
+    let raw: *const u8 = greeting as *const u8;
+    printf("%s\n", raw);
+
+    return 0;
+}
+// END CODE
+// BEGIN EXPECT
+//len=5
+//ch=e
+//foobar
+//concat_len=6
+//equal
+//not_equal
+//hello
+// END EXPECT

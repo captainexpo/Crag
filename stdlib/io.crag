@@ -1,8 +1,84 @@
 import "./libc/stdio.crag" as cstdio;
 import "./libc/stdlib.crag" as cstdlib;
-import "./libc/string.crag" as cstring;
 
-pub fn panic(msg: *const u8) -> void  {
+pub fn panic(msg: *const u8) -> void {
     cstdio.fprintf(cstdio.stderr, "PANIC: %s\n", msg);
     cstdlib.abort();
+}
+
+// --- stdout ---
+
+pub fn print(s: str) -> void {
+    cstdio.printf("%s", s);
+}
+
+pub fn println(s: str) -> void {
+    cstdio.puts(s);
+}
+
+pub fn print_int(n: i64) -> void {
+    cstdio.printf("%lld", n);
+}
+
+pub fn println_int(n: i64) -> void {
+    cstdio.printf("%lld\n", n);
+}
+
+pub fn print_uint(n: u64) -> void {
+    cstdio.printf("%llu", n);
+}
+
+pub fn println_uint(n: u64) -> void {
+    cstdio.printf("%llu\n", n);
+}
+
+pub fn print_float(f: f64) -> void {
+    cstdio.printf("%g", f);
+}
+
+pub fn println_float(f: f64) -> void {
+    cstdio.printf("%g\n", f);
+}
+
+pub fn print_bool(b: bool) -> void {
+    if (b) {
+        cstdio.printf("true");
+    } else {
+        cstdio.printf("false");
+    }
+}
+
+pub fn println_bool(b: bool) -> void {
+    if (b) {
+        cstdio.puts("true");
+    } else {
+        cstdio.puts("false");
+    }
+}
+
+pub fn print_char(c: u8) -> void {
+    cstdio.putchar(c as i32);
+}
+
+pub fn println_char(c: u8) -> void {
+    cstdio.putchar(c as i32);
+    cstdio.putchar(10);
+}
+
+pub fn newline() -> void {
+    cstdio.putchar(10);
+}
+
+// --- stderr ---
+
+pub fn eprint(s: str) -> void {
+    cstdio.fprintf(cstdio.stderr, "%s", s);
+}
+
+pub fn eprintln(s: str) -> void {
+    cstdio.fprintf(cstdio.stderr, "%s\n", s);
+}
+
+pub fn eprintln_int(n: i64) -> void {
+    cstdio.fprintf(cstdio.stderr, "%lld\n", n);
 }
