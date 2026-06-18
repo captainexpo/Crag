@@ -292,6 +292,8 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
         return std::make_shared<Boolean>();
     if (val == "void")
         return std::make_shared<Void>();
+    if (val == "str")
+        return std::make_shared<StringType>();
     auto find = std::find(current_generic_params.begin(), current_generic_params.end(), val);
     if (find != current_generic_params.end())
         return std::make_shared<GenericType>(std::distance(current_generic_params.begin(), find), val);
@@ -807,10 +809,8 @@ std::shared_ptr<Expression> Parser::parse_nud() {
             return expr;
         }
         case TokenType::STRING: {
-            auto ty = std::make_shared<PointerType>(
-                std::make_shared<U8>(), false);
             auto lit = std::make_shared<Literal>(
-                t.value, ty);
+                t.value, std::make_shared<StringType>());
             expr = lit;
             expr->line = t.line;
             expr->col = t.column;

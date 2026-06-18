@@ -49,6 +49,8 @@ enum class TypeKind {
     Qualified, // For unknown types from imported modules
     TemplateInstanceType,
 
+    Str,
+
     // Categorical types
     Numeric,
     Any,
@@ -408,6 +410,17 @@ struct NullType : Type {
     }
     std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<NullType>(*this);
+    }
+};
+
+struct StringType : Type {
+    TypeKind kind() const override { return TypeKind::Str; }
+    std::string str() const override { return "str"; }
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        return other->kind() == TypeKind::Str;
+    }
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
+        return std::make_shared<StringType>(*this);
     }
 };
 

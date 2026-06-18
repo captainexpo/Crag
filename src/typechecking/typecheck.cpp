@@ -255,6 +255,13 @@ bool TypeChecker::canImplicitCast(const std::shared_ptr<Type> &from, const std::
         }
     }
 
+    // str coerces to *u8, *const u8, or *void (pointer decay for C interop)
+    if (from_tk == TypeKind::Str && to_tk == TypeKind::Pointer) {
+        auto to_ptr = dynamic_cast<PointerType *>(to.get());
+        if (to_ptr && (to_ptr->base->kind() == TypeKind::U8 || to_ptr->base->kind() == TypeKind::Void))
+            return true;
+    }
+
     return false;
 }
 bool canExplicitCast(const std::shared_ptr<Type> &from,
@@ -285,6 +292,10 @@ bool canExplicitCast(const std::shared_ptr<Type> &from,
     if (from_tk == TypeKind::Pointer && to->isInteger())
         return true;
     if (from->isInteger() && to_tk == TypeKind::Pointer)
+        return true;
+
+    // str can be explicitly cast to any pointer (decay to data pointer)
+    if (from_tk == TypeKind::Str && to_tk == TypeKind::Pointer)
         return true;
 
     return false;
@@ -1769,6 +1780,20 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
     if (!lt || !rt)
         throw TypeCheckError(current_module, bin, "Failed to infer types of binary operation operands");
 
+    // str concatenation
+    if (bin->op == "+" && lt->kind() == TypeKind::Str && rt->kind() == TypeKind::Str) {
+        auto s = std::make_shared<StringType>();
+        bin->inferred_type = s;
+        return s;
+    }
+
+    // str comparison
+    if ((bin->op == "==" || bin->op == "!=") && lt->kind() == TypeKind::Str && rt->kind() == TypeKind::Str) {
+        auto b = std::make_shared<Boolean>();
+        bin->inferred_type = b;
+        return b;
+    }
+
     // simple numeric ops
     if (bin->op == "+" || bin->op == "-" || bin->op == "*" || bin->op == "/" || bin->op == "%" ||
         bin->op == "|" || bin->op == "&" || bin->op == "^" || bin->op == "<<" ||
@@ -2154,6 +2179,19 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
         if (arrt) {
             return inferArrayFieldAccess(fa);
         }
+        if (bt->kind() == TypeKind::Str) {
+            if (fa->field == "len") {
+                auto t = std::make_shared<USize>();
+                fa->inferred_type = t;
+                return t;
+            }
+            if (fa->field == "ptr") {
+                auto t = std::make_shared<PointerType>(std::make_shared<U8>(), true);
+                fa->inferred_type = t;
+                return t;
+            }
+            throw TypeCheckError(current_module, fa, "str has no field '" + fa->field + "' (available: len, ptr)");
+        }
         auto ut = std::dynamic_pointer_cast<UnionType>(bt);
         if (ut) {
             // field access on union type: get the field from the union
@@ -2206,6 +2244,11 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
             auto bt = resolveType(oa, pt->base);
             oa->inferred_type = bt;
             return bt;
+        }
+        if (bt->kind() == TypeKind::Str) {
+            auto u8t = std::make_shared<U8>();
+            oa->inferred_type = u8t;
+            return u8t;
         }
         throw TypeCheckError(current_module, oa, "Offset access on non-array/pointer type: " + typeName(bt));
     } else {

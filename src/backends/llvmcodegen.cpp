@@ -543,6 +543,10 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const AS
         return llvm::Type::getDoubleTy(context);
     if (IS_INSTANCE(type, Boolean))
         return llvm::Type::getInt1Ty(context);
+    if (IS_INSTANCE(type, StringType)) {
+        // str is { i8*, i64 } — data pointer + byte length
+        return llvm::StructType::get(context, {llvm::PointerType::getUnqual(context), llvm::Type::getInt64Ty(context)});
+    }
     if (IS_INSTANCE(type, Void))
         return llvm::Type::getVoidTy(context);
     if (IS_INSTANCE(type, USize)) {
@@ -808,6 +812,10 @@ LLVMCodegen::generateCast(const std::shared_ptr<TypeCast> &typeCast,
         return m_builder->CreatePtrToInt(val, destType, "ptrtointtmp");
     } else if (srcType->isIntegerTy() && destType->isPointerTy()) {
         return m_builder->CreateIntToPtr(val, destType, "inttoptrtmp");
+    } else if (typeCast->expr->inferred_type && typeCast->expr->inferred_type->kind() == TypeKind::Str &&
+               destType->isPointerTy()) {
+        // str → *u8: extract the data pointer field
+        return m_builder->CreateExtractValue(val, {0}, "str_to_ptr");
     }
     throw CodeGenError(typeCast, "Unsupported cast from " + llvmTypeToString(srcType) +
                                      " to " + llvmTypeToString(destType) + " at " + typeCast->str());
@@ -1460,6 +1468,58 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
         return generateLogicalOp(left, right, op);
     }
 
+    // str concatenation and comparison
+    if (left->inferred_type && left->inferred_type->kind() == TypeKind::Str) {
+        llvm::Value *lv = generateExpression(left);
+        llvm::Value *rv = generateExpression(right);
+        llvm::StructType *strStructType = llvm::cast<llvm::StructType>(getLLVMType(std::make_shared<StringType>(), left));
+        llvm::Value *lptr = m_builder->CreateExtractValue(lv, {0}, "lstr_ptr");
+        llvm::Value *llen = m_builder->CreateExtractValue(lv, {1}, "lstr_len");
+        llvm::Value *rptr = m_builder->CreateExtractValue(rv, {0}, "rstr_ptr");
+        llvm::Value *rlen = m_builder->CreateExtractValue(rv, {1}, "rstr_len");
+
+        if (op == "+") {
+            // get-or-declare malloc and memcpy lazily
+            auto ptrTy = llvm::PointerType::getUnqual(context);
+            auto i64Ty = llvm::Type::getInt64Ty(context);
+            auto i8Ty = llvm::Type::getInt8Ty(context);
+            llvm::FunctionCallee mallocFn = m_llvm_module->getOrInsertFunction(
+                "malloc", llvm::FunctionType::get(ptrTy, {i64Ty}, false));
+            llvm::FunctionCallee memcpyFn = m_llvm_module->getOrInsertFunction(
+                "memcpy", llvm::FunctionType::get(ptrTy, {ptrTy, ptrTy, i64Ty}, false));
+
+            // new_len = llen + rlen; allocate new_len + 1 bytes
+            llvm::Value *newLen = m_builder->CreateAdd(llen, rlen, "cat_len");
+            llvm::Value *allocLen = m_builder->CreateAdd(newLen, llvm::ConstantInt::get(i64Ty, 1), "alloc_len");
+            llvm::Value *newPtr = m_builder->CreateCall(mallocFn, {allocLen}, "cat_ptr");
+            // copy left, then right
+            m_builder->CreateCall(memcpyFn, {newPtr, lptr, llen});
+            llvm::Value *offsetPtr = m_builder->CreateGEP(i8Ty, newPtr, llen, "rhs_offset");
+            m_builder->CreateCall(memcpyFn, {offsetPtr, rptr, rlen});
+            // null-terminate
+            llvm::Value *nullTerm = m_builder->CreateGEP(i8Ty, newPtr, newLen, "null_term");
+            m_builder->CreateStore(llvm::ConstantInt::get(i8Ty, 0), nullTerm);
+            // build result str struct
+            llvm::Value *result = llvm::UndefValue::get(strStructType);
+            result = m_builder->CreateInsertValue(result, newPtr, {0});
+            result = m_builder->CreateInsertValue(result, newLen, {1});
+            return result;
+        }
+        if (op == "==" || op == "!=") {
+            auto ptrTy = llvm::PointerType::getUnqual(context);
+            auto i64Ty = llvm::Type::getInt64Ty(context);
+            llvm::FunctionCallee memcmpFn = m_llvm_module->getOrInsertFunction(
+                "memcmp", llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {ptrTy, ptrTy, i64Ty}, false));
+            // lengths must match, then memcmp == 0
+            llvm::Value *lenEq = m_builder->CreateICmpEQ(llen, rlen, "len_eq");
+            llvm::Value *cmpResult = m_builder->CreateCall(memcmpFn, {lptr, rptr, llen}, "memcmp_res");
+            llvm::Value *bytesEq = m_builder->CreateICmpEQ(cmpResult, llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), "bytes_eq");
+            llvm::Value *eq = m_builder->CreateAnd(lenEq, bytesEq, "str_eq");
+            return op == "==" ? eq : m_builder->CreateNot(eq, "str_ne");
+        }
+        throw CodeGenError(left, "Unsupported operator on str type: " + op);
+    }
+
     llvm::Value *l = nullptr;
     if (op == "=") {
         l = generateAddress(left);
@@ -1859,6 +1919,21 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
         } else {
             throw CodeGenError(lit, "Unsupported pointer literal value type");
         }
+    } else if (IS_INSTANCE(lit->inferred_type, StringType)) {
+        // str literal: create global constant bytes, return { ptr, len } struct
+        auto strVal = tryGetConstValue<std::string>(lit);
+        auto strName = "g" + std::to_string(globalVals++);
+        auto strType = llvm::ArrayType::get(llvm::Type::getInt8Ty(context), strVal.size() + 1);
+        auto strConstant = llvm::ConstantDataArray::getString(context, strVal, true);
+        auto globalStr = new llvm::GlobalVariable(
+            *m_llvm_module, strType, true, llvm::GlobalValue::PrivateLinkage,
+            strConstant, strName);
+        llvm::Constant *zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
+        llvm::Constant *indices[] = {zero, zero};
+        llvm::Constant *ptr = llvm::ConstantExpr::getGetElementPtr(strType, globalStr, indices, true);
+        llvm::Constant *len = llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), strVal.size());
+        llvm::StructType *strStructType = llvm::cast<llvm::StructType>(getLLVMType(std::make_shared<StringType>(), lit));
+        return llvm::ConstantStruct::get(strStructType, {ptr, len});
     } else if (IS_INSTANCE(lit->inferred_type, NullType)) {
         return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(
             getLLVMType(std::make_shared<PointerType>(std::make_shared<Void>()), lit)));
@@ -2226,6 +2301,20 @@ llvm::Value *LLVMCodegen::generateOffsetAccess(
     if (offsetAccess->base->inferred_type->kind() == TypeKind::Array) {
         return generateArrayAccess(offsetAccess, loadValue);
     }
+    if (offsetAccess->base->inferred_type->kind() == TypeKind::Str) {
+        llvm::Value *strVal = generateExpression(std::static_pointer_cast<Expression>(offsetAccess->base));
+        llvm::Value *ptr = m_builder->CreateExtractValue(strVal, {0}, "str_ptr");
+        llvm::Value *index = generateExpression(offsetAccess->index);
+        if (index->getType() != llvm::Type::getInt64Ty(context))
+            index = m_builder->CreateZExt(index, llvm::Type::getInt64Ty(context), "idx_ext");
+        if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
+            llvm::Value *len = m_builder->CreateExtractValue(strVal, {1}, "str_len");
+            llvm::Value *inBounds = m_builder->CreateICmpULT(index, len, "idx_in_bounds");
+            conditionOrPanic(inBounds, OutOfBounds, offsetAccess->line, offsetAccess->col);
+        }
+        llvm::Value *gep = m_builder->CreateGEP(llvm::Type::getInt8Ty(context), ptr, index, "str_elem_ptr");
+        return loadValue ? m_builder->CreateLoad(llvm::Type::getInt8Ty(context), gep, "str_byte") : gep;
+    }
 
     llvm::Value *basePtr = generateExpression(
         std::static_pointer_cast<Expression>(offsetAccess->base));
@@ -2296,6 +2385,30 @@ llvm::Value *LLVMCodegen::generateArrayFieldAccess(const std::shared_ptr<FieldAc
     } else {
         throw CodeGenError(fieldAccess, "Unknown field on array: " + fieldAccess->field);
     }
+}
+
+llvm::Value *LLVMCodegen::generateStringFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
+    bool baseIsAddressable = isLValue(fieldAccess->base);
+    llvm::StructType *strStructType = llvm::cast<llvm::StructType>(getLLVMType(std::make_shared<StringType>(), fieldAccess->base));
+
+    if (baseIsAddressable) {
+        llvm::Value *basePtr = generateAddress(fieldAccess->base);
+        if (fieldAccess->field == "len") {
+            auto gep = m_builder->CreateStructGEP(strStructType, basePtr, 1, "str_len_ptr");
+            return loadValue ? m_builder->CreateLoad(llvm::Type::getInt64Ty(context), gep, "str_len") : gep;
+        }
+        if (fieldAccess->field == "ptr") {
+            auto gep = m_builder->CreateStructGEP(strStructType, basePtr, 0, "str_ptr_ptr");
+            return loadValue ? m_builder->CreateLoad(llvm::PointerType::getUnqual(context), gep, "str_ptr") : gep;
+        }
+    } else {
+        llvm::Value *strVal = generateExpression(fieldAccess->base);
+        if (fieldAccess->field == "len")
+            return m_builder->CreateExtractValue(strVal, {1}, "str_len");
+        if (fieldAccess->field == "ptr")
+            return m_builder->CreateExtractValue(strVal, {0}, "str_ptr");
+    }
+    throw CodeGenError(fieldAccess, "Unknown field on str: " + fieldAccess->field);
 }
 
 llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
@@ -2405,6 +2518,8 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
         return generateArrayFieldAccess(fieldAccess, loadValue);
     } else if (fieldAccess->base->inferred_type->kind() == TypeKind::ErrorUnion) {
         return generateErrorUnionFieldAccess(fieldAccess, loadValue);
+    } else if (fieldAccess->base->inferred_type->kind() == TypeKind::Str) {
+        return generateStringFieldAccess(fieldAccess, loadValue);
     }
 
     bool baseIsAddressable = isLValue(fieldAccess->base);

@@ -255,6 +255,7 @@ class LLVMCodegen : public Backend {
 
     llvm::Value *generateErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
     llvm::Value *generateArrayFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
+    llvm::Value *generateStringFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
     llvm::Value *generateOffsetAccess(const std::shared_ptr<OffsetAccess> &offsetAccess,
                                       bool loadValue = true);
     llvm::Value *generateArrayAccess(
