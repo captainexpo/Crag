@@ -1,99 +1,81 @@
-import "libc/libc.crag" as libc;
+import "./libc/string.crag" as cstring;
+import "./libc/stdlib.crag" as cstdlib;
+import "./libc/stdio.crag" as cstdio;
+import "./builtin.crag" as builtin;
 
-pub enum StrError(i32) {
-    ALLOC_ERROR = 1,
-    OUT_OF_BOUNDS,
+pub fn tostring_int(n: i64) -> str {
+    let buf: [32]u8 = {0};
+    cstdio.snprintf(buf.ptr, 32, "%lld", n);
+    return newstr(buf.ptr, cstring.strlen(buf.ptr));
 }
 
-pub struct Str {
-    value: *u8,
-    length: usize,
-    is_heap: bool,
+pub fn tostring_uint(n: u64) -> str {
+    let buf: [32]u8 = {0};
+    cstdio.snprintf(buf.ptr, 32, "%llu", n);
+    return newstr(buf.ptr, cstring.strlen(buf.ptr));
+}
 
-    fn len(self: *Str) -> usize {
-        return self.length;
-    }
+pub fn tostring_float(f: f64) -> str {
+    let buf: [32]u8 = {0};
+    cstdio.snprintf(buf.ptr, 32, "%g", f);
+    return newstr(buf.ptr, cstring.strlen(buf.ptr));
+}
 
-    fn is_empty(self: *Str) -> bool {
-        return self.length == 0;
-    }
-
-    fn is_null(self: *Str) -> bool {
-        return self.value == null;
-    }
-
-    fn c_str(self: *Str) -> *u8 {
-        return self.value;
-    }
-
-    fn at(self: *Str, index: usize) -> u8!StrError {
-        if (index >= self.length) {
-            return! StrError:OUT_OF_BOUNDS;
-        }
-        return self.value[index];
-    }
-
-    fn concat(self: *Str, other: Str) -> u8!StrError {
-        let new_length: usize = self.length + other.length;
-        let new_value: *u8 = libc.stdlib.malloc(new_length + 1) as *u8;
-        if (new_value == null) {
-            return! StrError:ALLOC_ERROR;
-        }
-
-        if (self.value != null) {
-            libc.string.memcpy(new_value as *void, self.value as *void, self.length);
-        }
-        if (other.value != null) {
-            libc.string.memcpy(new_value + self.length as *u8 as *void, other.value as *void, other.length);
-        }
-        new_value[new_length] = 0;
-
-        if (self.is_heap && self.value != null) {
-            libc.stdlib.free(self.value);
-        }
-
-        self.value = new_value;
-        self.length = new_length;
-        return 0;
-    }
-
-    fn substr(self: *Str, start: usize, end: usize) -> Str!StrError{
-        if (start >= self.length || end > self.length || start >= end) {
-            return! StrError:OUT_OF_BOUNDS;
-        }
-
-        let sub_length: usize = end - start;
-        let sub_value: *u8 = libc.stdlib.malloc(sub_length + 1) as *u8;
-        if (sub_value == null) {
-            return! StrError:ALLOC_ERROR;
-        }
-
-        libc.string.memcpy(sub_value as *void, (self.value + start as *u8) as *void, sub_length);
-        sub_value[sub_length] = 0;
-
-        return Str{value: sub_value, length: sub_length, is_heap: true};
-    }
-
-    fn free(self: *Str) -> void {
-        if (self.value != null && self.is_heap) {
-            libc.stdlib.free(self.value);
-            self.value = null;
-            self.length = 0;
-        }
+pub fn tostring_bool(b: bool) -> str {
+    if (b) {
+        return "true";
+    } else {
+        return "false";
     }
 }
 
-pub fn str(c_str: *u8) -> Str {
-    if (c_str == null) {
-        return Str{value: null, length: 0, is_heap: false};
-    }
+pub fn tostring_char(c: u8) -> str {
+    let buf: [2]u8 = {0};
+    buf[0] = c;
+    buf[1] = 0;
+    return newstr(buf.ptr, 1);
+}
 
-    let length: usize = 0;
-    let ptr: *u8 = c_str;
-    while (ptr.* != 0) {
-        length += 1;
-        ptr += 1 as *u8;
-    }
+pub fn tostring_ptr(ptr: *void) -> str {
+    let buf: [32]u8 = {0};
+    cstdio.snprintf(buf.ptr, 24, "%p", ptr);
+    return newstr(buf.ptr, cstring.strlen(buf.ptr));
+}
 
-    return Str{value: c_str, length: length, is_heap: false};
+pub fn tostring<T>(value: T) -> str {
+    when builtin.TypeID:I8 <= typeid(value) && builtin.TypeID:I64 >= typeid(value) {
+        return tostring_int(value as i64);
+    }
+    when builtin.TypeID:U8 <= typeid(value) && builtin.TypeID:USize >= typeid(value) {
+        return tostring_uint(value as u64);
+    }
+    when builtin.TypeID:F32 == typeid(value) || builtin.TypeID:F64 == typeid(value) {
+        return tostring_float(value as f64);
+    }
+    when builtin.TypeID:Bool == typeid(value) {
+        return tostring_bool(value);
+    }
+    when builtin.TypeID:Str == typeid(value) {
+        return value;
+    }
+    when builtin.TypeID:Struct == typeid(value) {
+        // Assume struct has tostring method
+        return value.tostring();
+    }
+    when builtin.TypeID:Pointer == typeid(value) {
+        return tostring_ptr(value as *void);
+    }
+    return "";
+}
+
+pub fn c_str(s: str) -> *const u8 {
+    // Ensure null-terminated, caller owns the memory and must free it
+    let len: usize = s.len;
+    let buffer: *u8 = cstdlib.malloc(len + 1) as *u8;
+    if (buffer == null) {
+        return null;
+    }
+    cstring.memcpy(buffer as *void, s.ptr as *void, len);
+    buffer[len] = 0;
+    return buffer;
 }

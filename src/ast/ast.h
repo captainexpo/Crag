@@ -3,6 +3,7 @@
 // #include "src/module_resolver.h"
 // #include "src/typechecking/typecheck.h"
 
+#include <ios>
 #ifndef AST_H
 #define AST_H
 
@@ -87,6 +88,7 @@ struct ASTVisitor {
     virtual void visit(struct UnaryOperation &) {}
     virtual void visit(struct StructInitializer &) {}
     virtual void visit(struct FunctionDeclaration &) {}
+    virtual void visit(struct ExternDeclaration &) {}
     virtual void visit(struct ExpressionStatement &) {}
     virtual void visit(struct EnumAccess &) {}
     virtual void visit(struct BreakStatement &) {}
@@ -162,6 +164,7 @@ enum class NodeKind {
     TemplateInstantiation,
     ImportDeclaration,
     TypeAliasDeclaration,
+    ExternDeclaration,
     TypeExpression,
     Unknown,
 };
@@ -821,6 +824,35 @@ struct Declaration : virtual ASTNode {
     bool is_pub;
 };
 
+struct ExternDeclaration : Declaration {
+    std::shared_ptr<Declaration> declaration;
+
+    std::optional<std::string> extern_name; // Optional, if not provided, use the declaration's name
+    std::optional<std::string> extern_type; // E.g. "C"
+
+    ExternDeclaration(std::shared_ptr<Declaration> d,
+                      std::optional<std::string> en = std::nullopt,
+                      std::optional<std::string> et = std::nullopt) : declaration(std::move(d)), extern_name(std::move(en)), extern_type(std::move(et)) {};
+
+    std::string str() const override {
+        return "extern "  + (extern_type == std::nullopt ? "" : *extern_type + " ") + (extern_name == std::nullopt ? "" : *extern_name + " ") + declaration->str();
+    }
+
+    NodeKind kind() const override { return NodeKind::ExternDeclaration; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
+};
+
+inline std::shared_ptr<Declaration> unwrapExternDeclaration(const std::shared_ptr<ASTNode> &node) {
+    if (!node) {
+        return nullptr;
+    }
+    if (auto extern_decl = std::dynamic_pointer_cast<ExternDeclaration>(node)) {
+        return extern_decl->declaration;
+    }
+    return std::dynamic_pointer_cast<Declaration>(node);
+}
+
 using ExprPtr = std::shared_ptr<Expression>;
 using StmtPtr = std::shared_ptr<Statement>;
 
@@ -1146,8 +1178,14 @@ struct StructInitializer : public Expression {
 // ----------------- Statements -----------------
 
 struct TypeDecl : Declaration {
+    struct InstantiationCacheEntry {
+        std::shared_ptr<Type> type;
+        uint64_t symbol_id = UINT64_MAX;
+    };
+
     std::string name;
     std::vector<std::string> generic_params;
+    std::unordered_map<std::string, InstantiationCacheEntry> instantiations;
 };
 
 struct Block : public Statement {
@@ -1279,7 +1317,6 @@ struct Assignment : public Statement {
 };
 
 struct FunctionDeclaration : public TypeDecl {
-    bool is_extern;
     std::shared_ptr<FunctionType> type;
     std::vector<std::string> param_names;
     std::shared_ptr<Statement> body;
@@ -1289,14 +1326,14 @@ struct FunctionDeclaration : public TypeDecl {
 
     FunctionDeclaration(std::string n, std::shared_ptr<FunctionType> t,
                         std::vector<std::string> params,
-                        std::shared_ptr<Statement> b, bool ext = false)
+                                                std::shared_ptr<Statement> b)
         : type(std::move(t)), param_names(std::move(params)),
-          body(std::move(b)), is_extern(ext) {
+                    body(std::move(b)) {
         name = std::move(n);
     }
     std::string str() const override {
-        return std::string(is_extern ? "Extern" : "") + "FunctionDeclaration(" + type->str() + ", " + name + "){" +
-               (body ? body->toString() : " ;") + "}";
+                return "FunctionDeclaration(" + type->str() + ", " + name + "){" +
+                             (body ? body->toString() : " ;") + "}";
     }
     NodeKind kind() const override { return NodeKind::FunctionDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
@@ -1310,7 +1347,6 @@ struct VariableDeclaration : Statement, Declaration {
     std::shared_ptr<Type> var_type;
     ASTNodePtr initializer;
     bool is_const = false;
-    bool is_extern = false;
 
     VariableDeclaration(std::string n, std::shared_ptr<Type> t, ASTNodePtr i)
         : name(std::move(n)), var_type(std::move(t)), initializer(std::move(i)) {}
@@ -1390,7 +1426,6 @@ struct EnumDeclaration : public TypeDecl {
 };
 
 struct StructDeclaration : public TypeDecl {
-    bool is_extern = false;
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
     std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
     std::vector<std::string> generic_params;
@@ -1430,7 +1465,6 @@ struct StructDeclaration : public TypeDecl {
 };
 
 struct UnionDeclaration : public TypeDecl {
-    bool is_extern = false;
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
 
     std::pair<std::string, std::shared_ptr<Type>>
@@ -1542,7 +1576,7 @@ struct AsmStmt : public Statement {
 
 struct WhenBlock : public Declaration, public Statement { // Conditional compilation
 
-    ExprPtr condition; // e.g. "windows", "debug", "feature=\"foo\""
+    ExprPtr condition;
     std::vector<ASTNodePtr> body;
 
     WhenBlock(ExprPtr cond, std::vector<ASTNodePtr> b) : condition(std::move(cond)), body(std::move(b)) {}

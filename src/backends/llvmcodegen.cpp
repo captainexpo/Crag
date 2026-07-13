@@ -334,8 +334,13 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module, GlobalSymbolTable *gl
 
     try {
         for (const auto &decl : module->ast->declarations) {
-            if (IS_INSTANCE(decl, StructDeclaration)) {
-                auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl);
+            auto actualDecl = decl;
+            if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+                actualDecl = externDecl->declaration;
+            }
+
+            if (IS_INSTANCE(actualDecl, StructDeclaration)) {
+                auto sd = std::dynamic_pointer_cast<StructDeclaration>(actualDecl);
                 // Skip template declarations - only generate instantiations
                 if (!sd->generic_params.empty()) {
                     continue;
@@ -347,45 +352,51 @@ void LLVMCodegen::generate(std::shared_ptr<Module> module, GlobalSymbolTable *gl
                 }
                 continue;
             }
-            if (IS_INSTANCE(decl, UnionDeclaration)) {
-                auto ud = std::dynamic_pointer_cast<UnionDeclaration>(decl);
+            if (IS_INSTANCE(actualDecl, UnionDeclaration)) {
+                auto ud = std::dynamic_pointer_cast<UnionDeclaration>(actualDecl);
                 generateUnionDeclaration(ud);
                 continue;
             }
-            if (IS_INSTANCE(decl, EnumDeclaration)) {
+            if (IS_INSTANCE(actualDecl, EnumDeclaration)) {
                 generateEnumDeclaration(
-                    std::dynamic_pointer_cast<EnumDeclaration>(decl));
+                    std::dynamic_pointer_cast<EnumDeclaration>(actualDecl));
                 continue;
             }
         }
 
         for (const auto &decl : module->ast->declarations) {
-            if (IS_INSTANCE(decl, FunctionDeclaration)) {
-                auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl);
+            auto actualDecl = decl;
+            if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+                actualDecl = externDecl->declaration;
+            }
+
+            if (IS_INSTANCE(actualDecl, FunctionDeclaration)) {
+                auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(actualDecl);
+                std::shared_ptr<ExternDeclaration> externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl);
                 // Skip template declarations - only generate instantiations
                 if (!fd->generic_params.empty()) {
                     continue;
                 }
-                llvm::Function *fn = generateFunctionDefinition(fd);
+                llvm::Function *fn = generateFunctionDefinition(fd, externDecl);
                 funcDecls.push_back({fn, fd});
                 continue;
             }
-            if (IS_INSTANCE(decl, VariableDeclaration)) {
+            if (IS_INSTANCE(actualDecl, VariableDeclaration)) {
                 generateVariableDeclaration(
-                    std::dynamic_pointer_cast<VariableDeclaration>(decl));
+                    std::dynamic_pointer_cast<VariableDeclaration>(actualDecl));
                 continue;
             }
-            if (IS_INSTANCE(decl, StructDeclaration) || IS_INSTANCE(decl, UnionDeclaration) || IS_INSTANCE(decl, EnumDeclaration)) {
+            if (IS_INSTANCE(actualDecl, StructDeclaration) || IS_INSTANCE(actualDecl, UnionDeclaration) || IS_INSTANCE(actualDecl, EnumDeclaration)) {
                 // Already handled in first pass
                 continue;
             }
-            if (IS_INSTANCE(decl, ImportDeclaration)) {
+            if (IS_INSTANCE(actualDecl, ImportDeclaration)) {
                 continue; // Handled elsewhere
             }
-            if (IS_INSTANCE(decl, TypeAliasDeclaration)) {
+            if (IS_INSTANCE(actualDecl, TypeAliasDeclaration)) {
                 continue; // No codegen needed
             }
-            throw CodeGenError(decl, "Unknown top-level declaration: " + decl->str());
+            throw CodeGenError(actualDecl, "Unknown top-level declaration: " + actualDecl->str());
         }
         for (const auto &fnPair : funcDecls) {
             generateFunctionBody(fnPair.second, fnPair.first);
@@ -862,13 +873,16 @@ LLVMCodegen::generateStatement(const std::shared_ptr<Statement> &stmt) {
     throw CodeGenError(stmt, "Unknown statement type: " + stmt->str());
 }
 
-llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> func) {
+llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> func,
+                                                        std::shared_ptr<ExternDeclaration> externDecl) {
     llvm::FunctionType *fType =
         llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type, func));
 
-    std::string fname = func->is_extern ? func->name : canonicalizeNonexternName(func->name);
+    std::string fname = func->type->is_extern
+                            ? (externDecl && externDecl->extern_name ? *externDecl->extern_name : func->name)
+                            : canonicalizeNonexternName(func->name);
     if (auto *existingFn = m_llvm_module->getFunction(fname)) {
-        if (func->is_extern) {
+        if (func->type->is_extern) {
             // Same underlying extern symbol may be declared by multiple modules
             // (e.g. every module that does `extern fn malloc(...)`). Each
             // declaration gets its own SymbolId at typecheck time, so each one
@@ -882,30 +896,42 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
         throw CodeGenError(func, "Duplicate definition of function: " + func->name);
     }
 
-    // For extern functions, we need to apply ABI coercion to struct parameters and return types
+    bool usesSRet = false;
+    std::vector<bool> byValParamFlags;
+    std::vector<llvm::Type *> loweredParamTypes;
+    llvm::Type *loweredReturnType = fType->getReturnType();
+
+    // For extern functions, apply ABI lowering for aggregates.
     llvm::FunctionType *abiType = fType;
-    if (func->is_extern) {
-        std::vector<llvm::Type *> abiParamTypes;
-        for (llvm::Type *paramType : fType->params()) {
-            if (shouldCoerceForABI(paramType)) {
-                abiParamTypes.push_back(getABICoercionType(paramType));
-            } else {
-                abiParamTypes.push_back(paramType);
-            }
-        }
-
-        llvm::Type *abiRetType = fType->getReturnType();
-        if (shouldCoerceForABI(abiRetType)) {
-            abiRetType = getABICoercionType(abiRetType);
-        }
-
-        abiType = llvm::FunctionType::get(abiRetType, abiParamTypes, fType->isVarArg());
+    if (func->type->is_extern) {
+        abiType = getExternABIFunctionType(func->type, func, usesSRet, byValParamFlags,
+                                           loweredParamTypes, loweredReturnType);
     }
 
-    llvm::Function::LinkageTypes linkage = func->is_extern ? llvm::Function::ExternalLinkage : llvm::Function::ExternalLinkage;
+    llvm::Function::LinkageTypes linkage = func->type->is_extern ? llvm::Function::ExternalLinkage : llvm::Function::ExternalLinkage;
 
     llvm::Function *function = llvm::Function::Create(
         abiType, linkage, fname, m_llvm_module.get());
+
+    if (func->type->is_extern) {
+        unsigned abiIndex = 0;
+        if (usesSRet) {
+            llvm::Type *retTy = getLLVMType(func->type->ret, func);
+            function->addParamAttr(abiIndex, llvm::Attribute::getWithStructRetType(context, retTy));
+            unsigned retAlign = m_llvm_module->getDataLayout().getABITypeAlign(retTy).value();
+            function->addParamAttr(abiIndex, llvm::Attribute::getWithAlignment(context, llvm::Align(retAlign)));
+            abiIndex++;
+        }
+
+        for (size_t i = 0; i < func->type->params.size(); ++i, ++abiIndex) {
+            llvm::Type *paramTy = getLLVMType(func->type->params[i], func);
+            if (i < byValParamFlags.size() && byValParamFlags[i]) {
+                function->addParamAttr(abiIndex, llvm::Attribute::getWithByValType(context, paramTy));
+                unsigned paramAlign = m_llvm_module->getDataLayout().getABITypeAlign(paramTy).value();
+                function->addParamAttr(abiIndex, llvm::Attribute::getWithAlignment(context, llvm::Align(paramAlign)));
+            }
+        }
+    }
 
     if (std::find(func->attributes.begin(), func->attributes.end(), "noreturn") != func->attributes.end()) {
         function->addFnAttr(llvm::Attribute::NoReturn);
@@ -920,7 +946,7 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
     }
 
     if (std::find(func->attributes.begin(), func->attributes.end(), "weak") != func->attributes.end()) {
-        if (func->is_extern) {
+        if (func->type->is_extern) {
             function->setLinkage(llvm::Function::WeakAnyLinkage);
         } else {
             throw CodeGenError(func, "Only extern functions can be marked as weak");
@@ -933,8 +959,14 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
     }
     // Set names for all arguments
     unsigned int idx = 0;
+    unsigned int paramNameIdx = 0;
     for (auto &arg : function->args()) {
-        arg.setName(func->param_names[idx++]);
+        if (usesSRet && idx == 0) {
+            arg.setName("sret.out");
+        } else {
+            arg.setName(func->param_names[paramNameIdx++]);
+        }
+        idx++;
     }
     return function;
 }
@@ -1266,13 +1298,22 @@ llvm::Constant *LLVMCodegen::getConstantLiteralValue(const std::shared_ptr<ASTNo
     return nullptr;
 }
 
+llvm::Function* getCurrentFunction(llvm::IRBuilder<> &builder) {
+    llvm::BasicBlock *currentBlock = builder.GetInsertBlock();
+    if (!currentBlock) {
+        return nullptr;
+    }
+    return currentBlock->getParent();
+}
+
 llvm::Value *LLVMCodegen::generateVariableDeclaration(
     const std::shared_ptr<VariableDeclaration> &varDecl) {
     static int varCounter = 0;
     bool is_global = m_scopeStack.size() == 1;
+    bool isExtern = is_global && m_current_module && m_current_module->externLinkage.count(varDecl->name);
 
     if (is_global) {
-        if (varDecl->is_extern) {
+        if (isExtern) {
             // Extern global variable declaration
             // Don't canonicalize name due to extern linkage
             llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
@@ -1331,8 +1372,7 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
     }
 
     llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
-    llvm::Function *currentFunction = m_builder->GetInsertBlock() ? m_builder->GetInsertBlock()->getParent() : nullptr;
-    llvm::Value *alloca = createEntryBlockAlloca(currentFunction, varType, varDecl->name);
+    llvm::Value *alloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), varType, varDecl->name);
     if (!alloca) {
         alloca = m_builder->CreateAlloca(varType, nullptr, varDecl->name);
     }
@@ -1956,7 +1996,10 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
     // Allocate the raw array: [N x elemType]
     auto arrayLLVMType = getLLVMType(arrayType, arrayLit); // struct { ptr, i64 }
     auto arrayLitType = llvm::ArrayType::get(elemType, arrayLit->defined_len);
-    auto rawArrAlloc = m_builder->CreateAlloca(arrayLitType, nullptr, "arraylit");
+    llvm::AllocaInst *rawArrAlloc = createEntryBlockAlloca(getCurrentFunction(*m_builder), arrayLitType, "array_literal");
+    if (!rawArrAlloc){
+        rawArrAlloc = m_builder->CreateAlloca(arrayLitType, nullptr, "arraylit");
+    }
     rawArrAlloc->setAlignment(llvm::Align(alignof(void *)));
 
     // declare void @llvm.memset.p0.i64(ptr writeonly captures(none), i8, i64, i1 immarg) #1
@@ -1986,7 +2029,10 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
     }
 
     // Allocate struct { ptr, i64 }
-    llvm::Value *arrayStructAlloc = m_builder->CreateAlloca(arrayLLVMType, nullptr, "arraystruct");
+    llvm::Value *arrayStructAlloc = createEntryBlockAlloca(getCurrentFunction(*m_builder), arrayLLVMType, "arraystruct");
+    if (!arrayStructAlloc){
+        arrayStructAlloc  = m_builder->CreateAlloca(arrayLLVMType, nullptr, "arraystruct");
+    }
 
     // Store array length into struct
     llvm::Value *lengthPtr = m_builder->CreateGEP(
@@ -2121,21 +2167,30 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     std::vector<llvm::Value *> argsV;
 
     llvm::Value *calleeValue = generateExpression(std::static_pointer_cast<Expression>(funcCall->func));
+
     if (!calleeValue) {
         throw CodeGenError(funcCall, "Failed to generate callee for function call");
     }
 
     llvm::FunctionType *funcTy = nullptr;
+    std::shared_ptr<FunctionType> sourceFuncType = nullptr;
     bool isExtern = false;
     if (auto ft = std::dynamic_pointer_cast<FunctionType>(funcCall->func->inferred_type)) {
+        sourceFuncType = ft;
         isExtern = ft->is_extern;
     } else if (auto fpt = std::dynamic_pointer_cast<PointerType>(funcCall->func->inferred_type)) {
         if (auto ft = std::dynamic_pointer_cast<FunctionType>(fpt->base)) {
+            sourceFuncType = ft;
             isExtern = ft->is_extern;
         }
     } else {
         throw CodeGenError(funcCall, "Unable to determine function type for call: " + funcCall->func->inferred_type->str());
     }
+
+    bool usesSRet = false;
+    std::vector<bool> byValParamFlags;
+    std::vector<llvm::Type *> loweredParamTypes;
+    llvm::Type *loweredReturnType = nullptr;
 
     if (auto *func = llvm::dyn_cast<llvm::Function>(calleeValue)) {
         funcTy = func->getFunctionType();
@@ -2150,10 +2205,30 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
             throw CodeGenError(funcCall, "Callee is a pointer, but not to a function type");
         }
         auto funcType = std::dynamic_pointer_cast<FunctionType>(ptrType->base);
-        funcTy = llvm::cast<llvm::FunctionType>(getLLVMType(funcType, funcCall));
+        if (funcType->is_extern) {
+            funcTy = getExternABIFunctionType(funcType, funcCall, usesSRet, byValParamFlags,
+                                              loweredParamTypes, loweredReturnType);
+        } else {
+            funcTy = llvm::cast<llvm::FunctionType>(getLLVMType(funcType, funcCall));
+        }
     } else {
         throw CodeGenError(funcCall, "Callee is not a function or function pointer: " +
                                          funcCall->func->str() + " instead has type " + funcCall->func->inferred_type->str());
+    }
+
+    if (isExtern && sourceFuncType && !usesSRet && byValParamFlags.empty() && loweredParamTypes.empty()) {
+        getExternABIFunctionType(sourceFuncType, funcCall, usesSRet, byValParamFlags,
+                                 loweredParamTypes, loweredReturnType);
+    }
+
+    llvm::AllocaInst *sretAlloca = nullptr;
+    if (isExtern && usesSRet && sourceFuncType) {
+        llvm::Type *retStructTy = getLLVMType(sourceFuncType->ret, funcCall);
+        sretAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), retStructTy, "sret.tmp");
+        if (!sretAlloca) {
+            sretAlloca = m_builder->CreateAlloca(retStructTy, nullptr, "sret.tmp");
+        }
+        argsV.push_back(sretAlloca);
     }
 
     // Generate argument values and apply ABI coercion if needed
@@ -2161,14 +2236,19 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     for (const auto &arg : funcCall->args) {
         llvm::Value *argVal = generateExpression(arg);
 
-        // Apply ABI coercion for extern functions
-        if (isExtern && argIdx < funcTy->getNumParams()) {
-            llvm::Type *paramType = funcTy->getParamType(argIdx);
+        // Apply ABI lowering/coercion for extern functions.
+        if (isExtern && sourceFuncType && argIdx < sourceFuncType->params.size()) {
             llvm::Type *argType = argVal->getType();
 
-            // If the actual param type in the function is different (due to ABI coercion),
-            // we need to coerce the argument
-            if (argType->isStructTy() && shouldCoerceForABI(argType)) {
+            if (argIdx < byValParamFlags.size() && byValParamFlags[argIdx]) {
+                llvm::Type *paramStructTy = getLLVMType(sourceFuncType->params[argIdx], arg);
+                llvm::AllocaInst *byValTmp = createEntryBlockAlloca(getCurrentFunction(*m_builder), paramStructTy, "byval.tmp");
+                if (!byValTmp) {
+                    byValTmp = m_builder->CreateAlloca(paramStructTy, nullptr, "byval.tmp");
+                }
+                m_builder->CreateStore(argVal, byValTmp);
+                argVal = byValTmp;
+            } else if (argType->isStructTy() && shouldCoerceForABI(argType)) {
                 argVal = coerceToABI(argVal, argType);
             }
         }
@@ -2194,8 +2274,36 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
         }
     }
 
-    llvm::Value *result = m_builder->CreateCall(funcTy, calleeValue, argsV,
-                                                funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
+    llvm::CallInst *callInst = m_builder->CreateCall(funcTy, calleeValue, argsV,
+                                                     funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
+
+    if (isExtern && sourceFuncType) {
+        unsigned abiIndex = 0;
+        if (usesSRet) {
+            llvm::Type *retTy = getLLVMType(sourceFuncType->ret, funcCall);
+            callInst->addParamAttr(abiIndex, llvm::Attribute::getWithStructRetType(context, retTy));
+            unsigned retAlign = m_llvm_module->getDataLayout().getABITypeAlign(retTy).value();
+            callInst->addParamAttr(abiIndex, llvm::Attribute::getWithAlignment(context, llvm::Align(retAlign)));
+            abiIndex++;
+        }
+
+        for (size_t i = 0; i < sourceFuncType->params.size(); ++i, ++abiIndex) {
+            llvm::Type *paramTy = getLLVMType(sourceFuncType->params[i], funcCall);
+            if (i < byValParamFlags.size() && byValParamFlags[i]) {
+                callInst->addParamAttr(abiIndex, llvm::Attribute::getWithByValType(context, paramTy));
+                unsigned paramAlign = m_llvm_module->getDataLayout().getABITypeAlign(paramTy).value();
+                callInst->addParamAttr(abiIndex, llvm::Attribute::getWithAlignment(context, llvm::Align(paramAlign)));
+            }
+        }
+    }
+
+    llvm::Value *result = callInst;
+
+    if (isExtern && usesSRet && sourceFuncType) {
+        llvm::Type *retTy = getLLVMType(sourceFuncType->ret, funcCall);
+        result = m_builder->CreateLoad(retTy, sretAlloca, "calltmp.sret");
+        return result;
+    }
 
     // If calling an extern function that returns a coerced struct, convert it back
     if (isExtern && result && shouldCoerceForABI(funcTy->getReturnType())) {
@@ -2740,6 +2848,7 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
     auto if_type = std::dynamic_pointer_cast<StructType>(_if_type);
     auto union_type = std::dynamic_pointer_cast<UnionType>(_if_type);
     auto array_type = std::dynamic_pointer_cast<ArrayType>(_if_type);
+    auto string_type = std::dynamic_pointer_cast<StringType>(_if_type);
 
     if (union_type) {
         // If it's a union initializer, delegate to the union initializer generator
@@ -2764,7 +2873,11 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
             return agg;
         }
 
-        llvm::Value *alloca = m_builder->CreateAlloca(llvmArray, nullptr, "slicetmp");
+        llvm::Value *alloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), llvmArray, "slicetmp");
+        if (!alloca){
+            alloca = m_builder->CreateAlloca(llvmArray, nullptr, "slicetmp");
+        }
+
         llvm::Value *ptrField = m_builder->CreateGEP(
             llvmArray, alloca,
             {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
@@ -2775,6 +2888,44 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
             {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
              llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1)},
             "slice_len_ptr");
+        m_builder->CreateStore(ptrVal, ptrField);
+        m_builder->CreateStore(lenVal, lenField);
+        return alloca;
+    }
+
+    if (string_type){
+        auto llvmString = llvm::cast<llvm::StructType>(getLLVMType(string_type, structInit));
+        auto ptrIt = structInit->field_values.find("ptr");
+        auto lenIt = structInit->field_values.find("len");
+        if (ptrIt == structInit->field_values.end() || lenIt == structInit->field_values.end()) {
+            throw CodeGenError(structInit, "String initializer expects ptr and len fields");
+        }
+
+        auto ptrVal = generateExpression(ptrIt->second);
+        auto lenVal = generateExpression(lenIt->second);
+
+        if (loadValue) {
+            llvm::Value *agg = llvm::UndefValue::get(llvmString);
+            agg = m_builder->CreateInsertValue(agg, ptrVal, 0, "string_ptr_insert");
+            agg = m_builder->CreateInsertValue(agg, lenVal, 1, "string_len_insert");
+            return agg;
+        }
+
+        llvm::Value *alloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), llvmString, "stringtmp");
+        if (!alloca){
+            alloca = m_builder->CreateAlloca(llvmString, nullptr, "stringtmp");
+        }
+
+        llvm::Value *ptrField = m_builder->CreateGEP(
+            llvmString, alloca,
+            {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+             llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)},
+            "string_ptr_ptr");
+        llvm::Value *lenField = m_builder->CreateGEP(
+            llvmString, alloca,
+            {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+             llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1)},
+            "string_len_ptr");
         m_builder->CreateStore(ptrVal, ptrField);
         m_builder->CreateStore(lenVal, lenField);
         return alloca;
@@ -2804,8 +2955,11 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
         return agg;
     }
 
-    llvm::Value *alloca =
-        m_builder->CreateAlloca(llvmStruct, nullptr, "structtmp");
+    llvm::Value *alloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), llvmStruct, "structtmp");
+    if (!alloca){
+        alloca = m_builder->CreateAlloca(llvmStruct, nullptr, "structtmp");
+    }
+
     for (const auto &field : structInit->field_values) {
         // Find field index
         auto fieldIndex = if_type->getFieldIndex(field.first);
@@ -2873,6 +3027,11 @@ LLVMCodegen::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
         m_builder->CreateBr(mergeBB);
     }
     m_builder->SetInsertPoint(mergeBB);
+
+    // If both branches terminated mergeBB is unreachable
+    if (mergeBB->use_empty()) {
+        m_builder->CreateUnreachable();
+    }
     return nullptr;
 }
 
@@ -3129,8 +3288,10 @@ llvm::Value *LLVMCodegen::materializeAggregate(llvm::Value *abiValue, llvm::Stru
     llvm::LLVMContext &C = context;
 
     // Allocate ABI-shaped temporary
-    llvm::AllocaInst *abiTmp =
-        B.CreateAlloca(abiTy, nullptr, "abi.tmp");
+
+    llvm::AllocaInst *abiTmp = createEntryBlockAlloca(getCurrentFunction(*m_builder), abiTy, "abi_tmp");
+    if (!abiTmp)
+        abiTmp = B.CreateAlloca(abiTy, nullptr, "abi_tmp");
 
     // ABI alignment
     llvm::DataLayout DL = m_llvm_module->getDataLayout();
@@ -3140,8 +3301,9 @@ llvm::Value *LLVMCodegen::materializeAggregate(llvm::Value *abiValue, llvm::Stru
     B.CreateStore(abiValue, abiTmp);
 
     // Allocate language-level struct
-    llvm::AllocaInst *langTmp =
-        B.CreateAlloca(langType, nullptr, "agg.tmp");
+    llvm::AllocaInst *langTmp = createEntryBlockAlloca(getCurrentFunction(*m_builder), langType, "agg_tmp");
+    if (!langTmp)
+        langTmp = B.CreateAlloca(langType, nullptr, "agg_tmp");
 
     unsigned langAlign = DL.getABITypeAlign(langType).value();
     langTmp->setAlignment(llvm::Align(langAlign));
@@ -3159,6 +3321,64 @@ llvm::Value *LLVMCodegen::materializeAggregate(llvm::Value *abiValue, llvm::Stru
 
     // Return pointer to materialized object
     return langTmp;
+}
+
+bool LLVMCodegen::isExternMemoryAggregateType(const std::shared_ptr<Type> &type, const ASTNodePtr &node) {
+    if (!type) {
+        return false;
+    }
+
+    llvm::Type *llvmTy = getLLVMType(type, node);
+    if (!llvmTy || !llvmTy->isStructTy()) {
+        return false;
+    }
+
+    llvm::DataLayout DL = m_llvm_module->getDataLayout();
+    uint64_t size = DL.getTypeAllocSize(llvmTy);
+    return size > 16;
+}
+
+llvm::FunctionType *LLVMCodegen::getExternABIFunctionType(const std::shared_ptr<FunctionType> &funcType,
+                                                          const ASTNodePtr &node,
+                                                          bool &usesSRet,
+                                                          std::vector<bool> &byValParamFlags,
+                                                          std::vector<llvm::Type *> &loweredParamTypes,
+                                                          llvm::Type *&loweredReturnType) {
+    usesSRet = false;
+    byValParamFlags.clear();
+    loweredParamTypes.clear();
+
+    if (!funcType) {
+        throw CodeGenError(node, "Invalid function type for ABI lowering");
+    }
+
+    llvm::Type *retType = getLLVMType(funcType->ret, node);
+    loweredReturnType = retType;
+
+    if (isExternMemoryAggregateType(funcType->ret, node)) {
+        usesSRet = true;
+        loweredReturnType = llvm::Type::getVoidTy(context);
+        loweredParamTypes.push_back(llvm::PointerType::getUnqual(context));
+    } else if (shouldCoerceForABI(retType)) {
+        loweredReturnType = getABICoercionType(retType);
+    }
+
+    byValParamFlags.reserve(funcType->params.size());
+    for (const auto &paramAstType : funcType->params) {
+        llvm::Type *paramType = getLLVMType(paramAstType, node);
+        bool byVal = isExternMemoryAggregateType(paramAstType, node);
+        byValParamFlags.push_back(byVal);
+
+        if (byVal) {
+            loweredParamTypes.push_back(llvm::PointerType::getUnqual(context));
+        } else if (shouldCoerceForABI(paramType)) {
+            loweredParamTypes.push_back(getABICoercionType(paramType));
+        } else {
+            loweredParamTypes.push_back(paramType);
+        }
+    }
+
+    return llvm::FunctionType::get(loweredReturnType, loweredParamTypes, funcType->variadic);
 }
 
 // ABI coercion helper functions
@@ -3232,7 +3452,10 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
     }
 
     // Fallback: allocate temporary for struct and perform the usual ABI coercion.
-    llvm::AllocaInst *structAlloca = m_builder->CreateAlloca(structType, nullptr, "struct.tmp");
+    llvm::AllocaInst *structAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), structType, "struct_tmp");
+    if (!structAlloca)
+        structAlloca = m_builder->CreateAlloca(structType, nullptr, "struct_tmp");
+
     m_builder->CreateStore(structValue, structAlloca);
 
     llvm::Value *abiPtr = m_builder->CreateBitCast(structAlloca,
@@ -3251,7 +3474,11 @@ llvm::Value *LLVMCodegen::coerceFromABI(llvm::Value *abiValue, llvm::Type *struc
     llvm::Type *abiType = getABICoercionType(structType);
 
     // Allocate temporary for ABI value
-    llvm::AllocaInst *abiAlloca = m_builder->CreateAlloca(abiType, nullptr, "abi.tmp");
+    llvm::AllocaInst *abiAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), abiType, "abi_tmp");
+    if (!abiAlloca)
+        abiAlloca = m_builder->CreateAlloca(abiType, nullptr, "abi_tmp");
+
+
     m_builder->CreateStore(abiValue, abiAlloca);
 
     // Bitcast to struct type pointer and load

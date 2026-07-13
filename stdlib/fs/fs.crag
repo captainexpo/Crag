@@ -38,8 +38,8 @@ pub fn exists(path: *const u8) -> bool {
 	return true;
 }
 
-pub fn read_all(path: string.Str) -> string.Str!FsError {
-	let handle: *void = cstdio.fopen(path.c_str(), "rb");
+pub fn read_all(path: *u8) -> str!FsError {
+	let handle: *void = cstdio.fopen(path, "rb");
 	if (handle == null) {
 		return! FsError:OPEN_ERROR;
 	}
@@ -72,25 +72,34 @@ pub fn read_all(path: string.Str) -> string.Str!FsError {
 	}
 
 	buffer[size] = 0;
-	return string.Str{value: buffer, length: size, is_heap: true};
+	return newstr(buffer, size);
 }
 
-pub fn write_all(path: *const u8, data: *const u8, len: usize) -> void!FsError {
+pub fn read_all_str(path: *u8) -> str!FsError {
+    let res = read_all(path);
+    if (res.is_err) {
+        return! res.err;
+    }
+    let s_res = newstr(res.ok.ptr, res.ok.len);
+    return s_res;
+}
+
+pub fn write_all(path: str, data: str) -> void!FsError {
 	let handle: *void = cstdio.fopen(path, "wb");
 	if (handle == null) {
 		return! FsError:OPEN_ERROR;
 	}
 
-	let written: usize = cstdio.fwrite(data as *const void, 1, len, handle);
+	let written: usize = cstdio.fwrite(data.ptr as *void, 1, data.len, handle);
 	cstdio.fclose(handle);
 
-	if (written != len) {
+	if (written != data.len) {
 		return! FsError:WRITE_ERROR;
 	}
 }
 
-pub fn write_str(path: *const u8, data: string.Str) -> void!FsError {
-	let res = write_all(path, data.c_str(), data.length);
+pub fn write_str(path: str, data: str) -> void!FsError {
+	let res = write_all(path, data);
     if (res.is_err) {
         return! res.err;
     }

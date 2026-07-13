@@ -32,6 +32,18 @@ std::shared_ptr<ASTNode> TypeCast::instantiate(std::vector<std::shared_ptr<Type>
     return c;
 }
 
+std::shared_ptr<ASTNode> ExternDeclaration::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
+    auto c = std::make_shared<ExternDeclaration>(std::dynamic_pointer_cast<Declaration>(declaration->instantiate(gp_replace)));
+    c->line = line;
+    c->col = col;
+    c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->is_pub = is_pub;
+    c->extern_name = extern_name;
+    c->extern_type = extern_type;
+    c->symbol_id = symbol_id;
+    return c;
+}
+
 std::shared_ptr<ASTNode> VarAccess::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
     auto c = std::make_shared<VarAccess>(name);
     c->line = line;
@@ -300,8 +312,7 @@ std::shared_ptr<ASTNode> FunctionDeclaration::instantiate(std::vector<std::share
         name,
         type != nullptr ? std::dynamic_pointer_cast<FunctionType>(type->instantiate(gp_replace)) : nullptr,
         param_names,
-        body ? std::dynamic_pointer_cast<Statement>(body->instantiate(gp_replace)) : nullptr,
-        is_extern);
+        body ? std::dynamic_pointer_cast<Statement>(body->instantiate(gp_replace)) : nullptr);
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
@@ -322,7 +333,6 @@ std::shared_ptr<ASTNode> VariableDeclaration::instantiate(std::vector<std::share
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->is_pub = is_pub;
     c->is_const = is_const;
-    c->is_extern = is_extern;
     c->symbol_id = symbol_id;
     return c;
 }
@@ -384,7 +394,6 @@ std::shared_ptr<ASTNode> StructDeclaration::instantiate(std::vector<std::shared_
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->is_pub = is_pub;
     c->generic_params = generic_params;
-    c->is_extern = is_extern;
 
     for (const auto &[mname, method] : methods) {
         c->methods[mname] = std::dynamic_pointer_cast<FunctionDeclaration>(method->instantiate(gp_replace));
@@ -405,7 +414,6 @@ std::shared_ptr<ASTNode> UnionDeclaration::instantiate(std::vector<std::shared_p
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->is_pub = is_pub;
     c->generic_params = generic_params;
-    c->is_extern = is_extern;
     c->symbol_id = symbol_id;
     return c;
 }
@@ -421,7 +429,7 @@ std::shared_ptr<ASTNode> AsmStmt::instantiate(std::vector<std::shared_ptr<Type>>
 
 std::shared_ptr<ASTNode> WhenBlock::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
     std::vector<ASTNodePtr> containees;
-    for (const auto &containee : containees) {
+    for (const auto &containee : body) {
         containees.push_back(containee->instantiate(gp_replace));
     }
     return std::make_shared<WhenBlock>(std::dynamic_pointer_cast<Expression>(condition->instantiate(gp_replace)), std::move(containees));

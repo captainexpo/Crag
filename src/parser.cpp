@@ -3,13 +3,11 @@
 #include "lexer.h"
 #include <algorithm>
 #include <cstddef>
-#include <iostream>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
 
-namespace {
 std::string describeToken(const Token &token) {
     if (token.type == TokenType::EOF_T) {
         return "end of file";
@@ -48,7 +46,6 @@ bool extract_template_target(const std::shared_ptr<Expression> &expr,
     }
     return false;
 }
-} // namespace
 
 Parser::Parser(const std::vector<Token> &tokens)
     : tokens(tokens), position(0) {}
@@ -354,10 +351,12 @@ std::shared_ptr<PointerType> Parser::parse_function_ptr_type() {
         }
     }
     consume(TokenType::RPAREN);
-    consume(TokenType::ARROW);
-    auto ret_type = parse_type();
+    std::shared_ptr<Type> return_type = std::make_shared<Void>();
+    if (match({TokenType::ARROW})) {
+        return_type = parse_type();
+    }
     return std::make_shared<PointerType>(
-        std::make_shared<FunctionType>(param_types, ret_type, variadic));
+        std::make_shared<FunctionType>(param_types, return_type, variadic));
 }
 
 // ---- Declarations ----
@@ -430,6 +429,9 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
         case TokenType::EXTERN: {
             auto ed = parse_extern_declaration();
             ed->is_pub = is_pub;
+            if (auto extern_decl = std::dynamic_pointer_cast<ExternDeclaration>(ed)) {
+                extern_decl->declaration->is_pub = is_pub;
+            }
             return ed;
         }
         case TokenType::WHEN: {
@@ -452,6 +454,7 @@ std::shared_ptr<ASTNode> Parser::parse_when_statement(bool is_decl) {
                 throw ParseError("Unterminated when block, expected '}'", peek().line, peek().column);
                 break;
             }
+            // std::cout << "Parsing when block containee: " << describeToken(peek()) << std::endl;
             containees.push_back(is_decl ? parse_declaration() : parse_statement());
         }
         consume(TokenType::RBRACE);
@@ -461,6 +464,8 @@ std::shared_ptr<ASTNode> Parser::parse_when_statement(bool is_decl) {
         std::vector<std::shared_ptr<ASTNode>> containees;
         containees.push_back(decl);
         when_decl = std::make_shared<WhenBlock>(condition, containees);
+        // std::cout << "Parsed when block with single containee" << std::endl;
+        // std::cout << when_decl->toString() << std::endl;
     }
     when_decl->line = w.line;
     when_decl->col = w.column;
@@ -469,13 +474,24 @@ std::shared_ptr<ASTNode> Parser::parse_when_statement(bool is_decl) {
 
 std::shared_ptr<Declaration> Parser::parse_extern_declaration() {
     consume(TokenType::EXTERN);
+
+    std::optional<std::string> extern_name = std::nullopt;
+    std::optional<std::string> extern_type = std::nullopt;
+
+    if (match({TokenType::LPAREN})) {
+        extern_name = consume(TokenType::STRING).value;
+        consume(TokenType::RPAREN);
+    }
+    if (peek().type == TokenType::STRING) {
+        extern_type = consume(TokenType::STRING).value;
+    }
+
     switch (peek().type) {
         case TokenType::LET:
         case TokenType::CONST: {
             auto var_decl = parse_variable_declaration();
-            var_decl->is_extern = true;
             consume(TokenType::SEMICOLON);
-            return var_decl;
+            return std::make_shared<ExternDeclaration>(var_decl, extern_name, extern_type);
         }
 
         case TokenType::STRUCT:
@@ -483,9 +499,8 @@ std::shared_ptr<Declaration> Parser::parse_extern_declaration() {
             break;
         case TokenType::FN: {
             auto fn = parse_function_declaration();
-            fn->is_extern = true;
             fn->type->is_extern = true;
-            return fn;
+            return std::make_shared<ExternDeclaration>(fn, extern_name, extern_type);
         }
         default:
             break;
@@ -1407,11 +1422,12 @@ std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
         param_types.push_back(p.second);
     }
     consume(TokenType::RPAREN);
-    consume(TokenType::ARROW);
-    auto ret_type = parse_type();
-
+    std::shared_ptr<Type> return_type = std::make_shared<Void>();
+    if(match({TokenType::ARROW})){
+        return_type = parse_type();
+    }
     auto func_type =
-        std::make_shared<FunctionType>(param_types, ret_type, variadic);
+        std::make_shared<FunctionType>(param_types, return_type, variadic);
     std::set<std::string> attributes;
     while (peek().type == TokenType::ATTRIBUTE) {
         std::string attr_name = consume(TokenType::ATTRIBUTE).value;

@@ -327,32 +327,50 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
     }
 
     if (auto funcCall = std::dynamic_pointer_cast<FuncCall>(expr)) {
-        error(funcCall, "Function calls are not allowed in constant expressions");
-        return std::nullopt;
+        if (funcCall->inferred_type != nullptr) {
+            error(funcCall, "Function call has no inferred type");
+            return std::nullopt;
+        }
+
+        std::shared_ptr<Expression> baseExpr = funcCall;
+        m_type_checker->inferExpression(baseExpr);
+        return evaluateExpression(baseExpr);
     }
 
     if (auto arrayLit = std::dynamic_pointer_cast<ArrayLiteral>(expr)) {
-        std::cout << "Evaluating array literal with " << arrayLit->elements.size() << " elements\n";
         std::vector<ExprPtr> constElements;
         for (const auto &elem : arrayLit->elements) {
             std::optional<ExprPtr> valOpt = evaluateExpression(elem);
             if (!valOpt) {
-                std::cout << "Failed to evaluate array element: " << elem->toString() << "\n";
                 return std::nullopt;
             }
             auto constExpr = std::dynamic_pointer_cast<Expression>(*valOpt);
             if (!constExpr) {
-                std::cout << "Array element is not a constant expression: " << elem->toString() << "\n";
                 error(elem, "Array element is not a constant expression");
                 return std::nullopt;
             }
             constExpr->constant_evaluated = true;
             constElements.push_back(constExpr);
         }
-        std::cout << "Successfully evaluated array literal with " << constElements.size() << " constant elements\n";
         auto evaluated = std::make_shared<ArrayLiteral>(constElements);
         evaluated->constant_evaluated = true;
         return evaluated;
+    }
+
+    if (auto ea = std::dynamic_pointer_cast<EnumAccess>(expr)) {
+        std::shared_ptr<Expression> baseExpr = ea;
+        m_type_checker->inferExpression(baseExpr);
+        auto enumType = std::dynamic_pointer_cast<EnumType>(ea->inferred_type);
+        if (!enumType) {
+            error(ea, "Enum access base is not an enum: " + ea->enum_expr->str());
+            return std::nullopt;
+        }
+        auto valIt = enumType->variant_map.find(ea->variant);
+        if (valIt == enumType->variant_map.end()) {
+            error(ea, "Unknown enum variant: " + ea->variant);
+            return std::nullopt;
+        }
+        return std::dynamic_pointer_cast<Expression>(valIt->second);
     }
 
     if (auto moduleAccess = std::dynamic_pointer_cast<ModuleAccess>(expr)) {
@@ -377,9 +395,14 @@ std::optional<std::shared_ptr<VariableDeclaration>> ConstEvaluator::evaluateVari
     auto val = evaluateExpression(expr);
     if (!val)
         return std::nullopt;
+    if (!*val) {
+        error(var, "Const variable initializer could not be evaluated");
+        return std::nullopt;
+    }
 
-    m_const_vars[var->name] = val.value();
-    var->initializer = val.value();
+    m_const_vars[var->name] = *val;
+    var->initializer = *val;
+
     var->initializer->inferred_type = var->var_type;
     return var;
 }

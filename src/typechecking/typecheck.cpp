@@ -21,26 +21,33 @@ void rebuildModuleMetadata(const std::shared_ptr<Module> &module) {
     module->externLinkage.clear();
 
     for (const auto &decl : module->ast->declarations) {
-        if (auto f = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
+        bool isExtern = false;
+        auto actualDecl = decl;
+        if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+            isExtern = true;
+            actualDecl = externDecl->declaration;
+        }
+
+        if (auto f = std::dynamic_pointer_cast<FunctionDeclaration>(actualDecl)) {
             if (f->is_pub) {
                 module->exports[f->name] = f;
             }
-            if (f->is_extern || f->attributes.count("noprefix")) {
+            if (isExtern || f->type->is_extern || f->attributes.count("noprefix")) {
                 module->externLinkage.insert(f->name);
             }
-        } else if (auto s = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
+        } else if (auto s = std::dynamic_pointer_cast<StructDeclaration>(actualDecl)) {
             if (s->is_pub) {
                 module->exports[s->name] = s;
             }
-        } else if (auto e = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
+        } else if (auto e = std::dynamic_pointer_cast<EnumDeclaration>(actualDecl)) {
             if (e->is_pub) {
                 module->exports[e->name] = e;
             }
-        } else if (auto v = std::dynamic_pointer_cast<VariableDeclaration>(decl)) {
+        } else if (auto v = std::dynamic_pointer_cast<VariableDeclaration>(actualDecl)) {
             if (v->is_pub) {
                 module->exports[v->name] = v;
             }
-            if (v->is_extern) {
+            if (isExtern) {
                 module->externLinkage.insert(v->name);
             }
         }
@@ -169,7 +176,11 @@ void TypeChecker::ensureGlobalVariableVisible(const std::string &name) {
     }
 
     for (const auto &decl : current_module->ast->declarations) {
-        auto vd = std::dynamic_pointer_cast<VariableDeclaration>(decl);
+        auto actualDecl = decl;
+        if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+            actualDecl = externDecl->declaration;
+        }
+        auto vd = std::dynamic_pointer_cast<VariableDeclaration>(actualDecl);
         if (!vd || vd->name != name) {
             continue;
         }
@@ -386,6 +397,51 @@ static bool containsGenericType(const std::shared_ptr<Type> &t) {
     return false;
 }
 
+// Structurally matches a (possibly generic-containing) parameter type against a
+// concrete argument type, filling in `associations` for any GenericType found.
+// Returns false if the shapes don't match or an already-associated generic
+// conflicts with this occurrence.
+static bool unifyGenericParam(const std::shared_ptr<Type> &paramType,
+                               const std::shared_ptr<Type> &argType,
+                               std::unordered_map<std::string, std::shared_ptr<Type>> &associations) {
+    if (!paramType || !argType)
+        return false;
+
+    if (auto gt = std::dynamic_pointer_cast<GenericType>(paramType)) {
+        auto it = associations.find(gt->name);
+        if (it != associations.end())
+            return it->second->equals(argType);
+        associations[gt->name] = argType;
+        return true;
+    }
+    if (auto pt = std::dynamic_pointer_cast<PointerType>(paramType)) {
+        auto apt = std::dynamic_pointer_cast<PointerType>(argType);
+        return apt && unifyGenericParam(pt->base, apt->base, associations);
+    }
+    if (auto at = std::dynamic_pointer_cast<ArrayType>(paramType)) {
+        auto aat = std::dynamic_pointer_cast<ArrayType>(argType);
+        return aat && unifyGenericParam(at->element_type, aat->element_type, associations);
+    }
+    if (auto eu = std::dynamic_pointer_cast<ErrorUnionType>(paramType)) {
+        auto aeu = std::dynamic_pointer_cast<ErrorUnionType>(argType);
+        return aeu &&
+               unifyGenericParam(eu->errorType, aeu->errorType, associations) &&
+               unifyGenericParam(eu->valueType, aeu->valueType, associations);
+    }
+    if (auto ti = std::dynamic_pointer_cast<TemplateInstanceType>(paramType)) {
+        auto ati = std::dynamic_pointer_cast<TemplateInstanceType>(argType);
+        if (!ati || !ti->base->equals(ati->base) || ti->type_args.size() != ati->type_args.size())
+            return false;
+        for (size_t i = 0; i < ti->type_args.size(); ++i) {
+            if (!unifyGenericParam(ti->type_args[i], ati->type_args[i], associations))
+                return false;
+        }
+        return true;
+    }
+
+    return paramType->equals(argType);
+}
+
 static void substituteGenericTypes(std::shared_ptr<Type> &type,
                                    const std::unordered_map<std::string, std::shared_ptr<Type>> &generic_map) {
     if (!type)
@@ -592,7 +648,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
             return std::make_shared<TemplateInstanceType>(base_template, resolved_args);
         }
         throw TypeCheckError(current_module,
-                                node,
+                             node,
                              "Template instantiation base type is not a struct: " + base_type->str());
     }
     // primitive types are already resolved
@@ -638,7 +694,11 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
     try {
         for (int i = 0; i < module->ast->declarations.size(); ++i) {
             auto decl = module->ast->declarations[i];
-            if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
+            auto actualDecl = decl;
+            if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+                actualDecl = externDecl->declaration;
+            }
+            if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(actualDecl)) {
 
                 // Check if this is a generic struct
                 if (sd->generic_params.size() > 0) {
@@ -652,26 +712,26 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     insertSymbol(sd->name, SymbolKind::Type, st, sd);
                     struct_decls.push_back(sd);
                 }
-            } else if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(decl)) {
+            } else if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(actualDecl)) {
                 // Build a UnionType and register
                 auto ut = std::make_shared<UnionType>(ud->name);
                 ut->complete = false;
                 insertSymbol(ud->name, SymbolKind::Type, ut, ud);
                 union_decls.push_back(ud);
-            } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
+            } else if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(actualDecl)) {
                 if (fd->generic_params.size() > 0) {
                     SymbolId tid;
                     insertSymbol(fd->name, SymbolKind::Function, fd->type, fd, &tid);
-                    decl->symbol_id = tid;
+                    actualDecl->symbol_id = tid;
                     m_templates[tid] = fd;
                 } else {
                     auto ty = std::dynamic_pointer_cast<FunctionType>(resolveType(fd, fd->type));
 
                     SymbolId fid;
                     insertSymbol(fd->name, SymbolKind::Function, ty, fd, &fid);
-                    decl->symbol_id = fid;
+                    actualDecl->symbol_id = fid;
                 }
-            } else if (auto en = std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
+            } else if (auto en = std::dynamic_pointer_cast<EnumDeclaration>(actualDecl)) {
                 if (!en->base_type) {
                     throw TypeCheckError(current_module, en, "Enum " + en->name + " has no base type");
                     return;
@@ -696,7 +756,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
                 en->symbol_id = eid;
                 en->inferred_type = et;
-            } else if (auto im = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
+            } else if (auto im = std::dynamic_pointer_cast<ImportDeclaration>(actualDecl)) {
                 auto imported_module = module->imports[im->alias];
 
                 if (!imported_module) {
@@ -764,7 +824,11 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
         }
 
         for (const auto &decl : module->ast->declarations) {
-            if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(decl)) {
+            auto actualDecl = decl;
+            if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+                actualDecl = externDecl->declaration;
+            }
+            if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(actualDecl)) {
                 auto global_symbol = currentScopes().front().find(vd->name);
                 if (global_symbol != INVALID_SYMBOL_ID) {
                     auto entry = symbolTable().get(global_symbol);
@@ -776,16 +840,24 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
             }
         }
 
+        // Capture exports (including generic templates) before they get stripped
+        // from the declaration list below.
+        rebuildModuleMetadata(module);
+
         // Remove templates from AST
         module->ast->declarations.erase(
             std::remove_if(
                 module->ast->declarations.begin(),
                 module->ast->declarations.end(),
                 [this](const std::shared_ptr<ASTNode> &decl) {
-                    if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl)) {
+                    auto actualDecl = decl;
+                    if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+                        actualDecl = externDecl->declaration;
+                    }
+                    if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(actualDecl)) {
                         return sd->generic_params.size() > 0;
                     }
-                    if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
+                    if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(actualDecl)) {
                         return fd->generic_params.size() > 0;
                     }
                     return false;
@@ -805,8 +877,6 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 m_errors.emplace_back(e);
             }
         }
-
-        rebuildModuleMetadata(module);
     } catch (const TypeCheckError &e) {
         m_errors.emplace_back(e);
     }
@@ -824,11 +894,15 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
     if (!node)
         return;
-    if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(node)) {
+    auto actualNode = node;
+    if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(node)) {
+        actualNode = externDecl->declaration;
+    }
+    if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(actualNode)) {
         checkFunctionDeclaration(fd);
         return;
     }
-    if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(node)) {
+    if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(actualNode)) {
         if (!currentScopes().empty()) {
             auto global_symbol = currentScopes().front().find(vd->name);
             if (global_symbol != INVALID_SYMBOL_ID) {
@@ -844,31 +918,31 @@ void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
         checkVariableDeclaration(vd);
         return;
     }
-    if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(node)) {
+    if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(actualNode)) {
         // checkStructDeclaration(sd);
         return;
     }
-    if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(node)) {
+    if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(actualNode)) {
         // checkUnionDeclaration(ud);
         return;
     }
-    if (auto ed = std::dynamic_pointer_cast<EnumDeclaration>(node)) {
+    if (auto ed = std::dynamic_pointer_cast<EnumDeclaration>(actualNode)) {
         checkEnumDeclaration(ed);
         return;
     }
-    if (auto im = std::dynamic_pointer_cast<ImportDeclaration>(node)) {
+    if (auto im = std::dynamic_pointer_cast<ImportDeclaration>(actualNode)) {
         // Already handled in check()
         return;
     }
-    if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(node)) {
+    if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(actualNode)) {
         // Already handled in check()
         return;
     }
-    if (auto wb = std::dynamic_pointer_cast<WhenBlock>(node)) {
+    if (auto wb = std::dynamic_pointer_cast<WhenBlock>(actualNode)) {
         // Already handled in check()
         return;
     }
-    throw TypeCheckError(current_module, node, "Unsupported top-level declaration: " + node->toString());
+    throw TypeCheckError(current_module, actualNode, "Unsupported top-level declaration: " + actualNode->toString());
 }
 
 void TypeChecker::checkStructDeclaration(
@@ -884,7 +958,6 @@ void TypeChecker::checkStructDeclaration(
         st->fields = std::move(fields);
         st->methods = sd->methods;
         st->complete = true;
-        std::cout << "Completed struct type: " << st->str() << std::endl;
     } else {
         throw TypeCheckError(current_module, sd, "Internal error: struct " + sd->name + " not found in map");
     }
@@ -1132,6 +1205,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
     if (auto block = std::dynamic_pointer_cast<Block>(stmt)) {
         pushScope();
         for (size_t i = 0; i < block->statements.size();) {
+            // std::cout << "stmt[" + std::to_string(i) + "]: " + block->statements[i]->toString() << std::endl;
             try {
                 auto &s = block->statements[i];
                 if (auto when_block = std::dynamic_pointer_cast<WhenBlock>(s)) {
@@ -1156,7 +1230,7 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                     if (std::get<bool>(bool_lit->value)) {
                         std::vector<std::shared_ptr<Statement>> replacement;
                         replacement.reserve(when_block->body.size());
-                        for (auto &node : when_block->body) {
+                        for (const auto &node : when_block->body) {
                             auto body_stmt = std::dynamic_pointer_cast<Statement>(node);
                             if (!body_stmt) {
                                 throw TypeCheckError(current_module,
@@ -1177,12 +1251,10 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
 
                     continue;
                 }
-
                 checkStatement(s);
             } catch (const TypeCheckError &e) {
                 m_errors.emplace_back(e);
             }
-
             ++i;
         }
         popScope();
@@ -1442,6 +1514,11 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
                 expr = so.second;
                 return so.first;
             }
+            if (va->name == "newstr") {
+                auto so = expandNewStr(call);
+                expr = so.second;
+                return so.first;
+            }
             if (va->name == "alignof") {
                 auto ao = expandAlignOf(call);
                 expr = ao.second;
@@ -1451,6 +1528,12 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
                 auto oo = expandOffsetOf(call);
                 expr = oo.second;
                 return oo.first;
+            }
+            if (va->name == "typeid") {
+                auto to = expandTypeId(call);
+                std::cout << "TypeId expansion: " << to.first->str() << std::endl;
+                expr = to.second;
+                return to.first;
             }
         }
         return inferFuncCall(call, expected);
@@ -1970,11 +2053,6 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
     st = std::dynamic_pointer_cast<StructType>(resolveType(mc, st));
     auto it = st->methods.find(mc->method);
     if (it == st->methods.end()) {
-        std::cout << "Available methods on " << typeName(st) << ": ";
-        for (const auto &m : st->methods) {
-            std::cout << m.first << " ";
-        }
-        std::cout << std::endl;
         throw TypeCheckError(current_module, mc, "Struct " + st->name + " has no method " + mc->method);
     }
     auto ftype = std::dynamic_pointer_cast<FunctionType>(resolveType(mc, it->second->type));
@@ -2001,7 +2079,7 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
     return ftype->ret;
 }
 
-std::shared_ptr<Type> TypeChecker::tryInferGenericFunctionCall(const std::shared_ptr<FuncCall> &fc, const std::shared_ptr<FunctionType> &ft) {
+std::shared_ptr<TemplateInstantiation> TypeChecker::tryInferGenericFunctionCall(const std::shared_ptr<FuncCall> &fc, const std::shared_ptr<FunctionType> &ft) {
     // assumes ft is a generic function type
     // 1. infer argument types
     // 2. match against generic parameters to build associations between Generic -> concrete
@@ -2018,15 +2096,9 @@ std::shared_ptr<Type> TypeChecker::tryInferGenericFunctionCall(const std::shared
     std::unordered_map<std::string, std::shared_ptr<Type>> generic_associations;
     for (size_t i = 0; i < ft->params.size(); ++i) {
         auto pt = ft->params[i];
-        if (auto gt = std::dynamic_pointer_cast<GenericType>(pt)) {
-            // if we already have an association for this generic, check it matches
-            auto it = generic_associations.find(gt->name);
-            if (it != generic_associations.end()) {
-                if (!arg_types[i]->equals(it->second))
-                    throw TypeCheckError(current_module, fc, "Generic type association mismatch for " + gt->name + ": expected " + typeName(it->second) + " got " + typeName(arg_types[i]));
-            } else {
-                generic_associations[gt->name] = arg_types[i];
-            }
+        if (containsGenericType(pt)) {
+            if (!unifyGenericParam(pt, arg_types[i], generic_associations))
+                throw TypeCheckError(current_module, fc, "Could not infer generic type(s) for parameter " + std::to_string(i) + ": expected " + typeName(pt) + " got " + typeName(arg_types[i]));
         } else if (!pt->equals(arg_types[i])) {
             if (canImplicitCast(arg_types[i], pt)) {
                 fc->args[i] = std::make_shared<TypeCast>(fc->args[i], pt, CastType::Normal);
@@ -2034,14 +2106,30 @@ std::shared_ptr<Type> TypeChecker::tryInferGenericFunctionCall(const std::shared
                 throw TypeCheckError(current_module, fc, "Function call argument " + std::to_string(i) + " type mismatch: expected " + typeName(pt) + " got " + typeName(arg_types[i]));
         }
     }
-    // HACk for a seconds
-    std::vector<std::shared_ptr<Type>> template_args;
-    for (auto &ga : generic_associations) {
-        template_args.push_back(ga.second);
+
+    SymbolId called_id = fc->func->symbol_id;
+    Symbol called_sym = *symbol_table.lookupSymbol(called_id);
+
+    auto called_func = std::dynamic_pointer_cast<FunctionDeclaration>(called_sym.decl);
+    if (!called_func)
+        throw TypeCheckError(current_module, fc, "Called symbol is not a function declaration");
+
+    std::vector<std::shared_ptr<Type>> concrete_params(called_func->generic_params.size());
+
+    for (auto &[name, type] : generic_associations) {
+        auto idx = std::find(called_func->generic_params.begin(), called_func->generic_params.end(), name);
+        if (idx == called_func->generic_params.end())
+            throw TypeCheckError(current_module, fc, "Generic type " + name + " not found in function declaration");
+        size_t index = std::distance(called_func->generic_params.begin(), idx);
+        concrete_params[index] = type;
     }
-    auto prevFunc = fc->func;
-    // *fc->func = std::make_shared<TemplateInstantiation>(prevFunc->name, template_args);
-    return nullptr; // TODO: implement template instantiation and inference
+
+    // Convert to template instantiation node, preserving the module path
+    std::vector<std::string> module_path;
+    if (auto ma = std::dynamic_pointer_cast<ModuleAccess>(fc->func)) {
+        module_path = ma->module_path;
+    }
+    return std::make_shared<TemplateInstantiation>(module_path, called_sym.name, concrete_params);
 }
 
 std::shared_ptr<Type> TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall> &call,
@@ -2067,7 +2155,9 @@ std::shared_ptr<Type> TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall>
     }
 
     if (containsGenericType(ftype)) {
-        tryInferGenericFunctionCall(call, ftype); // Destructive, will modify call in-place if successful
+        auto new_ti = tryInferGenericFunctionCall(call, ftype);
+        call->func = new_ti;
+        return inferFuncCall(call, expected);
     }
 
     // check arity (naive, no implicit conversions)

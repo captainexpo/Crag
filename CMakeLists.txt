@@ -15,48 +15,38 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -std=c++20")
 
 file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
+
+
 # Add the executable
 add_executable(crag ${SRC_FILES})
 
 # Include the headers
 target_include_directories(crag PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-# LLVM compiler flags
-execute_process(
-    COMMAND llvm-config --cxxflags
-    OUTPUT_VARIABLE LLVM_CXXFLAGS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-string(STRIP "${LLVM_CXXFLAGS}" LLVM_CXXFLAGS_STRIPPED)
-string(REPLACE "-fno-exceptions" "" LLVM_CXXFLAGS_STRIPPED "${LLVM_CXXFLAGS_STRIPPED}")
-separate_arguments(LLVM_CXXFLAGS_LIST NATIVE_COMMAND "${LLVM_CXXFLAGS_STRIPPED}")
-target_compile_options(crag PRIVATE ${LLVM_CXXFLAGS_LIST})
+if(NOT NO_LLVM)
+    # LLVM compiler flags
+    execute_process(
+        COMMAND llvm-config --cxxflags
+        OUTPUT_VARIABLE LLVM_CXXFLAGS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    string(STRIP "${LLVM_CXXFLAGS}" LLVM_CXXFLAGS_STRIPPED)
+    string(REPLACE "-fno-exceptions" "" LLVM_CXXFLAGS_STRIPPED "${LLVM_CXXFLAGS_STRIPPED}")
+    separate_arguments(LLVM_CXXFLAGS_LIST NATIVE_COMMAND "${LLVM_CXXFLAGS_STRIPPED}")
+    target_compile_options(crag PRIVATE ${LLVM_CXXFLAGS_LIST})
 
-# LLVM linker flags for components
-execute_process(
-    COMMAND llvm-config --ldflags --libs core support irreader
-    OUTPUT_VARIABLE LLVM_LDFLAGS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+    # LLVM linker flags for components
+    execute_process(
+        COMMAND llvm-config --ldflags --libs core support irreader
+        OUTPUT_VARIABLE LLVM_LDFLAGS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
 
-string(STRIP "${LLVM_LDFLAGS}" LLVM_LDFLAGS_STRIPPED)
-separate_arguments(LLVM_LDFLAGS_LIST NATIVE_COMMAND "${LLVM_LDFLAGS_STRIPPED}")
-target_link_libraries(crag PRIVATE ${LLVM_LDFLAGS_LIST})
+    string(STRIP "${LLVM_LDFLAGS}" LLVM_LDFLAGS_STRIPPED)
+    separate_arguments(LLVM_LDFLAGS_LIST NATIVE_COMMAND "${LLVM_LDFLAGS_STRIPPED}")
+    target_link_libraries(crag PRIVATE ${LLVM_LDFLAGS_LIST})
 
-
-# find_package(argparse QUIET)
-#
-# if (NOT argparse_FOUND)
-# find argparse
-  FetchContent_Declare(
-    argparse
-    GIT_REPOSITORY https://github.com/p-ranav/argparse.git
-    GIT_TAG v3.2
-  )
-
-  FetchContent_MakeAvailable(argparse)
-# endif()
-target_link_libraries(crag PRIVATE argparse)
+endif()
 
 set(RUNTIME_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runtime")
 

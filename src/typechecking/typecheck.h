@@ -174,7 +174,7 @@ class TypeChecker {
     std::shared_ptr<Type> inferUnaryOp(const std::shared_ptr<UnaryOperation> &un);
     std::shared_ptr<Type> inferFuncCall(const std::shared_ptr<FuncCall> &call,
                                         const std::shared_ptr<Type> &expected = nullptr);
-    std::shared_ptr<Type> tryInferGenericFunctionCall(const std::shared_ptr<FuncCall> &fc, const std::shared_ptr<FunctionType> &ft);
+    std::shared_ptr<TemplateInstantiation> tryInferGenericFunctionCall(const std::shared_ptr<FuncCall> &fc, const std::shared_ptr<FunctionType> &ft);
     std::shared_ptr<Type> inferMethodCall(const std::shared_ptr<MethodCall> &mc);
     std::shared_ptr<Type> inferFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma);
@@ -195,8 +195,11 @@ class TypeChecker {
 
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandSizeOf(const std::shared_ptr<FuncCall> &call);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandSlice(const std::shared_ptr<FuncCall> &call);
+
+    std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandNewStr( const std::shared_ptr<FuncCall> &call);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandOffsetOf(const std::shared_ptr<FuncCall> &call);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandAlignOf(const std::shared_ptr<FuncCall> &call);
+    std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> expandTypeId(const std::shared_ptr<FuncCall> &call);
 
     inline std::vector<TypeScope> &currentScopes() {
         auto mod_id = current_module->id;

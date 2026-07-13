@@ -1,5 +1,8 @@
 import "./libc/stdio.crag" as cstdio;
+import "./builtin.crag" as builtin;
 import "./libc/stdlib.crag" as cstdlib;
+import "./libc/string.crag" as cstring;
+import "./string.crag" as string;
 
 pub fn panic(msg: *const u8) -> void {
     cstdio.fprintf(cstdio.stderr, "PANIC: %s\n", msg);
@@ -8,12 +11,20 @@ pub fn panic(msg: *const u8) -> void {
 
 // --- stdout ---
 
-pub fn print(s: str) -> void {
-    cstdio.printf("%s", s);
+pub fn println<T>(value: T) -> void {
+    print(value);
+    cstdio.putchar('\n');
 }
 
-pub fn println(s: str) -> void {
-    cstdio.puts(s);
+pub fn print<T>(value: T) -> void {
+    let s = string.tostring(value);
+    for (let i: usize = 0; i < s.len; i++) {
+        cstdio.putchar(s[i]);
+    }
+}
+
+pub fn print_ptr(ptr: *void) -> void {
+    cstdio.printf("%p", ptr);
 }
 
 pub fn print_int(n: i64) -> void {
@@ -82,3 +93,4 @@ pub fn eprintln(s: str) -> void {
 pub fn eprintln_int(n: i64) -> void {
     cstdio.fprintf(cstdio.stderr, "%lld\n", n);
 }
+

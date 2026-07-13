@@ -117,7 +117,14 @@ class ModuleResolver {
         auto module_dir = abs_path.parent_path();
 
         for (const auto &decl : ast->declarations) {
-            if (auto importDecl = std::dynamic_pointer_cast<ImportDeclaration>(decl)) {
+            bool isExtern = false;
+            auto actualDecl = decl;
+            if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+                isExtern = true;
+                actualDecl = externDecl->declaration;
+            }
+
+            if (auto importDecl = std::dynamic_pointer_cast<ImportDeclaration>(actualDecl)) {
 
                 auto imported = loadModule(importDecl->path, module_dir);
 
@@ -127,24 +134,24 @@ class ModuleResolver {
             }
 
             // exports
-            if (auto f = std::dynamic_pointer_cast<FunctionDeclaration>(decl)) {
+            if (auto f = std::dynamic_pointer_cast<FunctionDeclaration>(actualDecl)) {
                 if (f->is_pub)
                     module->exports[f->name] = f;
-                if (f->is_extern || f->attributes.count("noprefix"))
+                if (isExtern || f->type->is_extern || f->attributes.count("noprefix"))
                     module->externLinkage.insert(f->name);
             } else if (auto s =
-                           std::dynamic_pointer_cast<StructDeclaration>(decl)) {
+                           std::dynamic_pointer_cast<StructDeclaration>(actualDecl)) {
                 if (s->is_pub)
                     module->exports[s->name] = s;
             } else if (auto e =
-                           std::dynamic_pointer_cast<EnumDeclaration>(decl)) {
+                           std::dynamic_pointer_cast<EnumDeclaration>(actualDecl)) {
                 if (e->is_pub)
                     module->exports[e->name] = e;
             } else if (auto v =
-                           std::dynamic_pointer_cast<VariableDeclaration>(decl)) {
+                           std::dynamic_pointer_cast<VariableDeclaration>(actualDecl)) {
                 if (v->is_pub)
                     module->exports[v->name] = v;
-                if (v->is_extern)
+                if (isExtern)
                     module->externLinkage.insert(v->name);
             }
         }

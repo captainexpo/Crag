@@ -87,6 +87,58 @@ static bool isTemplateDeclaration(const std::shared_ptr<Declaration> &decl) {
     return false;
 }
 
+static std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>>
+makeCachedTemplateResult(const std::shared_ptr<TemplateInstantiation> &ti,
+                         const std::shared_ptr<Type> &type,
+                         uint64_t symbol_id,
+                         const std::string &symbol_name) {
+    if (!type) {
+        return {nullptr, nullptr};
+    }
+
+    ti->inferred_type = type;
+
+    if (auto ftype = std::dynamic_pointer_cast<FunctionType>(type)) {
+        if (symbol_id != UINT64_MAX) {
+            auto va = std::make_shared<VarAccess>(symbol_name);
+            va->inferred_type = ftype;
+            va->symbol_id = symbol_id;
+            va->line = ti->line;
+            va->col = ti->col;
+            return {ftype, va};
+        }
+
+        auto type_expr = std::make_shared<TypeExpression>(ftype);
+        type_expr->inferred_type = ftype;
+        type_expr->symbol_id = symbol_id;
+        type_expr->line = ti->line;
+        type_expr->col = ti->col;
+        return {ftype, type_expr};
+    }
+
+    auto type_expr = std::make_shared<TypeExpression>(type);
+    type_expr->inferred_type = type;
+    type_expr->symbol_id = symbol_id;
+    type_expr->line = ti->line;
+    type_expr->col = ti->col;
+    return {type, type_expr};
+}
+
+static std::shared_ptr<TypeDecl> getTemplateDecl(const std::shared_ptr<Declaration> &decl) {
+    return std::dynamic_pointer_cast<TypeDecl>(decl);
+}
+
+static std::string getTemplateCacheKey(const std::shared_ptr<TypeDecl> &decl,
+                                       const std::vector<std::shared_ptr<Type>> &params) {
+    return mangleTemplateName(decl->name, params);
+}
+
+static std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>>
+makeCachedTemplateResult(const std::shared_ptr<TemplateInstantiation> &ti,
+                         const TypeDecl::InstantiationCacheEntry &entry) {
+    return makeCachedTemplateResult(ti, entry.type, entry.symbol_id, ti->template_name);
+}
+
 // Returns type of expression, and replacement for the instantiation
 std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti) {
     auto target_mod = resolveModulePath(ti, ti->module_path);
@@ -99,6 +151,20 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
     params.reserve(ti->type_args.size());
     for (const auto &arg : ti->type_args) {
         params.push_back(resolveType(ti, arg));
+    }
+
+    if (ti->symbol_id != UINT32_MAX) {
+        auto cached = symbol_table.lookupSymbol(ti->symbol_id);
+        if (cached) {
+            return makeCachedTemplateResult(ti, cached->type, cached->id, cached->name);
+        }
+    }
+
+    if (ti->template_id != UINT32_MAX) {
+        auto cached = symbol_table.lookupSymbol(ti->template_id);
+        if (cached) {
+            return makeCachedTemplateResult(ti, cached->type, cached->id, cached->name);
+        }
     }
 
     SymbolId template_id = currentScopes().front().find(ti->template_name);
@@ -114,6 +180,22 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
 
     if (!decl) {
         throw TypeCheckError(current_module, ti, "Unknown template: " + ti->template_name);
+    }
+
+    auto type_decl = getTemplateDecl(decl);
+    if (!type_decl) {
+        throw TypeCheckError(current_module, ti, "Template declaration is not a type declaration: " + ti->template_name);
+    }
+
+    auto cache_key = getTemplateCacheKey(type_decl, params);
+    auto cache_it = type_decl->instantiations.find(cache_key);
+    if (cache_it != type_decl->instantiations.end()) {
+        auto cached = makeCachedTemplateResult(ti, cache_it->second);
+        if (cache_it->second.symbol_id != UINT64_MAX) {
+            ti->symbol_id = cache_it->second.symbol_id;
+            ti->template_id = cache_it->second.symbol_id;
+        }
+        return cached;
     }
 
     if (auto alias_decl = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
@@ -145,6 +227,8 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         if (inst_id != INVALID_SYMBOL_ID) {
             ti->symbol_id = inst_id;
         }
+
+        type_decl->instantiations[cache_key] = {resolved, inst_id};
 
         return std::make_pair(resolved, std::make_shared<TypeExpression>(resolved));
     }
@@ -205,10 +289,12 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         declCopy->symbol_id = inst_id;
 
         ti->inferred_type = declCopy->type;
+        ti->template_id = inst_id;
+        ti->symbol_id = inst_id;
 
         current_module->ast->declarations.push_back(declCopy);
 
-        ti->symbol_id = inst_id;
+        type_decl->instantiations[cache_key] = {ti->inferred_type, inst_id};
 
         auto va = std::make_shared<VarAccess>(new_name);
         va->inferred_type = ti->inferred_type;
@@ -286,6 +372,8 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         ti->template_id = inst_id;
         ti->symbol_id = inst_id;
         m_expected_return_type = old_expected_return_type;
+
+        type_decl->instantiations[cache_key] = {ti->inferred_type, inst_id};
         return std::make_pair(
             ti->inferred_type,
             std::make_shared<TypeExpression>(ti->inferred_type));
@@ -555,6 +643,13 @@ void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map
     }
 
     if (auto ma = std::dynamic_pointer_cast<ModuleAccess>(node)) {
+        return;
+    }
+
+    if (auto wb= std::dynamic_pointer_cast<WhenBlock>(node)) {
+        if (wb->condition) {
+            replaceGenericTypes(wb->condition, generic_map);
+        }
         return;
     }
 

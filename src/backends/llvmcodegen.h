@@ -219,7 +219,8 @@ class LLVMCodegen : public Backend {
     llvm::Value *generateAddress(const std::shared_ptr<Expression> &expr);
     llvm::Value *generateStatement(const std::shared_ptr<Statement> &stmt);
 
-    llvm::Function *generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> funcDecl);
+    llvm::Function *generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> funcDecl,
+                                              std::shared_ptr<ExternDeclaration> externDecl = nullptr);
     llvm::Function *generateFunctionBody(std::shared_ptr<FunctionDeclaration> funcDecl, llvm::Function *function);
 
     llvm::Value* generateVariableDeclaration(
@@ -314,6 +315,14 @@ class LLVMCodegen : public Backend {
     llvm::Type *getABICoercionType(llvm::Type *structType);
     llvm::Value *coerceToABI(llvm::Value *structValue, llvm::Type *structType);
     llvm::Value *coerceFromABI(llvm::Value *abiValue, llvm::Type *structType);
+
+    bool isExternMemoryAggregateType(const std::shared_ptr<Type> &type, const ASTNodePtr &node);
+    llvm::FunctionType *getExternABIFunctionType(const std::shared_ptr<FunctionType> &funcType,
+                                                 const ASTNodePtr &node,
+                                                 bool &usesSRet,
+                                                 std::vector<bool> &byValParamFlags,
+                                                 std::vector<llvm::Type *> &loweredParamTypes,
+                                                 llvm::Type *&loweredReturnType);
 
     std::optional<CGSymbol> tryGetCGSymbol(SymbolId symbol) {
         auto it = m_symbol_map.find(symbol);
