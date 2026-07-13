@@ -1,0 +1,501 @@
+// crsh - a small bash-like shell written in Crag.
+
+import "stdlib" as std;
+
+const MAX_TOKENS: usize = 128;
+const MAX_COMMANDS: usize = 16;
+
+extern fn fgetc(stream: *void) -> i32;
+extern const stdin: *void;
+
+extern fn fork() -> i32;
+extern fn execvp(path: *const u8, argv: **u8) -> i32;
+extern fn waitpid(pid: i32, status: *i32, options: i32) -> i32;
+extern fn _exit(code: i32) -> void;
+
+extern fn pipe(fds: *i32) -> i32;
+extern fn dup(oldfd: i32) -> i32;
+extern fn dup2(oldfd: i32, newfd: i32) -> i32;
+extern fn close(fd: i32) -> i32;
+extern fn open(path: *const u8, flags: i32, mode: i32) -> i32;
+extern fn fflush(stream: *void) -> i32;
+
+extern fn getcwd(buf: *u8, size: usize) -> *u8;
+extern fn chdir(path: *const u8) -> i32;
+extern fn setenv(name: *const u8, value: *const u8, overwrite: i32) -> i32;
+extern fn unsetenv(name: *const u8) -> i32;
+
+fn is_space(c: u8) -> bool {
+    return c == 32 || c == 9;
+}
+
+fn read_line(stream: *void) -> *u8 {
+    let cap: usize = 256;
+    let buf: *u8 = std.cstdlib.malloc(cap) as *u8;
+    let len: usize = 0;
+
+    while (true) {
+        let c: i32 = fgetc(stream);
+        if (c == -1) {
+            if (len == 0) {
+                std.cstdlib.free(buf as *void);
+                return null;
+            }
+            break;
+        }
+        if (c == 10) {
+            break;
+        }
+        if (len + 1 >= cap) {
+            cap = cap * 2;
+            buf = std.cstdlib.realloc(buf as *void, cap) as *u8;
+        }
+        buf[len] = c as u8;
+        len = len + 1;
+    }
+
+    buf[len] = 0;
+    return buf;
+}
+
+fn strip_comment(line: *u8) -> void {
+    let i: usize = 0;
+    let in_quotes: bool = false;
+    while (line[i] != 0) {
+        if (line[i] == '"') {
+            in_quotes = !in_quotes;
+        } else if (line[i] == '#' && !in_quotes) {
+            line[i] = 0;
+            return;
+        }
+        i = i + 1;
+    }
+}
+
+fn tokenize(line: *u8, tokens: **u8) -> i32 {
+    let count: i32 = 0;
+    let i: usize = 0;
+
+    while (line[i] != 0 && (count as usize) < MAX_TOKENS) {
+        while (is_space(line[i])) {
+            i = i + 1;
+        }
+        if (line[i] == 0) {
+            break;
+        }
+
+        let write: usize = i;
+        let start: usize = i;
+        let in_quotes: bool = false;
+
+        while (line[i] != 0 && (in_quotes || !is_space(line[i]))) {
+            if (line[i] == '"') {
+                in_quotes = !in_quotes;
+                i = i + 1;
+                continue;
+            }
+            line[write] = line[i];
+            write = write + 1;
+            i = i + 1;
+        }
+
+        let had_delim: bool = line[i] != 0;
+        line[write] = 0;
+        tokens[count] = &line[start];
+        count = count + 1;
+
+        if (had_delim) {
+            i = i + 1;
+        }
+    }
+
+    return count;
+}
+
+fn expand_env(tokens: **u8, count: i32) -> void {
+    let i: i32 = 0;
+    while (i < count) {
+        let tok: *u8 = tokens[i];
+        if (tok[0] == '$' && tok[1] != 0) {
+            let value: *u8 = std.cstdlib.getenv(&tok[1] as *const u8);
+            if (value == null) {
+                tokens[i] = "" as *u8;
+            } else {
+                tokens[i] = value;
+            }
+        }
+        i = i + 1;
+    }
+}
+
+const O_RDONLY: i32 = 0;
+const O_WRONLY: i32 = 1;
+const O_CREAT: i32 = 64;
+const O_TRUNC: i32 = 512;
+const O_APPEND: i32 = 1024;
+const CREATE_MODE: i32 = 420; // 0644
+
+struct Command {
+    argv: **u8, // malloc'd buffer of MAX_TOKENS + 1 pointers, owned for the shell's lifetime
+    argc: i32,
+    infile: *u8,
+    outfile: *u8,
+    append: bool,
+}
+
+fn alloc_commands() -> *Command {
+    let commands: *Command = std.cstdlib.malloc(MAX_COMMANDS * sizeof(Command)) as *Command;
+    let i: usize = 0;
+    while (i < MAX_COMMANDS) {
+        commands[i].argv = std.cstdlib.malloc((MAX_TOKENS + 1) * sizeof(*u8)) as **u8;
+        i = i + 1;
+    }
+    return commands;
+}
+
+fn build_commands(tokens: **u8, count: i32, commands: *Command) -> i32 {
+    let num_commands: i32 = 0;
+    commands[0].argc = 0;
+    commands[0].infile = null;
+    commands[0].outfile = null;
+    commands[0].append = false;
+
+    let i: i32 = 0;
+    while (i < count) {
+        let tok: *u8 = tokens[i];
+        let cmd: *Command = &commands[num_commands];
+
+        if (std.cstring.strcmp(tok as *const u8, "|" as *const u8) == 0) {
+            cmd.argv[cmd.argc] = null;
+            num_commands = num_commands + 1;
+            commands[num_commands].argc = 0;
+            commands[num_commands].infile = null;
+            commands[num_commands].outfile = null;
+            commands[num_commands].append = false;
+        } else if (std.cstring.strcmp(tok as *const u8, "<" as *const u8) == 0 && i + 1 < count) {
+            i = i + 1;
+            cmd.infile = tokens[i];
+        } else if (std.cstring.strcmp(tok as *const u8, ">>" as *const u8) == 0 && i + 1 < count) {
+            i = i + 1;
+            cmd.outfile = tokens[i];
+            cmd.append = true;
+        } else if (std.cstring.strcmp(tok as *const u8, ">" as *const u8) == 0 && i + 1 < count) {
+            i = i + 1;
+            cmd.outfile = tokens[i];
+            cmd.append = false;
+        } else {
+            cmd.argv[cmd.argc] = tok;
+            cmd.argc = cmd.argc + 1;
+        }
+
+        i = i + 1;
+    }
+
+    commands[num_commands].argv[commands[num_commands].argc] = null;
+    return num_commands + 1;
+}
+
+fn print_help() -> void {
+    std.cstdio.printf("crsh - a small bash-like shell\n\n");
+    std.cstdio.printf("Built-in commands:\n");
+    std.cstdio.printf("  cd [dir]        change the working directory (default: $HOME)\n");
+    std.cstdio.printf("  pwd              print the working directory\n");
+    std.cstdio.printf("  echo [args...]   print arguments\n");
+    std.cstdio.printf("  export NAME=VAL  set an environment variable\n");
+    std.cstdio.printf("  unset NAME       remove an environment variable\n");
+    std.cstdio.printf("  help              show this message\n");
+    std.cstdio.printf("  exit [code]      exit the shell\n\n");
+    std.cstdio.printf("Other features: pipelines (|), redirection (< > >>),\n");
+    std.cstdio.printf("\"quoted arguments\", $VAR expansion, and # comments.\n");
+}
+
+fn builtin_cd(cmd: *Command) -> void {
+    let dir: *u8 = null;
+    if (cmd.argc < 2) {
+        dir = std.cstdlib.getenv("HOME" as *const u8);
+    } else {
+        dir = cmd.argv[1];
+    }
+    if (dir == null || chdir(dir as *const u8) != 0) {
+        std.cstdio.fprintf(std.cstdio.stderr, "cd: cannot access '%s'\n", dir);
+    }
+}
+
+fn builtin_echo(cmd: *Command) -> void {
+    let i: i32 = 1;
+    while (i < cmd.argc) {
+        std.cstdio.printf("%s", cmd.argv[i]);
+        if (i + 1 < cmd.argc) {
+            std.cstdio.printf(" ");
+        }
+        i = i + 1;
+    }
+    std.cstdio.printf("\n");
+}
+
+fn builtin_export(cmd: *Command) -> void {
+    if (cmd.argc < 2) {
+        std.cstdio.fprintf(std.cstdio.stderr, "export: usage: export NAME=VALUE\n");
+        return;
+    }
+
+    let arg: *u8 = cmd.argv[1];
+    let i: usize = 0;
+    while (arg[i] != 0 && arg[i] != '=') {
+        i = i + 1;
+    }
+
+    if (arg[i] != '=') {
+        std.cstdio.fprintf(std.cstdio.stderr, "export: usage: export NAME=VALUE\n");
+        return;
+    }
+
+    arg[i] = 0;
+    setenv(arg as *const u8, &arg[i + 1] as *const u8, 1);
+}
+
+fn builtin_unset(cmd: *Command) -> void {
+    let i: i32 = 1;
+    while (i < cmd.argc) {
+        unsetenv(cmd.argv[i] as *const u8);
+        i = i + 1;
+    }
+}
+
+fn is_builtin(name: *u8) -> bool {
+    return std.cstring.strcmp(name as *const u8, "cd" as *const u8) == 0
+        || std.cstring.strcmp(name as *const u8, "pwd" as *const u8) == 0
+        || std.cstring.strcmp(name as *const u8, "echo" as *const u8) == 0
+        || std.cstring.strcmp(name as *const u8, "export" as *const u8) == 0
+        || std.cstring.strcmp(name as *const u8, "unset" as *const u8) == 0
+        || std.cstring.strcmp(name as *const u8, "help" as *const u8) == 0
+        || std.cstring.strcmp(name as *const u8, "exit" as *const u8) == 0;
+}
+
+fn run_builtin(cmd: *Command) -> void {
+    let name: *u8 = cmd.argv[0];
+    if (std.cstring.strcmp(name as *const u8, "cd" as *const u8) == 0) {
+        builtin_cd(cmd);
+    } else if (std.cstring.strcmp(name as *const u8, "pwd" as *const u8) == 0) {
+        let buf: [1024]u8 = {};
+        if (getcwd(buf.ptr, 1024) != null) {
+            std.cstdio.printf("%s\n", buf.ptr);
+        }
+    } else if (std.cstring.strcmp(name as *const u8, "echo" as *const u8) == 0) {
+        builtin_echo(cmd);
+    } else if (std.cstring.strcmp(name as *const u8, "export" as *const u8) == 0) {
+        builtin_export(cmd);
+    } else if (std.cstring.strcmp(name as *const u8, "unset" as *const u8) == 0) {
+        builtin_unset(cmd);
+    } else if (std.cstring.strcmp(name as *const u8, "help" as *const u8) == 0) {
+        print_help();
+    } else if (std.cstring.strcmp(name as *const u8, "exit" as *const u8) == 0) {
+        let code: i32 = 0;
+        if (cmd.argc >= 2) {
+            code = std.cstdlib.atoi(cmd.argv[1] as *const u8);
+        }
+        std.cstdlib.exit(code);
+    }
+}
+
+fn apply_redirections(cmd: *Command) -> void {
+    if (cmd.infile != null) {
+        let fd: i32 = open(cmd.infile as *const u8, O_RDONLY, 0);
+        if (fd < 0) {
+            std.cstdio.fprintf(std.cstdio.stderr, "crsh: cannot open '%s' for reading\n", cmd.infile);
+            fflush(null);
+            _exit(1);
+        }
+        dup2(fd, 0);
+        close(fd);
+    }
+    if (cmd.outfile != null) {
+        let flags: i32 = O_WRONLY | O_CREAT;
+        if (cmd.append) {
+            flags = flags | O_APPEND;
+        } else {
+            flags = flags | O_TRUNC;
+        }
+        let fd: i32 = open(cmd.outfile as *const u8, flags, CREATE_MODE);
+        if (fd < 0) {
+            std.cstdio.fprintf(std.cstdio.stderr, "crsh: cannot open '%s' for writing\n", cmd.outfile);
+            fflush(null);
+            _exit(1);
+        }
+        dup2(fd, 1);
+        close(fd);
+    }
+}
+
+fn run_builtin_with_redirection(cmd: *Command) -> void {
+    let saved_stdin: i32 = -1;
+    let saved_stdout: i32 = -1;
+    let ok: bool = true;
+
+    if (cmd.infile != null) {
+        let fd: i32 = open(cmd.infile as *const u8, O_RDONLY, 0);
+        if (fd < 0) {
+            std.cstdio.fprintf(std.cstdio.stderr, "crsh: cannot open '%s' for reading\n", cmd.infile);
+            ok = false;
+        } else {
+            saved_stdin = dup(0);
+            dup2(fd, 0);
+            close(fd);
+        }
+    }
+
+    if (ok && cmd.outfile != null) {
+        let flags: i32 = O_WRONLY | O_CREAT;
+        if (cmd.append) {
+            flags = flags | O_APPEND;
+        } else {
+            flags = flags | O_TRUNC;
+        }
+        let fd: i32 = open(cmd.outfile as *const u8, flags, CREATE_MODE);
+        if (fd < 0) {
+            std.cstdio.fprintf(std.cstdio.stderr, "crsh: cannot open '%s' for writing\n", cmd.outfile);
+            ok = false;
+        } else {
+            fflush(std.cstdio.stdout as *void);
+            saved_stdout = dup(1);
+            dup2(fd, 1);
+            close(fd);
+        }
+    }
+
+    if (ok) {
+        run_builtin(cmd);
+    }
+
+    fflush(std.cstdio.stdout as *void);
+    if (saved_stdout != -1) {
+        dup2(saved_stdout, 1);
+        close(saved_stdout);
+    }
+    if (saved_stdin != -1) {
+        dup2(saved_stdin, 0);
+        close(saved_stdin);
+    }
+}
+
+fn execute_pipeline(commands: *Command, num_commands: i32) -> void {
+    if (num_commands == 1 && is_builtin(commands[0].argv[0])) {
+        run_builtin_with_redirection(&commands[0]);
+        return;
+    }
+
+    let pipe_fds: [MAX_COMMANDS * 2]i32 = {};
+    let i: i32 = 0;
+    while (i < num_commands - 1) {
+        pipe(&pipe_fds[(i as usize) * 2]);
+        i = i + 1;
+    }
+
+    let pids: [MAX_COMMANDS]i32 = {};
+
+    i = 0;
+    while (i < num_commands) {
+        let pid: i32 = fork();
+        if (pid == 0) {
+            if (i > 0) {
+                dup2(pipe_fds[((i - 1) as usize) * 2], 0);
+            }
+            if (i < num_commands - 1) {
+                dup2(pipe_fds[(i as usize) * 2 + 1], 1);
+            }
+
+            let j: i32 = 0;
+            while (j < num_commands - 1) {
+                close(pipe_fds[(j as usize) * 2]);
+                close(pipe_fds[(j as usize) * 2 + 1]);
+                j = j + 1;
+            }
+
+            apply_redirections(&commands[i]);
+
+            if (is_builtin(commands[i].argv[0])) {
+                run_builtin(&commands[i]);
+                fflush(null);
+                _exit(0);
+            }
+
+            execvp(commands[i].argv[0] as *const u8, commands[i].argv);
+            std.cstdio.fprintf(std.cstdio.stderr, "crsh: %s: command not found\n", commands[i].argv[0]);
+            fflush(null);
+            _exit(127);
+        }
+        pids[i] = pid;
+        i = i + 1;
+    }
+
+    i = 0;
+    while (i < num_commands - 1) {
+        close(pipe_fds[(i as usize) * 2]);
+        close(pipe_fds[(i as usize) * 2 + 1]);
+        i = i + 1;
+    }
+
+    i = 0;
+    while (i < num_commands) {
+        let status: i32 = 0;
+        waitpid(pids[i], &status, 0);
+        i = i + 1;
+    }
+}
+
+fn run_line(line: *u8, commands: *Command) -> void {
+    strip_comment(line);
+
+    let tokens: [MAX_TOKENS]*u8 = {};
+    let count: i32 = tokenize(line, tokens.ptr);
+    if (count == 0) {
+        return;
+    }
+    expand_env(tokens.ptr, count);
+
+    let num_commands: i32 = build_commands(tokens.ptr, count, commands);
+
+    if (commands[0].argc == 0) {
+        return;
+    }
+
+    execute_pipeline(commands, num_commands);
+}
+
+fn run_repl(stream: *void, commands: *Command, interactive: bool) -> void {
+    while (true) {
+        if (interactive) {
+            std.cstdio.printf("crsh> ");
+            fflush(std.cstdio.stdout as *void);
+        }
+
+        let line: *u8 = read_line(stream);
+        if (line == null) {
+            if (interactive) {
+                std.cstdio.printf("\n");
+            }
+            break;
+        }
+
+        run_line(line, commands);
+        std.cstdlib.free(line as *void);
+    }
+}
+
+fn main(args: []*u8, envp: *const u8) -> i32 {
+    let commands: *Command = alloc_commands();
+
+    if (args.len > 1) {
+        let script: *void = std.cstdio.fopen(args[1] as *const u8, "r" as *const u8);
+        if (script == null) {
+            std.cstdio.fprintf(std.cstdio.stderr, "crsh: cannot open script '%s'\n", args[1]);
+            return 1;
+        }
+        run_repl(script, commands, false);
+        std.cstdio.fclose(script);
+        return 0;
+    }
+
+    run_repl(stdin, commands, true);
+    return 0;
+}

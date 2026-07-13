@@ -77,11 +77,13 @@ fn, return, if, else, while, for, let, const, struct, union, enum, import, exter
 - Module access / qualification: `mod::name` or `mod::type::<T>`
 - Template instantiation: `Name::<T1, T2>` (parser accepts `ID DOUBLE_COLON LT ... GT` form)
 - Slice constructor: `slice(ptr, len)` returns an unsized array view `[]T`
+- String constructor: `mkstr(ptr, len)` returns a `str` type (unsized array of `u8` with length)
 - Struct initializer: `TypeName { field: expr, ... }` (also works after module/field access or template instantiation)
 - Array literal: `{ e1, e2, ... }` (note: parser uses `{}` for array literals)
-- Unary: prefix `* & + - ! ~ ++ --` and postfix `++ --`
+- Unary: prefix `* & + - ! ~ ++ --` and postfix `++ --` `.*`
 - Binary: standard infix operators including `.` `:` (enum access), `::` (qualification), array indexing `[]`, function call `()`
 - Field access: `expr.field` (also used for module member access when left side is an imported module identifier)
+- Pointer dereference: `expr.*` — reads or assigns through a pointer, e.g. `p.* = 3;` or `let v = p.*;`. This is the operator that actually works; see note below about prefix `*`.
 - Offset access (indexing): `expr[expr]`
 - Function / method call: `f(a, b)` or `obj.method(a)`
 - Casts: `expr as Type` (normal) and `expr re Type` (re-interpret)
@@ -92,6 +94,7 @@ fn, return, if, else, while, for, let, const, struct, union, enum, import, exter
 - `using` creates type aliases and supports generic parameters.
 - `fn` generic params are parsed with `<T,...>` immediately after the function name.
 - Unary & binary operator precedence and associativity are implemented in `get_precedence()` and the Pratt parser (`parse_nud` / `parse_led`).
+- **Prefix `*expr` as a dereference is parsed but not currently handled by the typechecker** ("Unhandled unary operator: *"), for both reads and assignments. Prefix `*` only works in *type* position (e.g. `*T`, `*const T`); to dereference a pointer *value*, use the postfix form `expr.*` (`p.*` to read, `p.* = v` to assign), which lowers to a dedicated `Dereference` AST node and is fully supported.
 
 ## Examples
 - Variable
@@ -117,6 +120,13 @@ let v: S = S { a: 1, buf: {0,1,2,3} };
 ```
 let a: [3]u8 = { 1, 2, 3 };
 let b = a[1];
+```
+
+- Pointer dereference
+```
+fn increment(p: *i32) -> void {
+  p.* = p.* + 1;
+}
 ```
 
 - Import / extern
