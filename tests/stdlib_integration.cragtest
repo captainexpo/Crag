@@ -4,13 +4,12 @@
 //BEGIN CODE
 
 import "stdio.crag" as stdio;
+import "stdlib" as std;
 
 fn main() -> i32 {
-    stdio.printf("%d", 15);
+    let written: i32 = stdio.printf("%d", 15);
+    std.testing.assert(written == 2, "printf('%d', 15) should print 2 characters");
     return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//15
-//END EXPECT

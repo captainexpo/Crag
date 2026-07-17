@@ -1,8 +1,8 @@
 //NAME: Simple Enums
 //DESC: Verify enum values and boolean-backed enums
 //BEGIN CODE
-extern fn printf(fmt: *const u8, ...) -> i32;
 
+import "stdlib" as std;
 
 enum EnumCode(i32) {
     A = 1,
@@ -20,23 +20,19 @@ fn main(argc: i32, argv: **u8) -> i32 {
     let b = EnumCode:B;
     let c = EnumCode:C;
 
-    printf("a = %d\n", a as i32);
-    printf("b = %d\n", b as i32);
-    printf("c = %d\n", c as i32);
+    std.testing.assert((a as i32) == 1, "EnumCode:A should equal 1");
+    std.testing.assert((b as i32) == 2, "EnumCode:B should auto-increment to 2");
+    std.testing.assert((c as i32) == 3, "EnumCode:C should equal 3");
 
     let x = OtherEnum:X;
     let y = OtherEnum:Y;
+    let bx: bool = x;
+    let by: bool = y;
 
-    printf("x = %d\n", x);
-    printf("y = %d\n", y);
+    std.testing.assert(bx == true, "OtherEnum:X should equal true");
+    std.testing.assert(by == false, "OtherEnum:Y should equal false");
 
     return 0;
 }
+
 //END CODE
-//BEGIN EXPECT
-//a = 1
-//b = 2
-//c = 3
-//x = 1
-//y = 0
-//END EXPECT

@@ -1,8 +1,8 @@
 //NAME: Switch On Isize
-//DESC: Tests switch conditions using the new isize type
+//DESC: Tests switch conditions using the isize type
 //BEGIN CODE
 
-extern fn printf(fmt: *u8, ...) -> i32;
+import "stdlib" as std;
 
 fn classify(x: isize) -> i32 {
   switch (x) {
@@ -23,11 +23,10 @@ fn main() -> i32 {
   let a = classify(-1);
   let b = classify(0);
   let c = classify(9);
-  printf("%d %d %d\n", a, b, c);
+  std.testing.assert(a == 1, "classify(-1) should return 1");
+  std.testing.assert(b == 2, "classify(0) should return 2");
+  std.testing.assert(c == 3, "classify(9) should return 3");
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//1 2 3
-//END EXPECT

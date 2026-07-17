@@ -2,16 +2,14 @@
 //DESC: Test whether code not required forward declaration works
 //BEGIN CODE
 
+import "stdlib" as std;
 
 fn main(argc: i32, argv: **u8) -> i32 {
-  printf("Hello World!\n");
+  let written: i32 = printf("Hello World!\n");
+  std.testing.assert(written == 13, "printf should be usable before its forward declaration and report 13 characters written");
   return 0;
 }
 
 extern fn printf(fmt: *u8, ...) -> i32;
 
-
 //END CODE
-//BEGIN EXPECT
-//Hello World!\n
-//END EXPECT

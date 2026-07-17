@@ -1,23 +1,15 @@
 //NAME: Linked List Example
-//DESC: Test linked list printing from examples/linked_list.y. This is more of an all-encompassing test
+//DESC: Test linked list construction and traversal from examples/linked_list.y. This is more of an all-encompassing test
 //BEGIN CODE
 
-extern fn printf(_s: *const u8, ...) -> i32;
+import "stdlib" as std;
+
 extern fn free(_p: *u8) -> void;
 extern fn malloc(_size: usize) -> *u8;
 
 struct Node {
   val: i32,
   next: *Node,
-
-  fn print(self: *Node) -> void {
-    if (self.next == null) {
-      printf("%d\n", self.val);
-      return;
-    }
-    printf("%d -> ", self.val);
-    self.next.print();
-  }
 
   fn append(self: *Node, val: i32) -> void {
     let cur: *Node = self;
@@ -50,12 +42,20 @@ fn main(argc: i32, argv: **u8) -> i32 {
   x.append(44);
   x.append(45);
   x.append(46);
-  x.print();
+
+  let expected: [5]i32 = {42, 43, 44, 45, 46};
+  let cur: *Node = x;
+  let i: i32 = 0;
+  while (cur != null) {
+    std.testing.assert(i < 5, "linked list should not have more than 5 nodes");
+    std.testing.assert(cur.val == expected[i], "linked list node value should match expected order");
+    cur = cur.next;
+    i = i + 1;
+  }
+  std.testing.assert(i == 5, "linked list should have exactly 5 nodes");
+
   llfree(x);
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//42 -> 43 -> 44 -> 45 -> 46
-//END EXPECT

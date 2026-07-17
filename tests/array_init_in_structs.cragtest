@@ -2,7 +2,7 @@
 //DESC:
 //BEGIN CODE
 
-extern fn printf(fmt: *u8, ...) -> i32;
+import "stdlib" as std;
 
 struct Test {
     arr: [256]u8,
@@ -16,12 +16,12 @@ fn main(argc: i32) -> i32 {
         arr2: {1,2,3},
     };
     t.arr[25] = 'H';
-    printf("%c %d %d %d", t.arr[25], t.arr2[0], t.arr2[2], t.arr2[120]);
+    std.testing.assert(t.arr[25] == 'H', "assigning t.arr[25] should stick");
+    std.testing.assert(t.arr2[0] == 1, "t.arr2[0] should be 1 from the initializer");
+    std.testing.assert(t.arr2[2] == 3, "t.arr2[2] should be 3 from the initializer");
+    std.testing.assert(t.arr2[120] == 0, "t.arr2[120] should default to 0 beyond the initializer list");
     return 0;
 }
 
 
 //END CODE
-//BEGIN EXPECT
-//H 1 3 0
-//END EXPECT

@@ -1,0 +1,9 @@
+import "io.crag" as io;
+
+pub fn assert(condition: bool, message: str){
+    if (!condition) {
+        io.panic("[FAIL] " + message);
+        return;
+    }
+    io.println("[PASS] " + message);
+}

@@ -11,15 +11,11 @@ fn main() -> i32 {
         arena.alloc(32);
     }
 
-    std.cstdio.printf("%zu\n", arena.used);
+    std.testing.assert(arena.used == 512, "arena.used after 16 allocations of 32 bytes should be 512");
     arena.reset();
+    std.testing.assert(arena.used == 0, "arena.used after reset() should be 0");
     arena.destroy();
-    std.cstdio.printf("%zu\n", arena.used);
     return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//512
-//0
-//END EXPECT

@@ -2,7 +2,7 @@
 //DESC: Nested generic aliases and concrete alias resolution
 //BEGIN CODE
 
-extern fn printf(fmt: *u8, ...) -> i32;
+import "stdlib" as std;
 
 struct Pair<T> {
     a: T,
@@ -15,11 +15,8 @@ using PairI32 = PairAlias2::<i32>;
 
 fn main() -> i32 {
     let p = PairI32 {a: 2, b: 5};
-    printf("%d\n", p.a + p.b);
+    std.testing.assert(p.a + p.b == 7, "p.a + p.b should be 7");
     return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//7
-//END EXPECT

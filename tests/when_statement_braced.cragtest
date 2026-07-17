@@ -2,26 +2,36 @@
 //DESC: Test braced when statements in function bodies, including nested and removed branches.
 //BEGIN CODE
 
-extern fn printf(_s: *u8, ...) -> i32;
+import "stdlib" as std;
+
+struct Trace {
+  steps: [8]i32,
+  n: i32,
+}
+
+fn record(t: *Trace, marker: i32) -> void {
+  t.steps[t.n] = marker;
+  t.n = t.n + 1;
+}
 
 fn main() -> i32 {
+  let t: Trace = Trace { steps: {0}, n: 0 };
   when true {
-    printf("braced-true-a\n");
+    record(&t, 1); // braced-true-a
     when false {
-      printf("braced-false-skip\n");
+      record(&t, 99); // braced-false-skip
     }
-    when true printf("braced-true-b\n");
+    when true record(&t, 2); // braced-true-b
   }
   when false {
-    printf("braced-false-removed\n");
+    record(&t, 99); // braced-false-removed
   }
-  printf("after-braced\n");
+  record(&t, 3); // after-braced
+
+  std.testing.assert(t.n == 3, "exactly 3 steps should have executed");
+  std.testing.assert(t.steps[0] == 1 && t.steps[1] == 2 && t.steps[2] == 3,
+    "braced when-true branches should execute in order and when-false branches should be skipped");
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//braced-true-a
-//braced-true-b
-//after-braced
-//END EXPECT

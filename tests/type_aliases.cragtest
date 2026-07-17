@@ -2,6 +2,8 @@
 //DESC:
 //BEGIN CODE
 
+import "stdlib" as std;
+
 using number = f64;
 
 struct Point {
@@ -11,20 +13,14 @@ struct Point {
 
 using Test = Point;
 
-extern fn printf(fmt: *u8, ...) -> i32;
-
 fn main() -> i32 {
     let v: number;
     v = 4.0;
-    printf("%f\n", v);
+    std.testing.assert(v == 4.0, "number alias should behave like f64");
     let p: Test = Test { x: 1.0, y: 2.0 };
-    printf("%f\n", p.x + p.y);
+    std.testing.assert(p.x + p.y == 3.0, "Test alias fields should sum to 3.0");
     return 0;
 }
 
 
 //END CODE
-//BEGIN EXPECT
-//4.000000
-//3.000000
-//END EXPECT

@@ -2,7 +2,7 @@
 //DESC: self explanitory
 //BEGIN CODE
 
-extern fn printf(str: *u8, ...) -> i32;
+import "stdlib" as std;
 
 fn main(argc: i32, argv: **u8) -> i32 {
   let i: i32 = 0;
@@ -10,11 +10,8 @@ fn main(argc: i32, argv: **u8) -> i32 {
   i -= 2;
   i *= 10;
   i /= 5;
-  printf("%d", i);
+  std.testing.assert(i == 2, "augmented assignment chain should result in 2");
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//2
-//END EXPECT

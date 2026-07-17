@@ -2,7 +2,7 @@
 //DESC: Test generic function inference and type mixing
 //BEGIN CODE
 
-extern fn printf(fmt: *u8, ...) -> i32;
+import "stdlib" as std;
 
 fn id<T>(x: T) -> T {
   return x;
@@ -11,13 +11,9 @@ fn id<T>(x: T) -> T {
 fn main() -> i32 {
   let a: i32 = id::<i32>(5);
   let b = id::<f64>(3.5);
-  printf("%d\n", a);
-  printf("%f\n", b);
+  std.testing.assert(a == 5, "id::<i32>(5) should return 5");
+  std.testing.assert(b == 3.5, "id::<f64>(3.5) should return 3.5");
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//5
-//3.500000
-//END EXPECT

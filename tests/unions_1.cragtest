@@ -2,6 +2,7 @@
 //DESC:
 //BEGIN CODE
 
+import "stdlib" as std;
 
 struct Test {
     x: f64,
@@ -14,8 +15,6 @@ union Vals {
     T: Test,
 }
 
-extern fn printf(fmt: *u8, ...) -> i32;
-
 fn main() -> i32 {
     let v: Vals;
     v.a = 4.0;
@@ -23,12 +22,9 @@ fn main() -> i32 {
         x: 5.0,
         y: 2.0,
     };
-    printf("%lli\n", v.b);
+    std.testing.assert(v.b == 4617315517961601024, "v.b should read the bit pattern of Test.x (5.0 as f64) through the union");
     return 0;
 }
 
 
 //END CODE
-//BEGIN EXPECT
-//4617315517961601024
-//END EXPECT

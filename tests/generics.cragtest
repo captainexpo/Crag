@@ -2,28 +2,23 @@
 //DESC:
 //BEGIN CODE
 
+import "stdlib" as std;
 
 struct Vec2<T> {
     x: T,
     y: T,
 }
 
-extern fn printf(fmt: *u8, ...) -> i32;
-
 fn main() -> i32 {
 
     let v: Vec2::<f64> = Vec2::<f64> { x: 3.0, y: 4.0 };
-    printf("%f %f\n", v.x, v.y);
+    std.testing.assert(v.x == 3.0 && v.y == 4.0, "Vec2::<f64> fields should be 3.0 and 4.0");
 
     let v2 = Vec2::<i32> { x: 30, y: 40 };
-    printf("%d %d\n", v2.x, v2.y);
+    std.testing.assert(v2.x == 30 && v2.y == 40, "Vec2::<i32> fields should be 30 and 40");
 
     return 0;
 }
 
 
 //END CODE
-//BEGIN EXPECT
-//3.000000 4.000000
-//30 40
-//END EXPECT

@@ -2,19 +2,29 @@
 //DESC: Test single-statement when syntax in function bodies.
 //BEGIN CODE
 
-extern fn printf(_s: *u8, ...) -> i32;
+import "stdlib" as std;
+
+struct Trace {
+  steps: [8]i32,
+  n: i32,
+}
+
+fn record(t: *Trace, marker: i32) -> void {
+  t.steps[t.n] = marker;
+  t.n = t.n + 1;
+}
 
 fn main() -> i32 {
-  when false printf("single-false-skip\n");
-  when true printf("single-true-a\n");
-  when true printf("single-true-b\n");
-  printf("after-single\n");
+  let t: Trace = Trace { steps: {0}, n: 0 };
+  when false record(&t, 99); // single-false-skip
+  when true record(&t, 1); // single-true-a
+  when true record(&t, 2); // single-true-b
+  record(&t, 3); // after-single
+
+  std.testing.assert(t.n == 3, "exactly 3 steps should have executed");
+  std.testing.assert(t.steps[0] == 1 && t.steps[1] == 2 && t.steps[2] == 3,
+    "single-statement when-true branches should run in order and when-false should be skipped");
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//single-true-a
-//single-true-b
-//after-single
-//END EXPECT

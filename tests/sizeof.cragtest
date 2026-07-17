@@ -1,22 +1,16 @@
 
-//NAME: Sizeof 
-//DESC: 
+//NAME: Sizeof
+//DESC:
 //BEGIN CODE
 
-extern fn printf(format: *const u8, ...) -> i32;
+import "stdlib" as std;
 
 fn main(argc: i32, argv: *const *const u8) -> i32 {
-    printf("%d\n", sizeof(u8));
-    printf("%d\n", sizeof(u32));
-    printf("%d\n", sizeof(i64));
-    printf("%d\n", sizeof(*void));
+    std.testing.assert(sizeof(u8) == 1, "sizeof(u8) should be 1");
+    std.testing.assert(sizeof(u32) == 4, "sizeof(u32) should be 4");
+    std.testing.assert(sizeof(i64) == 8, "sizeof(i64) should be 8");
+    std.testing.assert(sizeof(*void) == 8, "sizeof(*void) should be 8");
     return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//1
-//4
-//8
-//8
-//END EXPECT

@@ -2,33 +2,31 @@
 //DESC: Tests return inside when and continue/break inside loops with when
 //BEGIN CODE
 
-extern fn printf(fmt: *u8, ...) -> i32;
+import "stdlib" as std;
 
 fn main() -> i32 {
+  let visited: [4]bool = {false, false, false, false};
+  let steps: i32 = 0;
   for (let i: i32 = 0; i < 4; i = i + 1) {
     if (i == 1) {
-      printf("skip-1\n");
       continue;
     }
     if (i == 3) {
-      printf("stop-at-3\n");
       break;
     }
-    printf("i=%d\n", i);
+    visited[i] = true;
+    steps += 1;
   }
+  std.testing.assert(visited[0] == true, "i == 0 should run the loop body");
+  std.testing.assert(visited[1] == false, "i == 1 should be skipped via continue");
+  std.testing.assert(visited[2] == true, "i == 2 should run the loop body");
+  std.testing.assert(visited[3] == false, "i == 3 should break before running the loop body");
+  std.testing.assert(steps == 2, "loop body should run exactly twice (i == 0 and i == 2)");
+
   when true {
-    printf("after-loop\n");
     return 0;
   }
-  printf("should-not-print\n");
-  return 0;
+  return 1;
 }
 
 //END CODE
-//BEGIN EXPECT
-//i=0
-//skip-1
-//i=2
-//stop-at-3
-//after-loop
-//END EXPECT

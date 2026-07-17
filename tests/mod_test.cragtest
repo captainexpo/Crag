@@ -4,16 +4,12 @@
 //BEGIN CODE
 
 import "mod_test_r1.crag" as mt1;
-
-extern fn printf(fmt: *u8, ...) -> i32;
+import "stdlib" as std;
 
 fn main() -> i32 {
     const a = mt1.func();
-    printf("%d", a);
+    std.testing.assert(a == 15, "mt1.func() should return 15");
     return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//15
-//END EXPECT

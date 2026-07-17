@@ -196,17 +196,17 @@ fn build_commands(tokens: **u8, count: i32, commands: *Command) -> i32 {
 }
 
 fn print_help() -> void {
-    std.cstdio.printf("crsh - a small bash-like shell\n\n");
-    std.cstdio.printf("Built-in commands:\n");
-    std.cstdio.printf("  cd [dir]        change the working directory (default: $HOME)\n");
-    std.cstdio.printf("  pwd              print the working directory\n");
-    std.cstdio.printf("  echo [args...]   print arguments\n");
-    std.cstdio.printf("  export NAME=VAL  set an environment variable\n");
-    std.cstdio.printf("  unset NAME       remove an environment variable\n");
-    std.cstdio.printf("  help              show this message\n");
-    std.cstdio.printf("  exit [code]      exit the shell\n\n");
-    std.cstdio.printf("Other features: pipelines (|), redirection (< > >>),\n");
-    std.cstdio.printf("\"quoted arguments\", $VAR expansion, and # comments.\n");
+    std.io.print("crsh - a small bash-like shell\n\n");
+    std.io.print("Built-in commands:\n");
+    std.io.print("  cd [dir]        change the working directory (default: $HOME)\n");
+    std.io.print("  pwd              print the working directory\n");
+    std.io.print("  echo [args...]   print arguments\n");
+    std.io.print("  export NAME=VAL  set an environment variable\n");
+    std.io.print("  unset NAME       remove an environment variable\n");
+    std.io.print("  help              show this message\n");
+    std.io.print("  exit [code]      exit the shell\n\n");
+    std.io.print("Other features: pipelines (|), redirection (< > >>),\n");
+    std.io.print("\"quoted arguments\", $VAR expansion, and # comments.\n");
 }
 
 fn builtin_cd(cmd: *Command) -> void {
@@ -226,11 +226,11 @@ fn builtin_echo(cmd: *Command) -> void {
     while (i < cmd.argc) {
         std.cstdio.printf("%s", cmd.argv[i]);
         if (i + 1 < cmd.argc) {
-            std.cstdio.printf(" ");
+            std.io.print(" ");
         }
         i = i + 1;
     }
-    std.cstdio.printf("\n");
+    std.io.print("\n");
 }
 
 fn builtin_export(cmd: *Command) -> void {
@@ -465,14 +465,14 @@ fn run_line(line: *u8, commands: *Command) -> void {
 fn run_repl(stream: *void, commands: *Command, interactive: bool) -> void {
     while (true) {
         if (interactive) {
-            std.cstdio.printf("crsh> ");
+            std.io.print("crsh> ");
             fflush(std.cstdio.stdout as *void);
         }
 
         let line: *u8 = read_line(stream);
         if (line == null) {
             if (interactive) {
-                std.cstdio.printf("\n");
+                std.io.print("\n");
             }
             break;
         }

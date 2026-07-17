@@ -2,7 +2,8 @@
 //DESC: Test struct methods from examples/struct_methods.y
 //BEGIN CODE
 
-extern fn printf(format: *const u8, ...) -> i32;
+import "stdlib" as std;
+
 extern fn malloc(size: usize) -> *u8;
 extern fn memcpy(dest: *u8, src: *const u8, n: usize) -> *u8;
 extern fn strlen(s: *const u8) -> u32;
@@ -35,13 +36,6 @@ struct Str {
   fn deinit(self: *Str) -> void {
     free(self.ptr);
   }
-  fn print(self: *Str) -> void {
-    let i: usize = 0;
-    while (i < self.len) {
-      printf("%c", self.ptr[i]);
-      i = i + 1;
-    }
-  }
   fn compare(self: *Str, s: *Str) -> i32 {
     let min_len: usize = min(self.len as i32, s.len as i32) as usize;
     for (let i: usize = 0; i < min_len; i = i + 1) {
@@ -66,17 +60,22 @@ fn main() -> i32 {
   let s: Str = make_str("Hello,");
   let t: Str = make_str(" World!\n");
   s.append(&t);
-  s.print();
-  printf("Length: %d\n", s.len());
-  printf("Comparison with 'Hello, World!': %d\n", s.compare(&t));
+
+  std.testing.assert(s.len() == 14, "s.len() after append should be 14");
+
+  let expected: [14]u8 = {'H','e','l','l','o',',',' ','W','o','r','l','d','!','\n'};
+  let matches: bool = true;
+  for (let i: usize = 0; i < 14; i = i + 1) {
+    if (s.ptr[i] != expected[i]) {
+      matches = false;
+    }
+  }
+  std.testing.assert(matches, "appended string should read 'Hello, World!\\n'");
+  std.testing.assert(s.compare(&t) == 40, "s.compare(&t) should be 40");
+
   s.deinit();
   t.deinit();
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//Hello, World!
-//Length: 14
-//Comparison with 'Hello, World!': 40
-//END EXPECT

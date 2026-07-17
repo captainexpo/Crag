@@ -2,19 +2,18 @@
 //DESC: Self evident
 //BEGIN CODE
 
-extern fn printf(format: *const u8, ...) -> i32;
+import "stdlib" as std;
 
 fn main(argc: i32, argv: *const *const u8) -> i32 {
     let a: i32 = 5;
+    let inner_a: i32 = 0;
     {
         let a: i32 = 7;
-        printf("Inner a: %d\n", a);
+        inner_a = a;
     }
-    printf("Outer a: %d\n", a);
+    std.testing.assert(inner_a == 7, "inner scope's shadowed a should be 7");
+    std.testing.assert(a == 5, "outer a should remain 5 after the inner scope ends");
     return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//Inner a: 7\nOuter a: 5
-//END EXPECT

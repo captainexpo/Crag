@@ -2,7 +2,7 @@
 //DESC:
 //BEGIN CODE
 
-extern fn printf(fmt: *u8, ...) -> i32;
+import "stdlib" as std;
 
 struct Point<T> {
     x: T,
@@ -18,11 +18,8 @@ using Palias<T> = Point::<T>;
 fn main() -> i32 {
     let p1 = Palias::<i32>{x: 1, y: 2};
     let k = identity::<bool>(true);
-    printf("%d\n", p1.x + p1.y + (k as i32));
+    std.testing.assert(p1.x + p1.y + (k as i32) == 4, "p1.x + p1.y + (k as i32) should be 4");
     return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//4
-//END EXPECT

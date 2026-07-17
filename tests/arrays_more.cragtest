@@ -2,13 +2,13 @@
 //DESC: Test the array literals and stuff
 //BEGIN CODE
 
-extern fn printf(fmt: *u8, ...) -> i32;
+import "stdlib" as std;
 
 fn main(argc: i32) -> i32 {
     let arr: [3+3]u8 = {'H','E','L','L','O',0};
     other(arr.ptr);
-    printf("%s\n", arr.ptr);
-    printf("Len: %d\n", arr.len);
+    std.testing.assert(arr[0] == 'B', "other() should have mutated arr[0] to 'B'");
+    std.testing.assert(arr.len == 6, "arr.len should be 6");
     return 0;
 }
 
@@ -17,9 +17,4 @@ fn other(arr: *u8) -> u8 {
     return arr[0];
 }
 
-
 //END CODE
-//BEGIN EXPECT
-//BELLO
-//Len: 6
-//END EXPECT

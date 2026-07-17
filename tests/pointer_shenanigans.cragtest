@@ -8,11 +8,8 @@ fn main(argc: i32, argv: **u8) -> i32 {
 
     let p1 = std.heap.alloc_arr::<u8>(1024);
     std.cstring.strcpy(p1.ptr, "Hello World!");
-    std.cstdio.printf("%s\n", p1.ptr);
+    std.testing.assert(std.cstring.strcmp(p1.ptr, "Hello World!") == 0, "p1.ptr should contain 'Hello World!'");
     return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//Hello World!
-//END EXPECT

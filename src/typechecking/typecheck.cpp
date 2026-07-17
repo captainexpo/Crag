@@ -289,6 +289,15 @@ bool canExplicitCast(const std::shared_ptr<Type> &from,
         return true; // TODO: Figure out if this is bad
     if (from_tk == TypeKind::Enum && to->isNumeric())
         return true;
+    // Enums with a non-numeric base type (e.g. `enum E(bool)`) can be
+    // implicitly assigned to their base type (see canImplicitCast above),
+    // but until this check existed there was no way to explicitly `as`-cast
+    // back to that same base type, since `to->isNumeric()` above only covers
+    // numeric bases.
+    if (auto from_enum = std::dynamic_pointer_cast<EnumType>(from)) {
+        if (from_enum->base_type->equals(to))
+            return true;
+    }
     if (from_tk == TypeKind::Bool && to->isNumeric())
         return true;
     if (from->isNumeric() && to_tk == TypeKind::Bool)
@@ -1531,7 +1540,6 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
             }
             if (va->name == "typeid") {
                 auto to = expandTypeId(call);
-                std::cout << "TypeId expansion: " << to.first->str() << std::endl;
                 expr = to.second;
                 return to.first;
             }

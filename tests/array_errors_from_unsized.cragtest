@@ -18,4 +18,4 @@ fn other(arr: []i32) -> void {
 //BEGIN EXPECT ERR
 //PANIC: Runtime Panic: Out of Bounds
 // at line 11, col 8
-//END EXPECT
+//END EXPECT ERR

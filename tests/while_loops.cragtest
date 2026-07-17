@@ -2,7 +2,7 @@
 //DESC: Test whether while loops work
 
 //BEGIN CODE
-extern fn printf(fmt: *u8, ...) -> i32;
+import "stdlib" as std;
 
 fn main() -> i32 {
   let i: i32 = 1;
@@ -11,11 +11,9 @@ fn main() -> i32 {
     i = i * 2;
     j = j + 1;
   }
-  printf("%d %d\n", i, j);
+  std.testing.assert(i == 16, "doubling from 1 while < 10 should stop at 16");
+  std.testing.assert(j == 4, "doubling from 1 to 16 should take 4 iterations");
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//16 4\n
-//END EXPECT

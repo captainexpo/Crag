@@ -5,11 +5,9 @@
 import "stdlib" as std;
 
 fn main(argc: i32, argv: **u8) -> i32 {
-  std.cstdio.printf("Hello World!\n");
+  let written: i32 = std.cstdio.printf("Hello World!\n");
+  std.testing.assert(written == 13, "printf should report 13 characters written");
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//Hello World!\n
-//END EXPECT

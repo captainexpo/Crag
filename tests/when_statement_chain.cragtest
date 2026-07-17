@@ -2,26 +2,35 @@
 //DESC: Test several adjacent when statements so removals and insertions do not skip siblings.
 //BEGIN CODE
 
-extern fn printf(_s: *u8, ...) -> i32;
+import "stdlib" as std;
+
+struct Trace {
+  steps: [8]i32,
+  n: i32,
+}
+
+fn record(t: *Trace, marker: i32) -> void {
+  t.steps[t.n] = marker;
+  t.n = t.n + 1;
+}
 
 fn main() -> i32 {
-  when true printf("chain-1\n");
-  when false printf("chain-skip-1\n");
+  let t: Trace = Trace { steps: {0}, n: 0 };
+  when true record(&t, 1); // chain-1
+  when false record(&t, 99); // chain-skip-1
   when true {
-    printf("chain-2a\n");
+    record(&t, 2); // chain-2a
   }
   when false {
-    printf("chain-skip-2\n");
+    record(&t, 99); // chain-skip-2
   }
-  when true printf("chain-3\n");
-  printf("chain-end\n");
+  when true record(&t, 3); // chain-3
+  record(&t, 4); // chain-end
+
+  std.testing.assert(t.n == 4, "exactly 4 steps should have executed");
+  std.testing.assert(t.steps[0] == 1 && t.steps[1] == 2 && t.steps[2] == 3 && t.steps[3] == 4,
+    "adjacent when statements should not skip siblings");
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//chain-1
-//chain-2a
-//chain-3
-//chain-end
-//END EXPECT

@@ -3,17 +3,13 @@
 //REQUIRES:mod_test_requires/mod_math.crag
 //BEGIN CODE
 
-extern fn printf(fmt: *u8, ...) -> i32;
-
+import "stdlib" as std;
 import "mod_math.crag" as math;
 
 fn main() -> i32 {
     let v: math.Vec2 = math.Vec2{x: 2, y: 4};
-    printf("%d\n", math.C + math.add(v));
+    std.testing.assert(math.C + math.add(v) == 7, "math.C + math.add(v) should be 7");
     return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//7
-//END EXPECT

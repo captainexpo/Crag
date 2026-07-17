@@ -2,7 +2,7 @@
 //DESC: Ensure const-eval matches runtime evaluation for basic ops
 //BEGIN CODE
 
-extern fn printf(fmt: *u8, ...) -> i32;
+import "stdlib" as std;
 
 fn main() -> i32 {
   const a: i32 = 7;
@@ -27,16 +27,25 @@ fn main() -> i32 {
   let ri: bool = (ra > rb);
   let rj: bool = (ra == rb);
 
-  printf("%d %d %d %d %d %d %d %d %d %d\n",
-    c, d, e, f, g, h, i as i32, j as i32,
-    rc, rd);
-  printf("%d %d %d %d %d %d %d %d\n",
-    r_mul, rf, rg, rh, ri as i32, rj as i32, a as i32, b as i32);
+  std.testing.assert(c == 9, "a + b should be 9");
+  std.testing.assert(d == 5, "a - b should be 5");
+  std.testing.assert(e == 14, "a * b should be 14");
+  std.testing.assert(f == 3, "a / b should be 3");
+  std.testing.assert(g == 6, "(12 & 5) | 2 should be 6");
+  std.testing.assert(h == 10, "(1 << 3) ^ 2 should be 10");
+  std.testing.assert(i == true, "a > b should be true");
+  std.testing.assert(j == false, "a == b should be false");
+
+  std.testing.assert(c == rc, "const and runtime addition should match");
+  std.testing.assert(d == rd, "const and runtime subtraction should match");
+  std.testing.assert(e == r_mul, "const and runtime multiplication should match");
+  std.testing.assert(f == rf, "const and runtime division should match");
+  std.testing.assert(g == rg, "const and runtime bitwise-and/or should match");
+  std.testing.assert(h == rh, "const and runtime shift/xor should match");
+  std.testing.assert(i == ri, "const and runtime comparison (>) should match");
+  std.testing.assert(j == rj, "const and runtime comparison (==) should match");
+
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//9 5 14 3 6 10 1 0 9 5
-//14 3 6 10 1 0 7 2
-//END EXPECT

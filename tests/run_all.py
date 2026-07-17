@@ -16,12 +16,14 @@ def color_text(text: Any, rgb: tuple[int, int, int]) -> str:
 
 
 def parse_test_file(text: str):
+    # Most tests assert their own expectations at runtime via std.testing.assert()
+    # and simply need to exit 0. BEGIN EXPECT ERR / END EXPECT ERR is kept for the
+    # handful of tests that intentionally fail to compile or panic, where there's
+    # no running program left to make assertions from.
     SECTION_NAME = re.compile(r"^NAME:\s*(.*)")
     SECTION_DESC = re.compile(r"^DESC:\s*(.*)")
     BEGIN_CODE = "BEGIN CODE"
     END_CODE = "END CODE"
-    BEGIN_EXPECT_OUT = "BEGIN EXPECT"
-    END_EXPECT_OUT = "END EXPECT"
     BEGIN_EXPECT_ERR = "BEGIN EXPECT ERR"
     END_EXPECT_ERR = "END EXPECT ERR"
 
@@ -32,11 +34,10 @@ def parse_test_file(text: str):
     name = None
     desc = None
     code = []
-    expect = []
     expect_err = []
     args = [] # for ARGS: <arg case 1> | <arg case 2> | ...
 
-    mode = None  # None, "code", "expect", "expect_err",
+    mode = None  # None, "code", "expect_err"
 
     for _line in lines:
         line = _line[2:] if _line.startswith('//') else _line # skip the leading comment characters
@@ -66,12 +67,6 @@ def parse_test_file(text: str):
             mode = None
             continue
 
-        if line.strip() == BEGIN_EXPECT_OUT:
-            mode = "expect"
-            continue
-        if line.strip() == END_EXPECT_OUT:
-            mode = None
-            continue
         if line.strip() == BEGIN_EXPECT_ERR:
             mode = "expect_err"
             continue
@@ -81,8 +76,6 @@ def parse_test_file(text: str):
 
         if mode == "code":
             code.append(_line)
-        elif mode == "expect":
-            expect.append(line.encode("utf-8").decode("unicode_escape"))
         elif mode == "expect_err":
             expect_err.append(line.encode("utf-8").decode("unicode_escape"))
 
@@ -90,7 +83,6 @@ def parse_test_file(text: str):
         "name": name,
         "desc": desc,
         "code": "\n".join(code).rstrip(),
-        "expect": "\n".join(expect).rstrip(),
         "expect_err": "\n".join(expect_err).rstrip(),
         "requires": requires,
         "args": args,
@@ -141,7 +133,6 @@ def run_unit_test(
     out_base = str(outdir / base)
     test_file_data = parse_test_file(open(src_path).read())
     src_code = test_file_data["code"]
-    expected_output = test_file_data["expect"]
     required_files = test_file_data["requires"]
 
     # Create a test directory for this specific test
@@ -199,36 +190,27 @@ def run_unit_test(
 
     if result.returncode != 0:
         if not test_file_data["expect_err"].strip():
+            # No EXPECT ERR block: this test proves itself via std.testing.assert()
+            # calls at runtime, so a nonzero exit means an assertion failed (or the
+            # program crashed) rather than an expected failure.
             printc(
-                f"Execution failed:\nStdout:{result.stdout}\nStderr:\n{result.stderr}",
+                f"Assertions failed / execution crashed:\nStdout:{result.stdout}\nStderr:\n{result.stderr}",
                 C_RED,
             )
             return TestResult.FAIL, outs, time.time() - start_time
-        if test_file_data["expect_err"]:
-            expected_err = test_file_data["expect_err"]
-            actual_err = result.stderr.rstrip()
-            if actual_err != expected_err:
-                printc("Error output mismatch:", C_RED)
-                printc("Expected Stderr:", C_RED)
-                printc(expected_err, C_RED)
-                printc("Actual Stderr:", C_RED)
-                printc(actual_err, C_RED)
-                return TestResult.FAIL, outs, total_time
-            else:
-                return TestResult.PASS, outs, total_time
+        expected_err = test_file_data["expect_err"]
+        actual_err = result.stderr.rstrip()
+        if actual_err != expected_err:
+            printc("Error output mismatch:", C_RED)
+            printc("Expected Stderr:", C_RED)
+            printc(expected_err, C_RED)
+            printc("Actual Stderr:", C_RED)
+            printc(actual_err, C_RED)
+            return TestResult.FAIL, outs, total_time
+        return TestResult.PASS, outs, total_time
     elif test_file_data["expect_err"].strip():
         printc("Expected execution to fail but it succeeded.", C_RED)
         return TestResult.FAIL, outs, total_time
-
-    actual_output = result.stdout.rstrip()
-    if test_file_data["expect"]:
-        if actual_output != expected_output:
-            printc("Output mismatch:", C_RED)
-            printc("Expected Stdout:", C_RED)
-            printc(expected_output, C_RED)
-            printc("Actual Stdout:", C_RED)
-            printc(actual_output, C_RED)
-            return TestResult.FAIL, outs, total_time
 
     return TestResult.PASS, outs, total_time
 

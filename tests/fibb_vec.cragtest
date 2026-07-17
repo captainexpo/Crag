@@ -12,19 +12,11 @@ fn main() -> i32 {
     for (let i: usize = 1; i < 100; i += 1) {
         a.append(a.get(i - 1).ok + a.get(i).ok);
     }
+    let expected: [7]i64 = {0, 1, 1, 2, 3, 5, 8};
     for (let i: usize = 0; i < 7; i += 1){
-        std.cstdio.printf("%lld\n", a.get(i).ok);
+        std.testing.assert(a.get(i).ok == expected[i], "fibonacci value at index i should match expected");
     }
     return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//0
-//1
-//1
-//2
-//3
-//5
-//8
-//END EXPECT

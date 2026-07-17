@@ -1,7 +1,7 @@
 //NAME: Global Variables
-//DESC: Verify global constants and printing
+//DESC: Verify global constants
 //BEGIN CODE
-extern fn printf(format: *const u8, ...) -> i32;
+import "stdlib" as std;
 
 const PI = 3.14159;
 const E = 2.71828;
@@ -10,16 +10,9 @@ const TAU = 2.0 * PI;
 
 
 fn main(argc: i32, argv: *const *const u8) -> i32 {
-    printf("Hello, World!\n" as *const u8);
-    printf("PI: %f\n", PI);
-    printf("E: %f\n", E);
-    printf("TAU: %f\n", TAU);
+    std.testing.assert(PI == 3.14159, "PI should be 3.14159");
+    std.testing.assert(E == 2.71828, "E should be 2.71828");
+    std.testing.assert(TAU == 2.0 * PI, "TAU should equal 2 * PI");
     return 0;
 }
 //END CODE
-//BEGIN EXPECT
-//Hello, World!
-//PI: 3.141590
-//E: 2.718280
-//TAU: 6.283180
-//END EXPECT

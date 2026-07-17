@@ -1,48 +1,35 @@
 // NAME: Native str type
 // DESC: Tests the native str type: literals, concatenation, indexing, .len, .ptr, equality
 // BEGIN CODE
-extern fn printf(fmt: *const u8, ...) -> i32;
+import "stdlib" as std;
 
 fn main() -> i32 {
     // str literal and .len
     let greeting: str = "hello";
-    printf("len=%d\n", greeting.len);
+    std.testing.assert(greeting.len == 5, "greeting.len should be 5");
 
     // indexing
     let ch: u8 = greeting[1];
-    printf("ch=%c\n", ch);
+    std.testing.assert(ch == 'e', "greeting[1] should be 'e'");
 
     // concatenation
     let a: str = "foo";
     let b: str = "bar";
     let c: str = a + b;
-    printf("%s\n", c);
-    printf("concat_len=%d\n", c.len);
+    std.testing.assert(c == "foobar", "a + b should equal 'foobar'");
+    std.testing.assert(c.len == 6, "c.len should be 6");
 
     // equality
     let x: str = "abc";
     let y: str = "abc";
     let z: str = "xyz";
-    if (x == y) {
-        printf("equal\n");
-    }
-    if (x != z) {
-        printf("not_equal\n");
-    }
+    std.testing.assert(x == y, "'abc' == 'abc' should be true");
+    std.testing.assert(x != z, "'abc' != 'xyz' should be true");
 
     // coercion to *const u8
     let raw: *const u8 = greeting as *const u8;
-    printf("%s\n", raw);
+    std.testing.assert(std.cstring.strcmp(raw, "hello") == 0, "coercing str to *const u8 should preserve the same bytes");
 
     return 0;
 }
 // END CODE
-// BEGIN EXPECT
-//len=5
-//ch=e
-//foobar
-//concat_len=6
-//equal
-//not_equal
-//hello
-// END EXPECT

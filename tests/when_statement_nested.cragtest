@@ -2,25 +2,33 @@
 //DESC: Test nested when statements and nested block lowering.
 //BEGIN CODE
 
-extern fn printf(_s: *u8, ...) -> i32;
+import "stdlib" as std;
+
+struct Trace {
+  steps: [8]i32,
+  n: i32,
+}
+
+fn record(t: *Trace, marker: i32) -> void {
+  t.steps[t.n] = marker;
+  t.n = t.n + 1;
+}
 
 fn main() -> i32 {
+  let t: Trace = Trace { steps: {0}, n: 0 };
   when true {
-    printf("outer-a\n");
+    record(&t, 1); // outer-a
     when true {
-      printf("inner-a\n");
-      when false printf("inner-skip\n");
-      when true printf("inner-b\n");
+      record(&t, 2); // inner-a
+      when false record(&t, 99); // inner-skip
+      when true record(&t, 3); // inner-b
     }
-    printf("outer-b\n");
+    record(&t, 4); // outer-b
   }
+  std.testing.assert(t.n == 4, "exactly 4 steps should have executed");
+  std.testing.assert(t.steps[0] == 1 && t.steps[1] == 2 && t.steps[2] == 3 && t.steps[3] == 4,
+    "nested when-true branches should execute in order and when-false branches should be skipped");
   return 0;
 }
 
 //END CODE
-//BEGIN EXPECT
-//outer-a
-//inner-a
-//inner-b
-//outer-b
-//END EXPECT
