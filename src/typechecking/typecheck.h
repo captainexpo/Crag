@@ -172,6 +172,8 @@ class TypeChecker {
     std::shared_ptr<Type> inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
                                         const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferUnaryOp(const std::shared_ptr<UnaryOperation> &un);
+    std::shared_ptr<Type> inferTryExpr(const std::shared_ptr<TryExpression> &tryExpr);
+    std::shared_ptr<Type> inferCatchExpr(const std::shared_ptr<CatchExpression> &catchExpr);
     std::shared_ptr<Type> inferFuncCall(const std::shared_ptr<FuncCall> &call,
                                         const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<TemplateInstantiation> tryInferGenericFunctionCall(const std::shared_ptr<FuncCall> &fc, const std::shared_ptr<FunctionType> &ft);

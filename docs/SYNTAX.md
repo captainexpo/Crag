@@ -22,7 +22,7 @@ This file summarizes the language syntax as implemented by `src/lexer.*` and `sr
 - Null: `null` (keyword)
 
 ## Keywords (non-exhaustive)
-fn, return, if, else, while, for, let, const, struct, union, enum, import, extern, pub, break, continue, using, when, type, asm, volatile, switch
+fn, return, if, else, while, for, let, const, struct, union, enum, import, extern, pub, break, continue, using, when, type, asm, volatile, switch, try, catch
 
 ## Operators & Delimiters (high level)
 - Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`
@@ -39,7 +39,8 @@ fn, return, if, else, while, for, let, const, struct, union, enum, import, exter
 - Array type: `[<size>]T` for fixed-sized arrays, or `[]T` (written as `[]T` by using `[]` with no size) — parser uses `LBRACKET` `RBRACKET` and an optional size expression. Unsized arrays are represented with `unsized=true`.
 - Function pointer type: `fn(T1, T2) -> TRet` (parsed into a `FunctionType` wrapped in a `PointerType`).
 - Template instance / qualified type: `Module::Name` or `Type:: <T...>` (the parser supports `DOUBLE_COLON` and `:: < ... >` template args).
-- Error union (return-with-error): `T!E` (type `T` with error `E`).
+- Error union (return-with-error): `T!E` (type `T` with error `E`). Values are unwrapped
+  manually via `.ok` / `.err` / `.is_err` field access, or with `try` / `catch` (see Expressions).
 
 ## Declarations
 - Function:
@@ -87,6 +88,16 @@ fn, return, if, else, while, for, let, const, struct, union, enum, import, exter
 - Offset access (indexing): `expr[expr]`
 - Function / method call: `f(a, b)` or `obj.method(a)`
 - Casts: `expr as Type` (normal) and `expr re Type` (re-interpret)
+- `try expr`: `expr` must be an error union (`T!E`). If it holds an error, immediately returns
+  that error from the enclosing function (which must itself return `X!E` with the *same* `E` —
+  no implicit conversion); otherwise evaluates to the unwrapped `T`. Binds like the other prefix
+  unary operators (precedence 41), so `try foo().bar()` parses as `try (foo().bar())`.
+- `expr catch fallback` / `expr catch |err| fallback`: `expr` must be an error union. If it holds
+  an error, evaluates to `fallback` instead (with the error value bound to `err` when a capture
+  is given); otherwise evaluates to the unwrapped value. `fallback` is a single expression (there
+  are no block-expressions in this language). `catch` is low precedence (same tier as `as`/`re`),
+  so `x catch y + 1` parses as `(x catch y) + 1` — parenthesize when mixing `catch` with same- or
+  lower-precedence operators inside the fallback, e.g. `expr catch |e| (e.code as i32 * 2)`.
 
 ## Notable Parser Behaviors / Constraints
 - Array literal syntax uses `{ ... }` (same token as struct initializer start). When the parser sees `{` after an identifier or type it treats as a struct initializer; when it sees `{` directly it parses an array literal.
@@ -138,4 +149,27 @@ extern fn printf(fmt: *const u8, ...) -> i32;
 - Inline Assembly
 ```
 asm("mov {0}, {1}", in(reg) x, out(reg) y);
+```
+
+- Error unions with try / catch
+```
+enum MyError(i32) { DivisionByZero = 0 }
+
+fn divide(a: i32, b: i32) -> i32!MyError {
+  if (b == 0) {
+    return! MyError:DivisionByZero;
+  }
+  return a / b;
+}
+
+// try: propagate an error to the caller
+fn divide_and_double(a: i32, b: i32) -> i32!MyError {
+  let d = try divide(a, b);
+  return d * 2;
+}
+
+// catch: supply a fallback, optionally capturing the error
+fn safe_divide(a: i32, b: i32) -> i32 {
+  return divide(a, b) catch |err| 0;
+}
 ```

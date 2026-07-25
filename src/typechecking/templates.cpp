@@ -552,6 +552,23 @@ void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map
         return;
     }
 
+    if (auto tryE = std::dynamic_pointer_cast<TryExpression>(node)) {
+        if (tryE->operand) {
+            replaceGenericTypes(tryE->operand, generic_map);
+        }
+        return;
+    }
+
+    if (auto catchE = std::dynamic_pointer_cast<CatchExpression>(node)) {
+        if (catchE->operand) {
+            replaceGenericTypes(catchE->operand, generic_map);
+        }
+        if (catchE->handler) {
+            replaceGenericTypes(catchE->handler, generic_map);
+        }
+        return;
+    }
+
     if (auto call = std::dynamic_pointer_cast<FuncCall>(node)) {
         if (call->func) {
             replaceGenericTypes(call->func, generic_map);

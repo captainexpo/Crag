@@ -18,23 +18,5 @@ pub enum TypeID(i32) {
     Str,
     Struct,
     Pointer,
-}
-
-pub struct TypeInfo {
-    id: TypeID,
-    sub_id: TypeID,
-}
-
-pub fn type_info<T>(x: T) -> TypeInfo {
-    let id: i32 = typeid(x);
-    let sub_id: i32 = 0;
-
-    if (id >= 15) {
-        sub_id = id - 15;
-    }
-
-    return TypeInfo {
-        id: TypeID(id),
-        sub_id: TypeID(sub_id),
-    };
+    Array,
 }

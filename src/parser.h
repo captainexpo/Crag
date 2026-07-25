@@ -135,6 +135,7 @@ class Parser {
         TokenType::BAND_ASSIGN,
         TokenType::BOR_ASSIGN,
         TokenType::BXOR_ASSIGN,
+        TokenType::CATCH,
     };
 
     const std::set<TokenType> PREFIX_OPS = {

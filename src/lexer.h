@@ -37,6 +37,8 @@ enum class TokenType {
     ASM, // (Inline assembly)
     VOLATILE,
     SWITCH,
+    TRY,
+    CATCH,
 
     // Operators
     EQ,

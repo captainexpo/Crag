@@ -128,7 +128,8 @@ static int getTypeId(std::shared_ptr<Type> type){
     if(std::dynamic_pointer_cast<Boolean>(type)) return 12;
     if(std::dynamic_pointer_cast<StringType>(type)) return 13;
     if(std::dynamic_pointer_cast<StructType>(type)) return 14;
-    if (std::dynamic_pointer_cast<PointerType>(type)) return 15 + getTypeId(std::dynamic_pointer_cast<PointerType>(type)->base);
+    if (std::dynamic_pointer_cast<PointerType>(type)) return 15;
+    if (std::dynamic_pointer_cast<ArrayType>(type)) return 16;
 
     throw std::runtime_error("Unknown type for typeid");
 }

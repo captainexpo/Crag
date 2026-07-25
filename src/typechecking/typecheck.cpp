@@ -576,6 +576,13 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
             if (!resolved) {
                 throw TypeCheckError(current_module, node, "Symbol '" + qt->type_name + "' in module '" + cur_mod->canon_name + "' is not a type for qualified type '" + qt->str() + "'");
             }
+            if (!resolved->type) {
+                // Generic (template) type: no concrete type until instantiated with
+                // concrete args. Keep the QualifiedType (module_path + name) intact so
+                // later TemplateInstanceType resolution can still route it through
+                // module-aware instantiation, mirroring the unqualified fallback above.
+                return qt;
+            }
             return resolved->type;
         }
     }
@@ -643,6 +650,13 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                 substituteGenericTypes(base_copy, generic_map);
                 auto collapsed = resolveType(node, base_copy);
                 if (auto collapsed_struct = std::dynamic_pointer_cast<StructType>(collapsed)) {
+                    if (collapsed_struct->complete) {
+                        // Already a fully-instantiated concrete type (e.g. resolved via a
+                        // module-qualified template instantiation above) — re-instantiating
+                        // it by name would use an already-mangled name with no module
+                        // context and fail. Just return it.
+                        return collapsed;
+                    }
                     auto ti = std::make_shared<TemplateInstantiation>(collapsed_struct->name, resolved_args);
                     auto pair = inferTemplateInstantiation(ti);
                     if (!pair.first) {
@@ -1510,6 +1524,10 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         return inferBinaryOp(bin, expected);
     if (auto un = std::dynamic_pointer_cast<UnaryOperation>(expr))
         return inferUnaryOp(un);
+    if (auto tryE = std::dynamic_pointer_cast<TryExpression>(expr))
+        return inferTryExpr(tryE);
+    if (auto catchE = std::dynamic_pointer_cast<CatchExpression>(expr))
+        return inferCatchExpr(catchE);
     if (auto call = std::dynamic_pointer_cast<FuncCall>(expr)) {
         if (auto va = std::dynamic_pointer_cast<VarAccess>(call->func)) {
             // Check for built-in functions
@@ -1693,6 +1711,22 @@ TypeChecker::inferTypeCast(const std::shared_ptr<TypeCast> &tc) {
 }
 
 std::shared_ptr<Type> TypeChecker::inferVarAccess(std::shared_ptr<VarAccess> &v) {
+    if (v->symbol_id != INT64_MAX) {
+        // Already resolved to a concrete symbol (e.g. by generic template
+        // instantiation, which runs with a different module temporarily active
+        // than whatever module is current now). Trust the resolved symbol id
+        // instead of re-resolving by name, which only searches the *current*
+        // module's scope and can fail even though the symbol is known to exist.
+        auto pre_resolved = symbol_table.lookupSymbol(v->symbol_id);
+        if (pre_resolved) {
+            if (!pre_resolved->type) {
+                throw TypeCheckError(current_module, v, "Variable has no resolvable type: " + v->name + " (could it be a template?)");
+            }
+            v->inferred_type = resolveType(v, pre_resolved->type);
+            return v->inferred_type;
+        }
+    }
+
     auto maybe = lookupSymbolInScope(v->name);
     if (maybe == std::nullopt) {
         ensureGlobalVariableVisible(v->name);
@@ -2027,6 +2061,67 @@ TypeChecker::inferUnaryOp(const std::shared_ptr<UnaryOperation> &un) {
         return ot;
     }
     throw TypeCheckError(current_module, un, "Unhandled unary operator: " + un->op);
+}
+
+std::shared_ptr<Type>
+TypeChecker::inferTryExpr(const std::shared_ptr<TryExpression> &tryExpr) {
+    auto ot = resolveType(tryExpr, inferExpression(tryExpr->operand));
+    auto eu = std::dynamic_pointer_cast<ErrorUnionType>(ot);
+    if (!eu) {
+        throw TypeCheckError(current_module, tryExpr, "try requires an error union expression, got " + typeName(ot));
+    }
+    if (!m_expected_return_type || !dynamic_cast<ErrorUnionType *>(m_expected_return_type.get())) {
+        throw TypeCheckError(current_module, tryExpr, "try can only be used inside a function that returns an error union");
+    }
+    auto outer_eu = std::dynamic_pointer_cast<ErrorUnionType>(m_expected_return_type);
+    if (!eu->errorType->equals(outer_eu->errorType)) {
+        throw TypeCheckError(current_module, tryExpr,
+                             "try: error type " + typeName(eu->errorType) +
+                                 " does not match enclosing function's error type " + typeName(outer_eu->errorType) +
+                                 "; use 'catch' to convert or handle it explicitly");
+    }
+    tryExpr->inferred_type = resolveType(tryExpr, eu->valueType);
+    return tryExpr->inferred_type;
+}
+
+std::shared_ptr<Type>
+TypeChecker::inferCatchExpr(const std::shared_ptr<CatchExpression> &catchExpr) {
+    auto ot = resolveType(catchExpr, inferExpression(catchExpr->operand));
+    auto eu = std::dynamic_pointer_cast<ErrorUnionType>(ot);
+    if (!eu) {
+        throw TypeCheckError(current_module, catchExpr, "catch requires an error union expression, got " + typeName(ot));
+    }
+
+    bool pushed_scope = false;
+    if (catchExpr->capture_name) {
+        pushScope();
+        pushed_scope = true;
+        SymbolId sid;
+        if (!insertSymbol(*catchExpr->capture_name, SymbolKind::Variable, eu->errorType, catchExpr, &sid)) {
+            popScope();
+            throw TypeCheckError(current_module, catchExpr, "Duplicate name in catch capture: " + *catchExpr->capture_name);
+        }
+        catchExpr->capture_symbol_id = sid;
+    }
+
+    auto ht = resolveType(catchExpr, inferExpression(catchExpr->handler, eu->valueType));
+
+    if (!ht->equals(eu->valueType)) {
+        if (canImplicitCast(ht, eu->valueType)) {
+            catchExpr->handler = std::make_shared<TypeCast>(catchExpr->handler, eu->valueType, CastType::Normal);
+        } else {
+            if (pushed_scope)
+                popScope();
+            throw TypeCheckError(current_module, catchExpr,
+                                 "catch: handler type mismatch: expected " + typeName(eu->valueType) + " but got " + typeName(ht));
+        }
+    }
+
+    if (pushed_scope)
+        popScope();
+
+    catchExpr->inferred_type = eu->valueType;
+    return catchExpr->inferred_type;
 }
 
 std::shared_ptr<Type>

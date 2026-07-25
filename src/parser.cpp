@@ -983,6 +983,14 @@ std::shared_ptr<Expression> Parser::parse_nud() {
             // Compiler intrinsic access
             return std::make_shared<VarAccess>("@" + t.value); // TODO: Add separate Intrinsic node?
         }
+        case TokenType::TRY: {
+            constexpr int PREFIX_PRECEDENCE = 41;
+            auto operand = parse_expression(PREFIX_PRECEDENCE);
+            expr = std::make_shared<TryExpression>(operand);
+            expr->line = t.line;
+            expr->col = t.column;
+            return expr;
+        }
         default:
             if (PREFIX_OPS.count(t.type)) {
                 constexpr int PREFIX_PRECEDENCE = 41;
@@ -1009,6 +1017,19 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
                 expr = std::make_shared<TypeCast>(
                     left, target_type,
                     t.type == TokenType::RE ? CastType::Reinterperet : CastType::Normal);
+                expr->line = t.line;
+                expr->col = t.column;
+                return expr;
+            }
+            case TokenType::CATCH: {
+                std::optional<std::string> capture_name;
+                if (peek().type == TokenType::BOR) {
+                    consume(TokenType::BOR);
+                    capture_name = consume(TokenType::ID).value;
+                    consume(TokenType::BOR);
+                }
+                auto handler = parse_expression(get_precedence(t, false) + 1);
+                expr = std::make_shared<CatchExpression>(left, capture_name, handler);
                 expr->line = t.line;
                 expr->col = t.column;
                 return expr;
@@ -1196,6 +1217,7 @@ int Parser::get_precedence(const Token &token, bool postfix) const {
     switch (token.type) {
         case TokenType::AS:
         case TokenType::RE:
+        case TokenType::CATCH:
             return 2;
         case TokenType::OR:
             return 3;

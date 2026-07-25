@@ -1,0 +1,50 @@
+//NAME: Try/Catch Expressions
+//DESC: Test try (error propagation) and catch (fallback/capture) on a divide() function that can fail
+//BEGIN CODE
+
+import "stdlib" as std;
+
+enum MyError(i32) {
+  DivisionByZero = 0,
+  Unknown = 1,
+}
+
+fn divide(a: i32, b: i32) -> i32!MyError {
+  if (b == 0) {
+    return! MyError:DivisionByZero;
+  }
+  return a / b;
+}
+
+fn divide_and_double(a: i32, b: i32) -> i32!MyError {
+  let d = try divide(a, b);
+  return d * 2;
+}
+
+fn main() -> i32 {
+  // try: propagates through on the ok path
+  let r1: i32!MyError = divide_and_double(10, 2);
+  std.testing.assert(!r1.is_err, "divide_and_double(10, 2) should not error");
+  std.testing.assert(r1.ok == 10, "divide_and_double(10, 2) should equal 10");
+
+  // try: propagates the error up to the caller
+  let r2: i32!MyError = divide_and_double(10, 0);
+  std.testing.assert(r2.is_err, "divide_and_double(10, 0) should error");
+  std.testing.assert(r2.err == MyError:DivisionByZero, "propagated error should be DivisionByZero");
+
+  // catch: ok path returns the unwrapped value, not the fallback
+  let v1: i32 = divide(10, 2) catch 999;
+  std.testing.assert(v1 == 5, "divide(10, 2) catch 999 should be 5, not the fallback");
+
+  // catch: error path returns the fallback expression
+  let v2: i32 = divide(10, 0) catch 0;
+  std.testing.assert(v2 == 0, "divide(10, 0) catch 0 should be 0");
+
+  // catch with |err| capture: the error value is bound and usable in the handler
+  let v3: i32 = divide(10, 0) catch |e| ((e == MyError:DivisionByZero) as i32 * 42);
+  std.testing.assert(v3 == 42, "captured error should equal DivisionByZero, giving 42");
+
+  return 0;
+}
+
+//END CODE

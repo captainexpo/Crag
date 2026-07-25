@@ -1,9 +1,36 @@
 import "io.crag" as io;
+import "string.crag" as string;
 
 pub fn assert(condition: bool, message: str){
     if (!condition) {
         io.panic("[FAIL] " + message);
         return;
+    }
+    io.println("[PASS] " + message);
+}
+
+pub fn assert_equal<T>(expected: T, actual: T, message: str) {
+    if (expected != actual) {
+        io.panic("[FAIL] " + message + ": expected " + string.tostring(expected) + ", got " + string.tostring(actual));
+        return;
+    }
+    io.println("[PASS] " + message);
+}
+
+pub fn assert_array_equal<T>(expected: []T, actual: []T, message: str) {
+    if (expected.len != actual.len) {
+        io.panic("[FAIL] " + message + ": expected array length " + string.tostring(expected.len) + ", got " + string.tostring(actual.len));
+        return;
+    }
+    for (let i = 0; i < expected.len; i++) {
+        if (expected[i] != actual[i]) {
+            if (expected.len > 10) {
+                io.panic("[FAIL] " + message + ": expected element at index " + string.tostring(i) + " to be " + string.tostring(expected[i]) + ", got " + string.tostring(actual[i]));
+            } else {
+                io.panic("[FAIL] " + message + ": expected " + string.tostring::<[]T>(expected) + ", got " + string.tostring::<[]T>(actual));
+            }
+            return;
+        }
     }
     io.println("[PASS] " + message);
 }

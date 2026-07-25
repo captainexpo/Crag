@@ -4,21 +4,23 @@ import "./libc/stdio.crag" as cstdio;
 import "./builtin.crag" as builtin;
 
 pub fn tostring_int(n: i64) -> str {
-    let buf: [32]u8 = {0};
-    cstdio.snprintf(buf.ptr, 32, "%lld", n);
-    return newstr(buf.ptr, cstring.strlen(buf.ptr));
+    // Heap-allocated rather than a `[32]u8` local: a `str` returned from
+    // here outlives this stack frame, and a pointer into a local array
+    // would already be dangling by the time the caller reads it.
+    let buf: *u8 = cstdlib.malloc(32) as *u8; cstdio.snprintf(buf, 32, "%lld", n);
+    return newstr(buf, cstring.strlen(buf));
 }
 
 pub fn tostring_uint(n: u64) -> str {
-    let buf: [32]u8 = {0};
-    cstdio.snprintf(buf.ptr, 32, "%llu", n);
-    return newstr(buf.ptr, cstring.strlen(buf.ptr));
+    let buf: *u8 = cstdlib.malloc(32) as *u8;
+    cstdio.snprintf(buf, 32, "%llu", n);
+    return newstr(buf, cstring.strlen(buf));
 }
 
 pub fn tostring_float(f: f64) -> str {
-    let buf: [32]u8 = {0};
-    cstdio.snprintf(buf.ptr, 32, "%g", f);
-    return newstr(buf.ptr, cstring.strlen(buf.ptr));
+    let buf: *u8 = cstdlib.malloc(32) as *u8;
+    cstdio.snprintf(buf, 32, "%g", f);
+    return newstr(buf, cstring.strlen(buf));
 }
 
 pub fn tostring_bool(b: bool) -> str {
@@ -30,16 +32,16 @@ pub fn tostring_bool(b: bool) -> str {
 }
 
 pub fn tostring_char(c: u8) -> str {
-    let buf: [2]u8 = {0};
+    let buf: *u8 = cstdlib.malloc(2) as *u8;
     buf[0] = c;
     buf[1] = 0;
-    return newstr(buf.ptr, 1);
+    return newstr(buf, 1);
 }
 
 pub fn tostring_ptr(ptr: *void) -> str {
-    let buf: [32]u8 = {0};
-    cstdio.snprintf(buf.ptr, 24, "%p", ptr);
-    return newstr(buf.ptr, cstring.strlen(buf.ptr));
+    let buf: *u8 = cstdlib.malloc(32) as *u8;
+    cstdio.snprintf(buf, 24, "%p", ptr);
+    return newstr(buf, cstring.strlen(buf));
 }
 
 pub fn tostring<T>(value: T) -> str {
@@ -64,6 +66,18 @@ pub fn tostring<T>(value: T) -> str {
     }
     when builtin.TypeID:Pointer == typeid(value) {
         return tostring_ptr(value as *void);
+    }
+    when builtin.TypeID:Array == typeid(value) {
+        let result: str = "{";
+        for (let i: usize = 0; i < value.len; i++) {
+            let v = value[i];
+            result += tostring(v);
+            if (i < value.len - 1) {
+                result += ", ";
+            }
+        }
+        result += "}";
+        return result;
     }
     return "";
 }

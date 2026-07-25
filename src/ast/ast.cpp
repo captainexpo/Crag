@@ -100,6 +100,77 @@ void setLitVal(std::shared_ptr<Literal> lit, uint64_t raw_val) {
     throw std::runtime_error("Unsupported literal type for setLitVal: " + lit->lit_type->str());
 }
 
+// Natural (non-packed) alignment of `type`, matching what LLVM's
+// StructType::setBody(..., /*packed=*/false) will actually use. Needed by
+// getTypeSize() so that struct sizes include the same inter-field and
+// trailing padding LLVM inserts -- without this, sizeof() on a struct that
+// mixes field sizes (e.g. a 4-byte enum next to 8-byte pointers) silently
+// undercounts the real in-memory size, and every malloc(sizeof(T)) for
+// such a type under-allocates.
+int getTypeAlign(const std::shared_ptr<Type> &type) {
+    switch (type->kind()) {
+        case TypeKind::I8:
+        case TypeKind::U8:
+        case TypeKind::Bool:
+            return 1;
+        case TypeKind::I16:
+        case TypeKind::U16:
+            return 2;
+        case TypeKind::I32:
+        case TypeKind::U32:
+        case TypeKind::F32:
+            return 4;
+        case TypeKind::Enum:
+            return getTypeAlign(std::dynamic_pointer_cast<EnumType>(type)->base_type);
+        case TypeKind::U64:
+        case TypeKind::I64:
+        case TypeKind::F64:
+        case TypeKind::Pointer:
+        case TypeKind::Function:
+        case TypeKind::Str:
+            return 8;
+        case TypeKind::USize:
+        case TypeKind::ISize:
+            return sizeof(size_t);
+        case TypeKind::Struct: {
+            auto st = std::dynamic_pointer_cast<StructType>(type);
+            int max_align = 1;
+            for (const auto &field : st->fields) {
+                max_align = std::max(max_align, getTypeAlign(field.second));
+            }
+            return max_align;
+        }
+        case TypeKind::Union: {
+            auto ut = std::dynamic_pointer_cast<UnionType>(type);
+            int max_align = 1;
+            for (const auto &field : ut->fields) {
+                max_align = std::max(max_align, getTypeAlign(field.second));
+            }
+            return max_align;
+        }
+        case TypeKind::Array: {
+            auto at = std::dynamic_pointer_cast<ArrayType>(type);
+            return getTypeAlign(at->element_type);
+        }
+        case TypeKind::ErrorUnion: {
+            auto eut = std::dynamic_pointer_cast<ErrorUnionType>(type);
+            return std::max(getTypeAlign(eut->valueType), getTypeAlign(eut->errorType));
+        }
+        case TypeKind::Void:
+            return 1;
+        default:
+            break;
+    }
+
+    throw std::runtime_error("Unsupported type for getTypeAlign: " + type->str());
+}
+
+static inline int alignUp(int offset, int align) {
+    if (align <= 1)
+        return offset;
+    return ((offset + align - 1) / align) * align;
+}
+
 int getTypeSize(const std::shared_ptr<Type> &type) {
     switch (type->kind()) {
         case TypeKind::I8:
@@ -116,20 +187,37 @@ int getTypeSize(const std::shared_ptr<Type> &type) {
         case TypeKind::I64:
         case TypeKind::F64:
             return 8;
-        // case TypeKind::ISize:
+        case TypeKind::ISize:
         case TypeKind::USize:
             return sizeof(size_t);
         case TypeKind::Pointer:
             return sizeof(void *);
         case TypeKind::Bool:
             return 1;
+        case TypeKind::Str:
+            // Matches getLLVMType's StringType lowering: { ptr, i64 }.
+            return sizeof(void *) + 8;
         case TypeKind::Struct: {
             auto st = std::dynamic_pointer_cast<StructType>(type);
-            int total_size = 0;
+            int offset = 0;
+            int max_align = 1;
             for (const auto &field : st->fields) {
-                total_size += getTypeSize(field.second);
+                int falign = getTypeAlign(field.second);
+                offset = alignUp(offset, falign);
+                offset += getTypeSize(field.second);
+                max_align = std::max(max_align, falign);
             }
-            return total_size;
+            return alignUp(offset, max_align);
+        }
+        case TypeKind::Union: {
+            auto ut = std::dynamic_pointer_cast<UnionType>(type);
+            int max_size = 0;
+            int max_align = 1;
+            for (const auto &field : ut->fields) {
+                max_size = std::max(max_size, getTypeSize(field.second));
+                max_align = std::max(max_align, getTypeAlign(field.second));
+            }
+            return alignUp(max_size, max_align);
         }
         case TypeKind::Array: {
             auto at = std::dynamic_pointer_cast<ArrayType>(type);

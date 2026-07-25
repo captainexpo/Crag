@@ -15,7 +15,7 @@ fn main(argc: i32, argv: **u8) -> i32 {
     let arr2: [5]i32 = {1,2,3,4,5};
     let view: []i32 = slice(arr2.ptr, 5);
     std.testing.assert(arr2.ptr.* == 1, "dereferencing arr2.ptr should give the first element, 1");
-    std.testing.assert((arr2.ptr + sizeof(i32)).* == 2, "advancing arr2.ptr by sizeof(i32) should give the second element, 2");
+    std.testing.assert((arr2.ptr + 1).* == 2, "advancing arr2.ptr by 1 should give the second element, 2");
     std.testing.assert(view.len == 5, "view.len should be 5");
     std.testing.assert(view[2] == 3, "view[2] should be 3");
 

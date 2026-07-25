@@ -98,6 +98,8 @@ struct ASTVisitor {
     virtual void visit(struct AsmStmt &) {}
     virtual void visit(struct WhenBlock &) {}
     virtual void visit(struct SwitchStmt &) {}
+    virtual void visit(struct TryExpression &) {}
+    virtual void visit(struct CatchExpression &) {}
 };
 
 struct Type {
@@ -166,6 +168,8 @@ enum class NodeKind {
     TypeAliasDeclaration,
     ExternDeclaration,
     TypeExpression,
+    TryExpr,
+    CatchExpr,
     Unknown,
 };
 
@@ -1089,6 +1093,38 @@ struct UnaryOperation : public Expression {
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
+// `try expr`: unwraps an error-union value, or propagates the error by
+// returning early from the enclosing function.
+struct TryExpression : public Expression {
+    ExprPtr operand;
+    explicit TryExpression(ExprPtr e) : operand(std::move(e)) {}
+    std::string str() const override {
+        return "TryExpression(" + operand->toString() + ")";
+    }
+    NodeKind kind() const override { return NodeKind::TryExpr; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
+};
+
+// `expr catch [|name|] handler`: unwraps an error-union value, or evaluates
+// `handler` (with the error optionally bound to `name`) as a fallback value.
+struct CatchExpression : public Expression {
+    ExprPtr operand;
+    std::optional<std::string> capture_name;
+    uint64_t capture_symbol_id = INT64_MAX;
+    ExprPtr handler;
+    CatchExpression(ExprPtr op, std::optional<std::string> cap, ExprPtr h)
+        : operand(std::move(op)), capture_name(std::move(cap)), handler(std::move(h)) {}
+    std::string str() const override {
+        return "CatchExpression(" + operand->toString() +
+               (capture_name ? (" |" + *capture_name + "|") : "") +
+               ", " + handler->toString() + ")";
+    }
+    NodeKind kind() const override { return NodeKind::CatchExpr; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
+};
+
 using ConstValue = std::variant<uint64_t, int64_t, double, bool, std::string>;
 struct Literal : public Expression {
     ConstValue value;
@@ -1634,5 +1670,6 @@ struct SwitchStmt : public Statement {
 uint64_t getLitValue(const std::shared_ptr<Literal> &lit);
 void setLitVal(std::shared_ptr<Literal> lit, uint64_t raw_val);
 int getTypeSize(const std::shared_ptr<Type> &type);
+int getTypeAlign(const std::shared_ptr<Type> &type);
 
 #endif

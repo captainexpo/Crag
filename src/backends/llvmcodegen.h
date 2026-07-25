@@ -255,6 +255,10 @@ class LLVMCodegen : public Backend {
     llvm::Value *generateFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue = true);
 
     llvm::Value *generateErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
+    llvm::Value *generateTryExpr(const std::shared_ptr<TryExpression> &tryExpr, bool loadValue);
+    llvm::Value *generateCatchExpr(const std::shared_ptr<CatchExpression> &catchExpr, bool loadValue);
+    llvm::Value *materializeErrorUnionBase(const std::shared_ptr<Expression> &operand,
+                                           const std::shared_ptr<ErrorUnionType> &euType);
     llvm::Value *generateArrayFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
     llvm::Value *generateStringFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
     llvm::Value *generateOffsetAccess(const std::shared_ptr<OffsetAccess> &offsetAccess,

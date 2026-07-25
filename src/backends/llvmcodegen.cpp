@@ -690,8 +690,38 @@ llvm::Value *LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &exp
         return generateModuleAccess(std::dynamic_pointer_cast<ModuleAccess>(expr),
                                     false);
     } else if (IS_INSTANCE(expr, MethodCall)) {
+        // isLValue() treats a pointer-returning method call as an lvalue
+        // (so that e.g. `some_call().field` type-checks); honor that here.
+        // Every other branch above returns a genuine memory address whose
+        // *load* yields the value (that's what callers like
+        // generateFieldAccess assume), but a call's result is a bare SSA
+        // value with no address of its own -- so spill it into a fresh
+        // temporary alloca and hand back that alloca's address.
+        auto mc = std::dynamic_pointer_cast<MethodCall>(expr);
+        if (mc->inferred_type && mc->inferred_type->kind() == TypeKind::Pointer) {
+            llvm::Value *ptrVal = generateExpression(expr);
+            llvm::AllocaInst *tmp = createEntryBlockAlloca(
+                m_builder->GetInsertBlock()->getParent(), ptrVal->getType(), "methodcall_ptr_tmp");
+            m_builder->CreateStore(ptrVal, tmp);
+            return tmp;
+        }
         throw CodeGenError(expr,
                            "Cannot take address of method call result");
+    } else if (IS_INSTANCE(expr, FuncCall)) {
+        // Same reasoning as the MethodCall case above: isLValue() allows a
+        // pointer-returning function call to act as an lvalue (e.g.
+        // `peek(ps).kind`), so treat it the same way rather than falling
+        // through to "not an lvalue" below.
+        auto fc = std::dynamic_pointer_cast<FuncCall>(expr);
+        if (fc->inferred_type && fc->inferred_type->kind() == TypeKind::Pointer) {
+            llvm::Value *ptrVal = generateExpression(expr);
+            llvm::AllocaInst *tmp = createEntryBlockAlloca(
+                m_builder->GetInsertBlock()->getParent(), ptrVal->getType(), "funccall_ptr_tmp");
+            m_builder->CreateStore(ptrVal, tmp);
+            return tmp;
+        }
+        throw CodeGenError(expr,
+                           "Cannot take address of function call result");
     }
     throw CodeGenError(expr, "Expression is not an lvalue: " + expr->str());
 }
@@ -707,6 +737,12 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
     if (IS_INSTANCE(expr, UnaryOperation)) {
         auto unOp = std::dynamic_pointer_cast<UnaryOperation>(expr);
         return generateUnaryOp(unOp, loadValue);
+    }
+    if (IS_INSTANCE(expr, TryExpression)) {
+        return generateTryExpr(std::dynamic_pointer_cast<TryExpression>(expr), loadValue);
+    }
+    if (IS_INSTANCE(expr, CatchExpression)) {
+        return generateCatchExpr(std::dynamic_pointer_cast<CatchExpression>(expr), loadValue);
     }
     if (IS_INSTANCE(expr, Literal)) {
         return generateLiteral(std::dynamic_pointer_cast<Literal>(expr), loadValue);
@@ -1508,8 +1544,13 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
         return generateLogicalOp(left, right, op);
     }
 
-    // str concatenation and comparison
-    if (left->inferred_type && left->inferred_type->kind() == TypeKind::Str) {
+    // str concatenation and comparison. Assignment ("=") to a str-typed
+    // lvalue is deliberately excluded here and falls through to the
+    // general assignment path below (generateAddress + store), which
+    // handles it fine since a `str` value is just an LLVM struct value;
+    // this block previously caught "=" too and unconditionally rejected
+    // it with "Unsupported operator on str type: =".
+    if (left->inferred_type && left->inferred_type->kind() == TypeKind::Str && op != "=") {
         llvm::Value *lv = generateExpression(left);
         llvm::Value *rv = generateExpression(right);
         llvm::StructType *strStructType = llvm::cast<llvm::StructType>(getLLVMType(std::make_shared<StringType>(), left));
@@ -1719,8 +1760,24 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
                 r = m_builder->CreateNeg(r, "neg_offset");
             }
 
-            // Use GEP for pointer arithmetic (returns pointer)
-            return m_builder->CreateGEP(llvm::Type::getInt8Ty(context), l, r, "ptrarith");
+            // Use GEP for pointer arithmetic (returns pointer), scaled by
+            // the pointee's real element type. Using i8 unconditionally
+            // here made `ptr + i` silently advance by a fixed 1-byte
+            // stride regardless of the pointee's actual size (e.g. for a
+            // `*Token`, `ptr + i` would step by 1 byte instead of
+            // sizeof(Token), corrupting every subsequent access).
+            // `*void` (and function pointers) keep byte-wise (i8) stride:
+            // void has no size, and a function type isn't a valid GEP
+            // element type, so LLVM would generate/select malformed GEPs
+            // for either. C treats `void*` arithmetic as byte-wise too.
+            llvm::Type *elemTy = llvm::Type::getInt8Ty(context);
+            auto leftPtrType = std::dynamic_pointer_cast<PointerType>(left->inferred_type);
+            if (leftPtrType && leftPtrType->base &&
+                leftPtrType->base->kind() != TypeKind::Void &&
+                leftPtrType->base->kind() != TypeKind::Function) {
+                elemTy = getLLVMType(leftPtrType->base, left);
+            }
+            return m_builder->CreateGEP(elemTy, l, r, "ptrarith");
         }
 
         // For other operations, convert both to integers
@@ -2568,6 +2625,124 @@ llvm::Value *LLVMCodegen::generateErrorUnionFieldAccess(const std::shared_ptr<Fi
     } else {
         throw CodeGenError(fieldAccess, "Unknown field on error union: " + fieldAccess->field);
     }
+}
+
+llvm::Value *LLVMCodegen::materializeErrorUnionBase(const std::shared_ptr<Expression> &operand,
+                                                    const std::shared_ptr<ErrorUnionType> &euType) {
+    llvm::Value *basePtr = nullptr;
+    if (isLValue(operand)) {
+        basePtr = generateAddress(operand);
+    } else {
+        llvm::Value *baseVal = generateExpression(operand);
+        llvm::StructType *structType = llvm::cast<llvm::StructType>(getLLVMType(euType, operand));
+        basePtr = materializeAggregate(baseVal, structType);
+    }
+    if (!basePtr) {
+        throw CodeGenError(operand, "Failed to generate address for error union base");
+    }
+    return basePtr;
+}
+
+llvm::Value *LLVMCodegen::generateTryExpr(const std::shared_ptr<TryExpression> &tryExpr, bool loadValue) {
+    auto eu_type = std::dynamic_pointer_cast<ErrorUnionType>(tryExpr->operand->inferred_type);
+    if (!eu_type) {
+        throw CodeGenError(tryExpr, "try operand is not an error union type");
+    }
+    if (!m_error_union_return_type) {
+        throw CodeGenError(tryExpr, "try used outside a function returning an error union");
+    }
+
+    llvm::StructType *euStructType = llvm::cast<llvm::StructType>(getLLVMType(eu_type, tryExpr));
+    auto layout = getErrorUnionLayout(eu_type);
+    llvm::Value *basePtr = materializeErrorUnionBase(tryExpr->operand, eu_type);
+
+    llvm::Value *isErr = createStructFieldAccess(euStructType, basePtr, layout.isErrIndex,
+                                                 llvm::Type::getInt1Ty(context), "is_err", true);
+
+    llvm::Function *theFunction = m_builder->GetInsertBlock()->getParent();
+    llvm::BasicBlock *errBB = llvm::BasicBlock::Create(context, "try.err", theFunction);
+    llvm::BasicBlock *okBB = llvm::BasicBlock::Create(context, "try.ok", theFunction);
+    m_builder->CreateCondBr(isErr, errBB, okBB);
+
+    m_builder->SetInsertPoint(errBB);
+    llvm::Type *errLLVMType = getLLVMType(eu_type->errorType, tryExpr);
+    llvm::Value *errVal = createStructFieldAccess(euStructType, basePtr, layout.errIndex, errLLVMType, "err", true);
+    llvm::Value *propagated = buildErrorUnionValue(m_error_union_return_type, nullptr, errVal, true, tryExpr);
+    m_builder->CreateRet(propagated);
+
+    m_builder->SetInsertPoint(okBB);
+    if (layout.okIsVoid) {
+        return nullptr;
+    }
+    llvm::Type *okLLVMType = getLLVMType(eu_type->valueType, tryExpr);
+    return createStructFieldAccess(euStructType, basePtr, layout.okIndex, okLLVMType, "ok", loadValue);
+}
+
+llvm::Value *LLVMCodegen::generateCatchExpr(const std::shared_ptr<CatchExpression> &catchExpr, bool loadValue) {
+    auto eu_type = std::dynamic_pointer_cast<ErrorUnionType>(catchExpr->operand->inferred_type);
+    if (!eu_type) {
+        throw CodeGenError(catchExpr, "catch operand is not an error union type");
+    }
+
+    llvm::StructType *euStructType = llvm::cast<llvm::StructType>(getLLVMType(eu_type, catchExpr));
+    auto layout = getErrorUnionLayout(eu_type);
+    llvm::Value *basePtr = materializeErrorUnionBase(catchExpr->operand, eu_type);
+
+    llvm::Value *isErr = createStructFieldAccess(euStructType, basePtr, layout.isErrIndex,
+                                                 llvm::Type::getInt1Ty(context), "is_err", true);
+
+    llvm::Function *theFunction = m_builder->GetInsertBlock()->getParent();
+    llvm::BasicBlock *okBB = llvm::BasicBlock::Create(context, "catch.ok", theFunction);
+    llvm::BasicBlock *errBB = llvm::BasicBlock::Create(context, "catch.err", theFunction);
+    llvm::BasicBlock *mergeBB = llvm::BasicBlock::Create(context, "catch.merge", theFunction);
+    m_builder->CreateCondBr(isErr, errBB, okBB);
+
+    // ok branch: unwrap the value
+    m_builder->SetInsertPoint(okBB);
+    llvm::Value *okVal = nullptr;
+    if (!layout.okIsVoid) {
+        llvm::Type *okLLVMType = getLLVMType(eu_type->valueType, catchExpr);
+        okVal = createStructFieldAccess(euStructType, basePtr, layout.okIndex, okLLVMType, "ok", true);
+    }
+    llvm::BasicBlock *okEndBB = m_builder->GetInsertBlock();
+    bool okBranches = !okEndBB->getTerminator();
+    if (okBranches) {
+        m_builder->CreateBr(mergeBB);
+    }
+
+    // err branch: bind the capture (if any) and evaluate the fallback handler
+    m_builder->SetInsertPoint(errBB);
+    if (catchExpr->capture_name) {
+        llvm::Type *errLLVMType = getLLVMType(eu_type->errorType, catchExpr);
+        llvm::Value *errVal = createStructFieldAccess(euStructType, basePtr, layout.errIndex, errLLVMType, "err", true);
+        llvm::Value *errAlloca = createEntryBlockAlloca(theFunction, errLLVMType, *catchExpr->capture_name);
+        m_builder->CreateStore(errVal, errAlloca);
+        setSymValue(catchExpr->capture_symbol_id, errAlloca, errLLVMType, eu_type->errorType);
+    }
+    llvm::Value *handlerVal = generateExpression(catchExpr->handler);
+    llvm::BasicBlock *errEndBB = m_builder->GetInsertBlock();
+    bool errBranches = !errEndBB->getTerminator();
+    if (errBranches) {
+        m_builder->CreateBr(mergeBB);
+    }
+
+    m_builder->SetInsertPoint(mergeBB);
+    if (mergeBB->use_empty()) {
+        m_builder->CreateUnreachable();
+        return nullptr;
+    }
+    if (layout.okIsVoid) {
+        return nullptr;
+    }
+    llvm::Type *valLLVMType = getLLVMType(eu_type->valueType, catchExpr);
+    llvm::PHINode *phi = m_builder->CreatePHI(valLLVMType, 2, "catch.result");
+    if (okBranches) {
+        phi->addIncoming(okVal, okEndBB);
+    }
+    if (errBranches) {
+        phi->addIncoming(handlerVal, errEndBB);
+    }
+    return phi;
 }
 
 bool LLVMCodegen::isLValue(const std::shared_ptr<Expression> &expr) {

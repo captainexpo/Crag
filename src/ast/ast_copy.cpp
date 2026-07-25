@@ -170,6 +170,28 @@ std::shared_ptr<ASTNode> UnaryOperation::instantiate(std::vector<std::shared_ptr
     return c;
 }
 
+std::shared_ptr<ASTNode> TryExpression::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
+    auto c = std::make_shared<TryExpression>(
+        std::dynamic_pointer_cast<Expression>(operand->instantiate(gp_replace)));
+    c->line = line;
+    c->col = col;
+    c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
+    return c;
+}
+
+std::shared_ptr<ASTNode> CatchExpression::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
+    auto c = std::make_shared<CatchExpression>(
+        std::dynamic_pointer_cast<Expression>(operand->instantiate(gp_replace)),
+        capture_name,
+        std::dynamic_pointer_cast<Expression>(handler->instantiate(gp_replace)));
+    c->line = line;
+    c->col = col;
+    c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
+    return c;
+}
+
 std::shared_ptr<ASTNode> Literal::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
     auto c = std::make_shared<Literal>(value, lit_type);
     c->line = line;
@@ -338,7 +360,8 @@ std::shared_ptr<ASTNode> VariableDeclaration::instantiate(std::vector<std::share
 }
 
 std::shared_ptr<ASTNode> TypeAliasDeclaration::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
-    auto c = std::make_shared<TypeAliasDeclaration>(name, aliased_type);
+    auto c = std::make_shared<TypeAliasDeclaration>(
+        name, aliased_type != nullptr ? aliased_type->instantiate(gp_replace) : nullptr);
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
