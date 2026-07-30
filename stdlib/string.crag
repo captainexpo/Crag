@@ -4,9 +4,6 @@ import "./libc/stdio.crag" as cstdio;
 import "./builtin.crag" as builtin;
 
 pub fn tostring_int(n: i64) -> str {
-    // Heap-allocated rather than a `[32]u8` local: a `str` returned from
-    // here outlives this stack frame, and a pointer into a local array
-    // would already be dangling by the time the caller reads it.
     let buf: *u8 = cstdlib.malloc(32) as *u8; cstdio.snprintf(buf, 32, "%lld", n);
     return newstr(buf, cstring.strlen(buf));
 }

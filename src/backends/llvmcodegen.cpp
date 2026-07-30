@@ -690,13 +690,6 @@ llvm::Value *LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &exp
         return generateModuleAccess(std::dynamic_pointer_cast<ModuleAccess>(expr),
                                     false);
     } else if (IS_INSTANCE(expr, MethodCall)) {
-        // isLValue() treats a pointer-returning method call as an lvalue
-        // (so that e.g. `some_call().field` type-checks); honor that here.
-        // Every other branch above returns a genuine memory address whose
-        // *load* yields the value (that's what callers like
-        // generateFieldAccess assume), but a call's result is a bare SSA
-        // value with no address of its own -- so spill it into a fresh
-        // temporary alloca and hand back that alloca's address.
         auto mc = std::dynamic_pointer_cast<MethodCall>(expr);
         if (mc->inferred_type && mc->inferred_type->kind() == TypeKind::Pointer) {
             llvm::Value *ptrVal = generateExpression(expr);
@@ -1328,7 +1321,27 @@ llvm::Constant *LLVMCodegen::getConstantLiteralValue(const std::shared_ptr<ASTNo
             elementValues.push_back(elemVal);
         }
         llvm::StructType *arrayType = llvm::cast<llvm::StructType>(getLLVMType(arrayLit->inferred_type, literal));
-        llvm::Constant *dataPtr = llvm::ConstantArray::get(llvm::ArrayType::get(elementValues[0]->getType(), elementValues.size()), elementValues);
+        llvm::Type *elemType;
+        if (!elementValues.empty()) {
+            elemType = elementValues[0]->getType();
+        } else {
+            auto arrTy = std::dynamic_pointer_cast<ArrayType>(arrayLit->inferred_type);
+            if (!arrTy) {
+                return nullptr;
+            }
+            elemType = getLLVMType(arrTy->element_type, literal);
+        }
+        llvm::ArrayType *dataArrayType = llvm::ArrayType::get(elemType, elementValues.size());
+        llvm::Constant *dataConstant = llvm::ConstantArray::get(dataArrayType, elementValues);
+
+        auto dataGlobalName = "arrlit" + std::to_string(globalVals++);
+        auto dataGlobal = new llvm::GlobalVariable(
+            *m_llvm_module, dataArrayType, true, llvm::GlobalValue::PrivateLinkage,
+            dataConstant, dataGlobalName);
+        llvm::Constant *zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
+        llvm::Constant *indices[] = {zero, zero};
+        llvm::Constant *dataPtr = llvm::ConstantExpr::getGetElementPtr(dataArrayType, dataGlobal, indices, true);
+
         return llvm::ConstantStruct::get(arrayType, {dataPtr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), elementValues.size())});
     }
     return nullptr;
@@ -1591,12 +1604,31 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
             auto i64Ty = llvm::Type::getInt64Ty(context);
             llvm::FunctionCallee memcmpFn = m_llvm_module->getOrInsertFunction(
                 "memcmp", llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {ptrTy, ptrTy, i64Ty}, false));
-            // lengths must match, then memcmp == 0
+
+            // Lengths must match before comparing bytes. memcmp(lptr, rptr, llen)
+            // reads llen bytes from *both* buffers, so calling it unconditionally
+            // when llen > rlen reads past the end of the shorter string's
+            // allocation -- usually harmless slop but occasionally a real
+            // out-of-bounds page-boundary segfault. Only call memcmp once we
+            // know llen == rlen (so llen bytes is safe to read from rptr too).
+            llvm::BasicBlock *startBlock = m_builder->GetInsertBlock();
+            llvm::Function *currentFunc = startBlock->getParent();
+            llvm::BasicBlock *cmpBlock = llvm::BasicBlock::Create(context, "streq.cmp", currentFunc);
+            llvm::BasicBlock *end = llvm::BasicBlock::Create(context, "streq.end", currentFunc);
+
             llvm::Value *lenEq = m_builder->CreateICmpEQ(llen, rlen, "len_eq");
+            m_builder->CreateCondBr(lenEq, cmpBlock, end);
+
+            m_builder->SetInsertPoint(cmpBlock);
             llvm::Value *cmpResult = m_builder->CreateCall(memcmpFn, {lptr, rptr, llen}, "memcmp_res");
             llvm::Value *bytesEq = m_builder->CreateICmpEQ(cmpResult, llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), "bytes_eq");
-            llvm::Value *eq = m_builder->CreateAnd(lenEq, bytesEq, "str_eq");
-            return op == "==" ? eq : m_builder->CreateNot(eq, "str_ne");
+            m_builder->CreateBr(end);
+
+            m_builder->SetInsertPoint(end);
+            llvm::PHINode *eq = m_builder->CreatePHI(llvm::Type::getInt1Ty(context), 2, "str_eq");
+            eq->addIncoming(llvm::ConstantInt::getFalse(context), startBlock);
+            eq->addIncoming(bytesEq, cmpBlock);
+            return op == "==" ? static_cast<llvm::Value *>(eq) : m_builder->CreateNot(eq, "str_ne");
         }
         throw CodeGenError(left, "Unsupported operator on str type: " + op);
     }
@@ -2053,11 +2085,16 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
     // Allocate the raw array: [N x elemType]
     auto arrayLLVMType = getLLVMType(arrayType, arrayLit); // struct { ptr, i64 }
     auto arrayLitType = llvm::ArrayType::get(elemType, arrayLit->defined_len);
-    llvm::AllocaInst *rawArrAlloc = createEntryBlockAlloca(getCurrentFunction(*m_builder), arrayLitType, "array_literal");
-    if (!rawArrAlloc){
-        rawArrAlloc = m_builder->CreateAlloca(arrayLitType, nullptr, "arraylit");
-    }
-    rawArrAlloc->setAlignment(llvm::Align(alignof(void *)));
+
+    auto ptrTy = llvm::PointerType::getUnqual(context);
+    auto i64Ty = llvm::Type::getInt64Ty(context);
+    llvm::FunctionCallee mallocFn = m_llvm_module->getOrInsertFunction(
+        "malloc", llvm::FunctionType::get(ptrTy, {i64Ty}, false));
+    uint64_t elemAllocSize = m_llvm_module->getDataLayout().getTypeAllocSize(elemType);
+    llvm::Value *rawArrPtr = m_builder->CreateCall(
+        mallocFn,
+        {llvm::ConstantInt::get(i64Ty, arrayLit->defined_len * elemAllocSize)},
+        "array_literal_data");
 
     // declare void @llvm.memset.p0.i64(ptr writeonly captures(none), i8, i64, i1 immarg) #1
     auto memsetFunction = m_llvm_module->getOrInsertFunction(
@@ -2069,7 +2106,7 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
             false));
 
     // Zero out the array memory using memset
-    m_builder->CreateCall(memsetFunction, {m_builder->CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context)),
+    m_builder->CreateCall(memsetFunction, {rawArrPtr,
                                            llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0),
                                            llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len * (size_t)(m_llvm_module->getDataLayout().getTypeAllocSize(elemType))),
                                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 0)});
@@ -2079,7 +2116,7 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
         llvm::Value *elemVal = generateExpression(arrayLit->elements[i]);
         llvm::Value *elemPtr = m_builder->CreateGEP(
             arrayLitType,
-            rawArrAlloc,
+            rawArrPtr,
             {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
              llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i)});
         m_builder->CreateStore(elemVal, elemPtr);
@@ -2104,9 +2141,7 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
          llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0)});
 
-    llvm::Value *castedPtr = m_builder->CreateBitCast(rawArrAlloc, llvm::PointerType::getUnqual(context));
-
-    m_builder->CreateStore(castedPtr, dataPtr);
+    m_builder->CreateStore(rawArrPtr, dataPtr);
 
     if (loadValue) {
         return m_builder->CreateLoad(arrayLLVMType, arrayStructAlloc, "arrload");
@@ -2157,28 +2192,38 @@ llvm::Value *LLVMCodegen::generateMethodCall(
     bool /*loadValue*/
 ) {
     auto structAccess = methodCall->object;
-    llvm::Value *obj = generateAddress(
-        std::static_pointer_cast<Expression>(structAccess));
+
+    // Check the receiver's static type *before* deciding how to evaluate it:
+    //   - struct VALUE (e.g. a local `Line`, or `self.lines[i]`): we need its
+    //     address, so `self: *T` methods can bind directly to it and `self: T`
+    //     methods can load from it below.
+    //   - already a POINTER (e.g. a plain `*Line` variable, but just as often
+    //     a computed expression like `self.lines + i`, a field, or another
+    //     call's result): the expression already evaluates to the pointer we
+    //     need, so just evaluate it normally. Calling generateAddress() on it
+    //     instead -- as this used to do unconditionally -- only happens to
+    //     work when the receiver is a plain variable (whose "address" is its
+    //     alloca slot, loaded once more to get the pointer value out); for
+    //     anything else (arithmetic, a call result, ...) there is no address
+    //     to take, and generateAddress() throws "not an lvalue".
+    auto structType =
+        std::dynamic_pointer_cast<StructType>(structAccess->inferred_type);
+    llvm::Value *obj = nullptr;
+
+    if (structType) {
+        obj = generateAddress(std::static_pointer_cast<Expression>(structAccess));
+    } else {
+        auto ptrType =
+            std::dynamic_pointer_cast<PointerType>(structAccess->inferred_type);
+        if (ptrType) {
+            structType = std::dynamic_pointer_cast<StructType>(ptrType->base);
+            obj = generateExpression(std::static_pointer_cast<Expression>(structAccess));
+        }
+    }
 
     if (!obj) {
         throw CodeGenError(structAccess,
                            "Failed to generate address for method call object");
-    }
-
-    auto structType =
-        std::dynamic_pointer_cast<StructType>(structAccess->inferred_type);
-
-    if (!structType) {
-        auto ptrType =
-            std::dynamic_pointer_cast<PointerType>(structAccess->inferred_type);
-        if (ptrType) {
-            structType =
-                std::dynamic_pointer_cast<StructType>(ptrType->base);
-            obj = m_builder->CreateLoad(
-                llvm::PointerType::getUnqual(context),
-                obj,
-                "load_ptr_for_method");
-        }
     }
 
     if (!structType) {
@@ -3572,6 +3617,46 @@ bool LLVMCodegen::shouldCoerceForABI(llvm::Type *type) {
     return size == 1 || size == 2 || size == 4 || size == 8 || size == 16;
 }
 
+// Determines which x86-64 SysV register class ([rangeStart, rangeEnd) bytes,
+// where rangeEnd - rangeStart <= 8) the leaf fields of `ty` fall into, merged
+// into `cls`. `baseOffset` is where `ty` itself starts within the enclosing
+// aggregate. INTEGER dominates SSE when a range contains a mix (matches the
+// SysV merging rule); ranges containing no overlapping field stay NONE.
+void LLVMCodegen::classifyEightbyteRange(llvm::Type *ty, const llvm::DataLayout &DL, uint64_t baseOffset,
+                                         uint64_t rangeStart, uint64_t rangeEnd, EightbyteClass &cls) {
+    if (ty->isFloatTy() || ty->isDoubleTy()) {
+        uint64_t sz = DL.getTypeAllocSize(ty);
+        if (baseOffset < rangeEnd && baseOffset + sz > rangeStart) {
+            cls = (cls == EightbyteClass::INTEGER) ? EightbyteClass::INTEGER : EightbyteClass::SSE;
+        }
+        return;
+    }
+    if (ty->isStructTy()) {
+        auto *st = llvm::cast<llvm::StructType>(ty);
+        if (st->getNumElements() > 0) {
+            const llvm::StructLayout *layout = DL.getStructLayout(st);
+            for (unsigned i = 0; i < st->getNumElements(); ++i) {
+                uint64_t fieldOff = baseOffset + layout->getElementOffset(i);
+                classifyEightbyteRange(st->getElementType(i), DL, fieldOff, rangeStart, rangeEnd, cls);
+            }
+        }
+        return;
+    }
+    if (ty->isArrayTy()) {
+        llvm::Type *elemTy = ty->getArrayElementType();
+        uint64_t elemSize = DL.getTypeAllocSize(elemTy);
+        for (unsigned i = 0; i < ty->getArrayNumElements(); ++i) {
+            classifyEightbyteRange(elemTy, DL, baseOffset + i * elemSize, rangeStart, rangeEnd, cls);
+        }
+        return;
+    }
+    // Integers, pointers, vectors, bools, etc. are all INTEGER class.
+    uint64_t sz = DL.getTypeAllocSize(ty);
+    if (baseOffset < rangeEnd && baseOffset + sz > rangeStart) {
+        cls = EightbyteClass::INTEGER;
+    }
+}
+
 llvm::Type *LLVMCodegen::getABICoercionType(llvm::Type *structType) {
     if (!structType->isStructTy()) {
         return structType;
@@ -3580,22 +3665,44 @@ llvm::Type *LLVMCodegen::getABICoercionType(llvm::Type *structType) {
     llvm::DataLayout DL = m_llvm_module->getDataLayout();
     uint64_t size = DL.getTypeAllocSize(structType);
 
-    // Map struct size to appropriate integer type
-    switch (size) {
-        case 1:
-            return llvm::Type::getInt8Ty(context);
-        case 2:
-            return llvm::Type::getInt16Ty(context);
-        case 4:
-            return llvm::Type::getInt32Ty(context);
-        case 8:
-            return llvm::Type::getInt64Ty(context);
-        case 16:
-            // Use <2 x i64> for 16-byte structs
-            return llvm::VectorType::get(llvm::Type::getInt64Ty(context), 2, false);
-        default:
-            return structType;
+    // Structs made entirely of float/double fields must be coerced to a
+    // floating-point-compatible type (float/double), not an integer type --
+    // otherwise the value is passed/returned via a general-purpose register
+    // (e.g. RAX) instead of the SSE register (e.g. XMM0) real C code
+    // actually uses for it, silently corrupting the value.
+    if (size == 1 || size == 2 || size == 4 || size == 8) {
+        EightbyteClass cls = EightbyteClass::NONE;
+        classifyEightbyteRange(structType, DL, 0, 0, size, cls);
+        if (cls == EightbyteClass::SSE) {
+            return size <= 4 ? llvm::Type::getFloatTy(context) : llvm::Type::getDoubleTy(context);
+        }
+        switch (size) {
+            case 1:
+                return llvm::Type::getInt8Ty(context);
+            case 2:
+                return llvm::Type::getInt16Ty(context);
+            case 4:
+                return llvm::Type::getInt32Ty(context);
+            case 8:
+                return llvm::Type::getInt64Ty(context);
+        }
     }
+
+    if (size == 16) {
+        EightbyteClass cls0 = EightbyteClass::NONE, cls1 = EightbyteClass::NONE;
+        classifyEightbyteRange(structType, DL, 0, 0, 8, cls0);
+        classifyEightbyteRange(structType, DL, 0, 8, 16, cls1);
+        if (cls0 == EightbyteClass::INTEGER && cls1 == EightbyteClass::INTEGER) {
+            // Preserve the existing exact type for the (by far most common)
+            // all-integer 16-byte case, e.g. Crag's own `str` (ptr + len).
+            return llvm::VectorType::get(llvm::Type::getInt64Ty(context), 2, false);
+        }
+        llvm::Type *t0 = (cls0 == EightbyteClass::SSE) ? llvm::Type::getDoubleTy(context) : llvm::Type::getInt64Ty(context);
+        llvm::Type *t1 = (cls1 == EightbyteClass::SSE) ? llvm::Type::getDoubleTy(context) : llvm::Type::getInt64Ty(context);
+        return llvm::StructType::get(context, {t0, t1});
+    }
+
+    return structType;
 }
 
 llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *structType) {
@@ -3618,15 +3725,16 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
         }
     }
 
-    // If it's a constant aggregate (e.g., global constant initializer),
-    // try to produce a constant ABI value via bitcast of the constant.
-    if (auto *C = llvm::dyn_cast<llvm::Constant>(structValue)) {
-        if (auto *CE = llvm::ConstantExpr::getBitCast(C, abiType)) {
-            return CE;
-        }
-    }
-
     // Fallback: allocate temporary for struct and perform the usual ABI coercion.
+    // (A constant-aggregate fast path used to live here, reinterpreting the
+    // constant via llvm::ConstantExpr::getBitCast(C, abiType). That's not a
+    // legal bitcast -- LLVM requires bitcast operands to already have the
+    // same first-class representation, and aggregate-to-scalar is not one of
+    // the cases it actually supports -- so it silently produced a malformed
+    // constant (observed as e.g. a bitcast of just the struct's first i8
+    // field to i32) that only blew up later during instruction selection.
+    // The alloca+store+load path below is valid for constants too, so it's
+    // used unconditionally instead.
     llvm::AllocaInst *structAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), structType, "struct_tmp");
     if (!structAlloca)
         structAlloca = m_builder->CreateAlloca(structType, nullptr, "struct_tmp");

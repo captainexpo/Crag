@@ -1,0 +1,36 @@
+//NAME: Global Const Array Of Str
+//DESC: A module-level `const [N]str` array used to corrupt object emission ("invalid number of bytes") -- the constant-folding path stored the array's data *value* directly into the {ptr, len} representation's pointer field instead of a pointer to that data (spilled to its own global), an LLVM type mismatch invisible until object emission since assertions are compiled out in release LLVM builds.
+//BEGIN CODE
+
+import "stdlib" as std;
+
+const WORDS: [4]str = { "fn", "let", "if", "hello world" };
+const NUMS: [5]i32 = { 10, 20, 30, 40, 50 };
+
+fn bytes_eq_str(ptr: *const u8, len: usize, s: str) -> bool {
+    if (len != s.len) {
+        return false;
+    }
+    let i: usize = 0;
+    while (i < len) {
+        if (ptr[i] != s[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn main() -> i32 {
+    std.testing.assert(bytes_eq_str(WORDS[0].ptr, WORDS[0].len, "fn"), "WORDS[0] should be 'fn'");
+    std.testing.assert(bytes_eq_str(WORDS[1].ptr, WORDS[1].len, "let"), "WORDS[1] should be 'let'");
+    std.testing.assert(bytes_eq_str(WORDS[2].ptr, WORDS[2].len, "if"), "WORDS[2] should be 'if'");
+    std.testing.assert(bytes_eq_str(WORDS[3].ptr, WORDS[3].len, "hello world"), "WORDS[3] should be 'hello world'");
+
+    std.testing.assert(NUMS[0] == 10, "NUMS[0] should be 10");
+    std.testing.assert(NUMS[4] == 50, "NUMS[4] should be 50");
+
+    return 0;
+}
+
+//END CODE

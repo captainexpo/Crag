@@ -1,0 +1,6 @@
+pub struct Point {
+    x: i32,
+    y: i32,
+}
+
+pub const ORIGIN: Point = Point{ x: 130, y: 255 };

@@ -1,0 +1,41 @@
+//NAME: ABI - Large Struct With Nested Struct (sret/byval)
+//DESC:
+//REQUIRES_C:abi_regression_helpers.c
+//BEGIN CODE
+
+import "stdlib" as std;
+
+struct Tex {
+    id: u32,
+    w: i32,
+    h: i32,
+    mip: i32,
+    fmt: i32,
+}
+
+struct Big {
+    a: i32,
+    b: i32,
+    c: i32,
+    tex: Tex,
+    p1: *void,
+    p2: *void,
+}
+
+extern fn make_big(seed: i32) -> Big;
+extern fn read_big_tex_h(v: Big) -> i32;
+
+fn main() -> i32 {
+    let v: Big = make_big(0);
+    std.testing.assert(v.a == 1 && v.b == 2 && v.c == 3, "make_big(0) leading fields should be 1,2,3");
+    std.testing.assert(v.tex.id == 10 && v.tex.w == 11 && v.tex.h == 12 && v.tex.mip == 13 && v.tex.fmt == 14,
+        "make_big(0)'s nested tex fields should be 10,11,12,13,14");
+    std.testing.assert((v.p1 as usize) == 100 && (v.p2 as usize) == 200, "make_big(0)'s trailing pointer fields should be 100,200");
+
+    let h: i32 = read_big_tex_h(v);
+    std.testing.assert(h == 12, "read_big_tex_h should read back tex.h == 12 through a byval parameter");
+
+    return 0;
+}
+
+//END CODE

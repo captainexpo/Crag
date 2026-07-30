@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -765,7 +766,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
                     // infer type of variant value
                     std::shared_ptr<Expression> val = v.second;
-                    auto i = inferExpression(val);
+                    auto i = inferExpression(val, en->base_type);
                     auto vtype = resolveType(en, i);
                     if (!vtype->equals(en->base_type)) {
                         throw TypeCheckError(current_module, v.second,
@@ -1079,6 +1080,13 @@ void TypeChecker::checkVariableDeclaration(
                 var->var_type = init_type;
             }
 
+            // var_type may be a shared/interned type object (e.g. a named
+            // struct/union/enum resolved via lookupNamedType). Clone before
+            // stamping const-ness so we don't mutate that shared instance
+            // and leak "const" onto every other use of the type.
+            if (var->is_const) {
+                var->var_type = var->var_type->instantiate();
+            }
             var->var_type->is_const = var->is_const;
 
             if (auto arr_lit = std::dynamic_pointer_cast<ArrayLiteral>(expr)) {
@@ -1217,9 +1225,18 @@ void TypeChecker::handleArrayLiteralAssignment(
 
     arr_lit->defined_len = final_len;
 
-    arr_type->length_expr = len_lit;
-    arr_type->actualSize = final_len;
-    arr_type->unsized = false;
+    // Only fill in a concrete length/size for a variable that was *declared*
+    // sized (e.g. `[10]i32`, possibly partially initialized). A variable
+    // declared unsized (`[]i32 = {...}`) must keep unsized = true: it's the
+    // same Type object as var->var_type, and other code (generic parameter
+    // unification, equals()) compares against that declared type elsewhere --
+    // flipping it to sized here made e.g. passing such a variable as a
+    // generic T argument bind T to a differently-sized array type than the
+    // one used at the call site's other, explicitly-unsized annotations.
+    if (!arr_type->unsized) {
+        arr_type->length_expr = len_lit;
+        arr_type->actualSize = final_len;
+    }
 }
 
 void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
@@ -1576,8 +1593,46 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         return inferDereference(d);
     if (auto mc = std::dynamic_pointer_cast<MethodCall>(expr))
         return inferMethodCall(mc);
-    if (auto ma = std::dynamic_pointer_cast<ModuleAccess>(expr))
+    if (auto ma = std::dynamic_pointer_cast<ModuleAccess>(expr)) {
+        // `a.b.c...` is always parsed as a single (possibly too-long) module
+        // path, since the parser can't tell "field access on a value"
+        // (`rl.GRAY.r`: value `rl.GRAY`, field `r`) apart from "a qualified
+        // module path" (`std.cstdlib.malloc`: module `std.cstdlib`, symbol
+        // `malloc`) without type info. Probe module_path here first: if some
+        // suffix of it doesn't actually resolve as nested submodules, the
+        // first such segment is the real member to look up, and everything
+        // after it -- module_path's tail, plus the original member_name --
+        // is really a chain of ordinary field accesses on that value.
+        std::shared_ptr<Module> probe = current_module;
+        size_t resolved = 0;
+        for (; resolved < ma->module_path.size(); ++resolved) {
+            auto it = probe->imports.find(ma->module_path[resolved]);
+            if (it == probe->imports.end()) {
+                break;
+            }
+            probe = it->second;
+        }
+        if (resolved < ma->module_path.size()) {
+            std::vector<std::string> realPath(ma->module_path.begin(), ma->module_path.begin() + resolved);
+            std::string realMember = ma->module_path[resolved];
+            std::shared_ptr<Expression> rewritten = std::make_shared<ModuleAccess>(realPath, realMember);
+            rewritten->line = ma->line;
+            rewritten->col = ma->col;
+            for (size_t i = resolved + 1; i < ma->module_path.size(); ++i) {
+                auto fa = std::make_shared<FieldAccess>(rewritten, ma->module_path[i]);
+                fa->line = ma->line;
+                fa->col = ma->col;
+                rewritten = fa;
+            }
+            auto fa = std::make_shared<FieldAccess>(rewritten, ma->member_name);
+            fa->line = ma->line;
+            fa->col = ma->col;
+            rewritten = fa;
+            expr = rewritten;
+            return inferExpression(expr, expected);
+        }
         return inferModuleAccess(ma);
+    }
     if (auto te = std::dynamic_pointer_cast<TypeExpression>(expr)) {
         te->inferred_type = resolveType(te, te->type);
         return te->inferred_type;

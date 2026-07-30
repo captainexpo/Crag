@@ -1,0 +1,20 @@
+//NAME: Chained Field Access On A Module-Qualified Constant
+//DESC:
+//REQUIRES:const_struct_mod.crag
+//BEGIN CODE
+
+import "stdlib" as std;
+import "const_struct_mod.crag" as pt;
+
+fn main() -> i32 {
+    let x: i32 = pt.ORIGIN.x;
+    let y: i32 = pt.ORIGIN.y;
+    std.testing.assert(x == 130 && y == 255, "pt.ORIGIN.x/y should read the real ORIGIN constant's fields");
+
+    let n: i32 = std.math.abs::<i32>(-5);
+    std.testing.assert(n == 5, "std.math.abs should still resolve as a qualified module path");
+
+    return 0;
+}
+
+//END CODE

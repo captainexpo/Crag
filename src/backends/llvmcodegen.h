@@ -320,6 +320,12 @@ class LLVMCodegen : public Backend {
     llvm::Value *coerceToABI(llvm::Value *structValue, llvm::Type *structType);
     llvm::Value *coerceFromABI(llvm::Value *abiValue, llvm::Type *structType);
 
+    // simplified x86-64 SysV eightbyte register-class classification, used so getABICoercionType() picks a
+    // floating-point-compatible coercion type (float/double) for structs made entirely of float/double fields
+    enum class EightbyteClass { NONE, INTEGER, SSE };
+    void classifyEightbyteRange(llvm::Type *ty, const llvm::DataLayout &DL, uint64_t baseOffset,
+                                uint64_t rangeStart, uint64_t rangeEnd, EightbyteClass &cls);
+
     bool isExternMemoryAggregateType(const std::shared_ptr<Type> &type, const ASTNodePtr &node);
     llvm::FunctionType *getExternABIFunctionType(const std::shared_ptr<FunctionType> &funcType,
                                                  const ASTNodePtr &node,

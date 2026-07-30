@@ -1,0 +1,22 @@
+//NAME: ABI - All-Float Small Struct Return
+//DESC:
+//REQUIRES_C:abi_regression_helpers.c
+//BEGIN CODE
+
+import "stdlib" as std;
+
+struct V2 {
+    x: f32,
+    y: f32,
+}
+
+extern fn make_v2(a: f32, b: f32) -> V2;
+
+fn main() -> i32 {
+    let v: V2 = make_v2(5.0, 7.0);
+    std.testing.assert(v.x == 10.0, "make_v2(5,7).x should be 10 (5*2)");
+    std.testing.assert(v.y == 21.0, "make_v2(5,7).y should be 21 (7*3)");
+    return 0;
+}
+
+//END CODE

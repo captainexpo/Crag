@@ -714,7 +714,10 @@ struct StructType : Type {
     }
 
     std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
-        return std::make_shared<StructType>(name, fields);
+        auto copy = std::make_shared<StructType>(name, fields);
+        copy->methods = methods;
+        copy->complete = complete;
+        return copy;
     }
 };
 

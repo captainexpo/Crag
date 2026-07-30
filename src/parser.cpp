@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
@@ -791,16 +792,9 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                 expr = std::make_shared<Literal>(std::stoull(t.value.substr(2), nullptr, 2),
                                                  std::make_shared<U64>());
             } else if (t.value.find('.') != std::string::npos) {
-                // stod, not stof: literals default to f64, so parsing with float
-                // (single) precision here would throw away digits beyond ~7
-                // significant figures before the value is ever widened to double.
                 expr = std::make_shared<Literal>(std::stod(t.value),
                                                  std::make_shared<F64>());
             } else {
-                // Decimal literals default to i32, but a literal whose value doesn't
-                // fit in 32 bits must default wider so codegen can build an APInt
-                // of the right size (see generateLiteral, which sizes the APInt off
-                // of lit_type/inferred_type, not the value's actual magnitude).
                 long val = std::stol(t.value);
                 std::shared_ptr<Type> default_type =
                     (val > INT32_MAX || val < INT32_MIN)

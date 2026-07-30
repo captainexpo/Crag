@@ -30,6 +30,7 @@ def parse_test_file(text: str):
     lines = text.splitlines()
 
     requires = []
+    requires_c = []
 
     name = None
     desc = None
@@ -44,6 +45,15 @@ def parse_test_file(text: str):
         if line.strip().startswith("REQUIRES:"):
             reqs = line.strip()[len("REQUIRES:"):].split(",")
             requires.extend(req.strip() for req in reqs)
+            continue
+        # REQUIRES_C: <file.c>[, <file.c>...] -- companion C file(s), compiled
+        # once with `cc -c` and linked in via -Wl,<path.o>. For tests that need
+        # to call into *real* extern C code (ABI regression tests can't be
+        # written in pure Crag, since the whole point is checking Crag's
+        # generated code against the platform's actual C calling convention).
+        if line.strip().startswith("REQUIRES_C:"):
+            reqs = line.strip()[len("REQUIRES_C:"):].split(",")
+            requires_c.extend(req.strip() for req in reqs)
             continue
         if line.strip().startswith("ARGS:"):
             arg_cases = line.strip()[len("ARGS:"):].split("|")
@@ -85,6 +95,7 @@ def parse_test_file(text: str):
         "code": "\n".join(code).rstrip(),
         "expect_err": "\n".join(expect_err).rstrip(),
         "requires": requires,
+        "requires_c": requires_c,
         "args": args,
     }
 
@@ -159,6 +170,28 @@ def run_unit_test(
             f.write(req_code)
 
     cmd = [comp, str(src_file), "-o", out_base]
+
+    for req_c in test_file_data["requires_c"]:
+        n = Path(req_c).name
+        req_c_path = os.path.join(ROOT, "tests", req_c)
+        if not os.path.isfile(req_c_path):
+            printc(f"Required C file '{req_c}' not found, skipping test.", C_YELLOW)
+            return TestResult.SKIP, outs, 0
+        obj_path = test_dir / (os.path.splitext(n)[0] + ".o")
+        try:
+            cc_result = subprocess.run(
+                ["cc", "-c", req_c_path, "-o", str(obj_path)],
+                capture_output=True, text=True,
+            )
+        except FileNotFoundError:
+            printc("No C compiler ('cc') found, skipping test.", C_YELLOW)
+            return TestResult.SKIP, outs, 0
+        if cc_result.returncode != 0:
+            printc(f"Failed to compile required C file '{req_c}':\n{cc_result.stderr}", C_RED)
+            return TestResult.FAIL, outs, 0
+        # crag's CLI only forwards -l/-L/-W-prefixed args to the linker, so a
+        # bare .o path has to go through -Wl, to reach it.
+        cmd.append(f"-Wl,{obj_path}")
 
     start_time = time.time()
 

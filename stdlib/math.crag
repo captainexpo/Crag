@@ -38,3 +38,13 @@ pub fn sign<T>(a: T) -> T{
     }
     return 0;
 }
+
+pub fn clamp<T>(a: T, min: T, max: T) -> T{
+    if (a < min) {
+        return min;
+    }
+    if (a > max) {
+        return max;
+    }
+    return a;
+}

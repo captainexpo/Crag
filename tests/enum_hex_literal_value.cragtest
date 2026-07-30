@@ -1,0 +1,34 @@
+//NAME: Enum Variant With Hex/Binary Literal Value
+//DESC: An enum variant explicitly assigned a hex or binary literal (e.g. `A = 0x00000001` in an `enum(i32)`) used to crash codegen with "Failed to get constant value of requested type (I32)" / bad_variant_access. Hex/binary literals are always parsed as {uint64_t, U64}, and the enum parser force-overwrites just the literal's declared type to the enum's base type without reconciling the stored value -- so a signed base type (i32) ended up with inferred_type=I32 but value still holding the uint64_t variant. The fix passes the enum's base_type as the `expected` type when inferring each variant's literal, which routes through the existing implicit-cast machinery (canImplicitCast + ConstEvaluator::castLiteral) that normalizes value's variant to match, the same path that already made `let x: i32 = 0x10;` work correctly.
+//BEGIN CODE
+
+import "stdlib" as std;
+
+enum Flags(i32) {
+    A = 0x00000001,
+    B = 0x00000002,
+    C = 0x00000004,
+}
+
+enum BinFlags(u8) {
+    X = 0b00000001,
+    Y = 0b00000010,
+}
+
+fn main() -> i32 {
+    let a: i32 = Flags:A as i32;
+    let b: i32 = Flags:B as i32;
+    let c: i32 = Flags:C as i32;
+    std.testing.assert(a == 1, "Flags:A should be 1");
+    std.testing.assert(b == 2, "Flags:B should be 2");
+    std.testing.assert(c == 4, "Flags:C should be 4");
+
+    let x: u8 = BinFlags:X as u8;
+    let y: u8 = BinFlags:Y as u8;
+    std.testing.assert(x == 1, "BinFlags:X should be 1");
+    std.testing.assert(y == 2, "BinFlags:Y should be 2");
+
+    return 0;
+}
+
+//END CODE

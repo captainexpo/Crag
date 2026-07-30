@@ -1,0 +1,48 @@
+//NAME: Method Call On Computed Pointer Expression
+//DESC: Calling a `self: *T` method on a receiver expression that already evaluates to *T but isn't a plain variable (e.g. pointer arithmetic, or another method's pointer-returning result) used to fail codegen with "not an lvalue", since it unconditionally tried to take the address of the receiver instead of just evaluating it when it's already a pointer.
+//BEGIN CODE
+
+import "stdlib" as std;
+
+struct Line {
+    val: i32,
+
+    fn set(self: *Line, v: i32) -> void {
+        self.val = v;
+    }
+}
+
+struct Holder {
+    lines: *Line,
+
+    fn get_at(self: *Holder, idx: usize) -> *Line {
+        return self.lines + idx;
+    }
+}
+
+fn main() -> i32 {
+    let lines: *Line = std.cstdlib.malloc(3 * sizeof(Line)) as *Line;
+    lines[0] = Line{ val: 0 };
+    lines[1] = Line{ val: 0 };
+    lines[2] = Line{ val: 0 };
+
+    let h: Holder = Holder{ lines: lines };
+
+    // Method call directly on an inline pointer-arithmetic expression.
+    (h.lines + 1).set(42);
+    std.testing.assert(lines[1].val == 42, "method call on a pointer-arithmetic receiver should mutate through the pointer");
+
+    // Method call directly on another method's pointer-returning result.
+    h.get_at(2).set(99);
+    std.testing.assert(lines[2].val == 99, "method call on a pointer-returning method-call result should work");
+
+    // Sanity: plain-variable receivers (the pattern that always worked) must
+    // still work after the fix.
+    let line: *Line = h.lines;
+    line.set(7);
+    std.testing.assert(lines[0].val == 7, "method call on a plain pointer variable should still work");
+
+    return 0;
+}
+
+//END CODE
