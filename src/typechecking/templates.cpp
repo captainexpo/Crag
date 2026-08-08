@@ -50,6 +50,10 @@ static void replaceInTypePreserveTemplates(std::shared_ptr<Type> &type,
         for (auto &variant : ut->fields) {
             replaceInTypePreserveTemplates(variant.second, generic_map);
         }
+    } else if (auto tt = std::dynamic_pointer_cast<TupleType>(type)) {
+        for (auto &elem : tt->elements) {
+            replaceInTypePreserveTemplates(elem, generic_map);
+        }
     }
 }
 
@@ -411,6 +415,10 @@ void replaceInType(std::shared_ptr<Type> &type, const std::unordered_map<std::st
     } else if (auto ut = std::dynamic_pointer_cast<UnionType>(type)) {
         for (auto &variant : ut->fields) {
             replaceInType(variant.second, generic_map);
+        }
+    } else if (auto tt = std::dynamic_pointer_cast<TupleType>(type)) {
+        for (auto &elem : tt->elements) {
+            replaceInType(elem, generic_map);
         }
     } else if (auto et = std::dynamic_pointer_cast<EnumType>(type)) {
         return;

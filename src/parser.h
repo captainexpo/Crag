@@ -69,6 +69,7 @@ class Parser {
     std::shared_ptr<PointerType> parse_pointer_type();
     std::shared_ptr<ArrayType> parse_array_type();
     std::shared_ptr<PointerType> parse_function_ptr_type();
+    std::shared_ptr<TupleType> parse_tuple_type();
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> parse_parameter_def();
     std::vector<std::string> try_parse_generic_parameters();
     std::shared_ptr<ASTNode> parse_declaration();

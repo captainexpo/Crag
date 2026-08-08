@@ -215,6 +215,19 @@ std::shared_ptr<ASTNode> ArrayLiteral::instantiate(std::vector<std::shared_ptr<T
     return c;
 }
 
+std::shared_ptr<ASTNode> TupleLiteral::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
+    std::vector<ExprPtr> elements_copy;
+    for (const auto &elem : elements) {
+        elements_copy.push_back(std::dynamic_pointer_cast<Expression>(elem->instantiate(gp_replace)));
+    }
+    auto c = std::make_shared<TupleLiteral>(std::move(elements_copy));
+    c->line = line;
+    c->col = col;
+    c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
+    return c;
+}
+
 std::shared_ptr<ASTNode> StructInitializer::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
     std::map<std::string, std::shared_ptr<Expression>> field_values_copy;
     for (const auto &[name, expr] : field_values) {

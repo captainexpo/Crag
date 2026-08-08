@@ -639,6 +639,14 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const AS
     if (IS_INSTANCE(type, EnumType)) {
         return getLLVMType(std::dynamic_pointer_cast<EnumType>(type)->base_type, node);
     }
+    if (IS_INSTANCE(type, TupleType)) {
+        auto tupleType = std::dynamic_pointer_cast<TupleType>(type);
+        std::vector<llvm::Type *> elements;
+        for (const auto &elemType : tupleType->elements) {
+            elements.push_back(getLLVMType(elemType, node));
+        }
+        return llvm::StructType::get(context, elements);
+    }
     if (!type) {
         throw CodeGenError(node, "Type is null");
     } else {
@@ -794,6 +802,10 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
     }
     if (IS_INSTANCE(expr, ArrayLiteral)) {
         return generateArrayLiteral(std::dynamic_pointer_cast<ArrayLiteral>(expr),
+                                    loadValue);
+    }
+    if (IS_INSTANCE(expr, TupleLiteral)) {
+        return generateTupleLiteral(std::dynamic_pointer_cast<TupleLiteral>(expr),
                                     loadValue);
     }
     throw CodeGenError(expr, "Unknown expression type: " + expr->str());
@@ -2075,6 +2087,30 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
     throw CodeGenError(lit, "Unsupported literal type: " + lit->inferred_type->str());
 }
 
+llvm::Value *LLVMCodegen::generateTupleLiteral(std::shared_ptr<TupleLiteral> tupleLit, bool loadValue) {
+    // Generate LLVM values for each element in the tuple
+    std::vector<llvm::Value *> elementValues;
+    for (const auto &element : tupleLit->elements) {
+        llvm::Value *elementValue = generateExpression(element);
+        elementValues.push_back(elementValue);
+    }
+
+    llvm::Type* tupleType = getLLVMType(tupleLit->inferred_type, tupleLit);
+
+    // Alloca for the tuple
+    llvm::Value* tupleAlloca = createEntryBlockAlloca(m_builder->GetInsertBlock()->getParent(), tupleType, "tuple");
+    // Store each element into the tuple
+    for (size_t i = 0; i < elementValues.size(); ++i) {
+        llvm::Value* elementPtr = m_builder->CreateStructGEP(tupleType, tupleAlloca, i);
+        m_builder->CreateStore(elementValues[i], elementPtr);
+    }
+
+    if (loadValue) {
+        return m_builder->CreateLoad(tupleType, tupleAlloca, "tupleload");
+    }
+    return tupleAlloca;
+}
+
 llvm::Value *LLVMCodegen::generateArrayLiteral(
     const std::shared_ptr<ArrayLiteral> &arrayLit, bool loadValue) {
 
@@ -2596,6 +2632,43 @@ llvm::Value *LLVMCodegen::generateArrayFieldAccess(const std::shared_ptr<FieldAc
         throw CodeGenError(fieldAccess, "Unknown field on array: " + fieldAccess->field);
     }
 }
+llvm::Value* LLVMCodegen::generateTupleFieldAccess(const std::shared_ptr<FieldAccess>& fieldAccess, bool loadValue) {
+    bool baseIsAddressable = isLValue(fieldAccess->base);
+
+    llvm::Value* basePtr = nullptr;
+
+    if (baseIsAddressable) {
+        basePtr = generateAddress(fieldAccess->base);
+    } else {
+        if (!loadValue) {
+            throw CodeGenError(fieldAccess,
+                "Cannot assign to field of temporary value");
+        }
+
+        llvm::Value* baseVal = generateExpression(fieldAccess->base);
+        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
+        basePtr = materializeAggregate(baseVal, structType);
+    }
+    if (!basePtr) {
+        throw CodeGenError(fieldAccess->base, "Failed to generate address for tuple field base");
+    }
+    auto tuple_type = std::dynamic_pointer_cast<TupleType>(fieldAccess->base->inferred_type);
+    if (!tuple_type) {
+        throw CodeGenError(fieldAccess->base, "Field access on non-tuple type: " + fieldAccess->base->inferred_type->str());
+    }
+    auto index = std::atoi(fieldAccess->field.c_str());
+    if (index < 0 || index >= tuple_type->elements.size()) {
+        throw CodeGenError(fieldAccess, "Tuple index out of bounds: " + fieldAccess->field);
+    }
+
+    llvm::StructType* tupleStructType =
+        llvm::cast<llvm::StructType>(getLLVMType(tuple_type, fieldAccess->base));
+
+    auto gep = m_builder->CreateStructGEP(tupleStructType, basePtr, index, "tuple_field_access");
+    return loadValue
+        ? m_builder->CreateLoad(getLLVMType(tuple_type->elements[index], fieldAccess), gep, "load_tuple_field")
+        : gep;
+}
 
 llvm::Value *LLVMCodegen::generateStringFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
     bool baseIsAddressable = isLValue(fieldAccess->base);
@@ -2848,6 +2921,8 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
         return generateErrorUnionFieldAccess(fieldAccess, loadValue);
     } else if (fieldAccess->base->inferred_type->kind() == TypeKind::Str) {
         return generateStringFieldAccess(fieldAccess, loadValue);
+    } else if (fieldAccess->base->inferred_type->kind() == TypeKind::Tuple) {
+        return generateTupleFieldAccess(fieldAccess, loadValue);
     }
 
     bool baseIsAddressable = isLValue(fieldAccess->base);

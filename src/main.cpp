@@ -49,6 +49,9 @@ struct Arguments {
     bool no_runtime;
     bool dump_ast_bsa;
     bool dump_ast_asa;
+    bool dump_cragir;
+    bool check_cragir;
+    bool emit_cragir_llvm;
     OSTarget os;
     ArchTarget arch;
     EnvironmentTarget environment;
@@ -68,6 +71,9 @@ void printHelp(int argc, char **argv) {
     std::cout << "  --unsafe                     Disable safety checks (bounds checking, null pointer checks)\n";
     std::cout << "  --no-runtime                 Do not link against the runtime library\n";
     std::cout << "  --dump-ast [bsa],[asa]       Dump the AST and exit. Provide 'bsa' to dump before semantic analysis and 'asa' to dump after semantic analysis\n";
+    std::cout << "  --dump-cragir                Dump the untyped CragIR (lowered from the AST, before semantic analysis) and exit\n";
+    std::cout << "  --check-cragir                Typecheck the CragIR (standalone diagnostic pass, does not run the real compiler pipeline) and exit\n";
+    std::cout << "  --emit-cragir-llvm            Generate LLVM IR directly from the typechecked CragIR and print it (standalone diagnostic pass, does not emit objects/link) and exit\n";
     std::cout << "  --target-os <os>             Target operating system (linux, macos, windows)\n";
     std::cout << "  --target-arch <arch>         Target architecture (x86_64, x86, arm64)\n";
     std::cout << "  --target-vendor <vendor>     Target vendor (pc, apple, unkown)\n";
@@ -89,6 +95,9 @@ Arguments parseArguments(int argc, char **argv) {
     args.no_runtime = false;
     args.dump_ast_asa = false;
     args.dump_ast_bsa = false;
+    args.dump_cragir = false;
+    args.check_cragir = false;
+    args.emit_cragir_llvm = false;
     args.os = defaultOS();
     args.arch = defaultArch();
 
@@ -156,6 +165,12 @@ Arguments parseArguments(int argc, char **argv) {
                 printHelp(argc, argv);
                 exit(1);
             }
+        } else if (arg == "--dump-cragir") {
+            args.dump_cragir = true;
+        } else if (arg == "--check-cragir") {
+            args.check_cragir = true;
+        } else if (arg == "--emit-cragir-llvm") {
+            args.emit_cragir_llvm = true;
         } else if (arg == "--target-os") {
             if (i + 1 < argc) {
                 std::string os_arg = argv[++i];
@@ -273,6 +288,9 @@ int main(int argc, char **argv) {
 
     options.dump_ast_bsa = args.dump_ast_bsa;
     options.dump_ast_asa = args.dump_ast_asa;
+    options.dump_cragir = args.dump_cragir;
+    options.check_cragir = args.check_cragir;
+    options.emit_cragir_llvm = args.emit_cragir_llvm;
     options.opt_level = args.opt;
     options.do_runtime_safety = !args.unsafe;
     options.target = Target(args.os, args.arch);

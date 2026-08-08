@@ -110,28 +110,56 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::expan
 }
 
 static int getTypeId(std::shared_ptr<Type> type){
-    if(std::dynamic_pointer_cast<I8>(type)) return 1;
-    if(std::dynamic_pointer_cast<I16>(type)) return 2;
-    if(std::dynamic_pointer_cast<I32>(type)) return 3;
-    if(std::dynamic_pointer_cast<I64>(type)) return 4;
+    // if(std::dynamic_pointer_cast<I8>(type)) return 1;
+    // if(std::dynamic_pointer_cast<I16>(type)) return 2;
+    // if(std::dynamic_pointer_cast<I32>(type)) return 3;
+    // if(std::dynamic_pointer_cast<I64>(type)) return 4;
+    //
+    // if(std::dynamic_pointer_cast<U8>(type)) return 5;
+    // if(std::dynamic_pointer_cast<U16>(type)) return 6;
+    // if(std::dynamic_pointer_cast<U32>(type)) return 7;
+    // if(std::dynamic_pointer_cast<U64>(type)) return 8;
+    //
+    // if(std::dynamic_pointer_cast<USize>(type)) return 9;
+    //
+    // if(std::dynamic_pointer_cast<F32>(type)) return 10;
+    // if(std::dynamic_pointer_cast<F64>(type)) return 11;
+    //
+    // if(std::dynamic_pointer_cast<Boolean>(type)) return 12;
+    // if(std::dynamic_pointer_cast<StringType>(type)) return 13;
+    // if(std::dynamic_pointer_cast<StructType>(type)) return 14;
+    // if (std::dynamic_pointer_cast<PointerType>(type)) return 15;
+    // if (std::dynamic_pointer_cast<ArrayType>(type)) return 16;
+    // if (std::dynamic_pointer_cast<FunctionType>(type)) return 17;
 
-    if(std::dynamic_pointer_cast<U8>(type)) return 5;
-    if(std::dynamic_pointer_cast<U16>(type)) return 6;
-    if(std::dynamic_pointer_cast<U32>(type)) return 7;
-    if(std::dynamic_pointer_cast<U64>(type)) return 8;
+    switch (type->kind()){
+        case TypeKind::I8: return 1;
+        case TypeKind::I16: return 2;
+        case TypeKind::I32: return 3;
+        case TypeKind::I64: return 4;
 
-    if(std::dynamic_pointer_cast<USize>(type)) return 9;
+        case TypeKind::U8: return 5;
+        case TypeKind::U16: return 6;
+        case TypeKind::U32: return 7;
+        case TypeKind::U64: return 8;
 
-    if(std::dynamic_pointer_cast<F32>(type)) return 10;
-    if(std::dynamic_pointer_cast<F64>(type)) return 11;
+        case TypeKind::USize: return 9;
 
-    if(std::dynamic_pointer_cast<Boolean>(type)) return 12;
-    if(std::dynamic_pointer_cast<StringType>(type)) return 13;
-    if(std::dynamic_pointer_cast<StructType>(type)) return 14;
-    if (std::dynamic_pointer_cast<PointerType>(type)) return 15;
-    if (std::dynamic_pointer_cast<ArrayType>(type)) return 16;
+        case TypeKind::F32: return 10;
+        case TypeKind::F64: return 11;
 
-    throw std::runtime_error("Unknown type for typeid");
+        case TypeKind::Bool: return 12;
+        case TypeKind::Str: return 13;
+        case TypeKind::Struct: return 14;
+        case TypeKind::Pointer: return 15;
+        case TypeKind::Array: return 16;
+        case TypeKind::Function: return 17;
+        case TypeKind::Tuple: return 18;
+        case TypeKind::Unknown: return 256;
+
+        default:
+            throw std::runtime_error("Unknown type kind for typeid: " + std::to_string(static_cast<int>(type->kind())));
+    }
 }
 
 std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::expandTypeId(const std::shared_ptr<FuncCall> &call) {

@@ -244,6 +244,7 @@ class LLVMCodegen : public Backend {
                                  bool loadValue = true); // Can't be llvm::Constant* because of arrays
 
     llvm::Value *generateArrayLiteral(const std::shared_ptr<ArrayLiteral> &arrayLit, bool loadValue);
+    llvm::Value *generateTupleLiteral(std::shared_ptr<TupleLiteral> tupleLit, bool loadValue);
     llvm::Value *generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
                                    bool loadValue = true);
     llvm::Value *generateEnumAccess(const std::shared_ptr<EnumAccess> &enumAccess,
@@ -254,6 +255,7 @@ class LLVMCodegen : public Backend {
                                     bool loadValue = true);
     llvm::Value *generateFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue = true);
 
+    llvm::Value* generateTupleFieldAccess(const std::shared_ptr<FieldAccess>& fieldAccess, bool loadValue);
     llvm::Value *generateErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
     llvm::Value *generateTryExpr(const std::shared_ptr<TryExpression> &tryExpr, bool loadValue);
     llvm::Value *generateCatchExpr(const std::shared_ptr<CatchExpression> &catchExpr, bool loadValue);

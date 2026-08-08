@@ -446,7 +446,7 @@ ConstEvaluator::evaluateBinaryLiterals(LiteralPtr lhs,
     if (isNumericConst(lhs->value) && isNumericConst(rhs->value)) {
         if (!lhs->lit_type || !rhs->lit_type || !lhs->lit_type->equals(rhs->lit_type)) {
             // Try to cast to a common type for mixed-type operations (e.g. int + float)
-            if (m_type_checker->canImplicitCast(lhs->lit_type, rhs->lit_type)) {
+            if (canImplicitCast(lhs->lit_type, rhs->lit_type)) {
                 auto casted = castLiteral(lhs, rhs->lit_type);
                 if (casted) {
                     lhs = casted;
@@ -454,7 +454,7 @@ ConstEvaluator::evaluateBinaryLiterals(LiteralPtr lhs,
                     error(nullptr, "Failed to cast left operand to common type for binary operation");
                     return std::nullopt;
                 }
-            } else if (m_type_checker->canImplicitCast(rhs->lit_type, lhs->lit_type)) {
+            } else if (canImplicitCast(rhs->lit_type, lhs->lit_type)) {
                 auto casted = castLiteral(rhs, lhs->lit_type);
                 if (casted) {
                     rhs = casted;

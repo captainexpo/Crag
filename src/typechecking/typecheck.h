@@ -36,6 +36,8 @@ struct CastResult {
 
 bool canExplicitCast(const std::shared_ptr<Type> &from,
                      const std::shared_ptr<Type> &to);
+bool canImplicitCast(const std::shared_ptr<Type> &from,
+                     const std::shared_ptr<Type> &to);
 std::shared_ptr<Type> getCastType(const std::shared_ptr<Type> &from,
                                   const std::shared_ptr<Type> &to);
 
@@ -147,8 +149,6 @@ class TypeChecker {
     std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t);
     std::shared_ptr<Module> resolveModulePath(std::shared_ptr<ASTNode> node, const std::vector<std::string> &path);
 
-    bool canImplicitCast(const std::shared_ptr<Type> &from, const std::shared_ptr<Type> &to);
-
     void checkNode(const std::shared_ptr<ASTNode> &node);
     void checkStatement(std::shared_ptr<Statement> &stmt);
     void checkAsmStatement(const std::shared_ptr<AsmStmt> &asm_stmt);
@@ -169,6 +169,7 @@ class TypeChecker {
                                        const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
                                             const std::shared_ptr<Type> &expected = nullptr);
+    std::shared_ptr<Type> inferTupleLiteral(const std::shared_ptr<TupleLiteral> &tl, const std::shared_ptr<Type> &expected);
     std::shared_ptr<Type> inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
                                         const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferUnaryOp(const std::shared_ptr<UnaryOperation> &un);

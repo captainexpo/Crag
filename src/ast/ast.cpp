@@ -278,3 +278,4 @@ bool typeContainsGeneric(const std::shared_ptr<Type> &t) {
     }
     return false;
 }
+

@@ -41,6 +41,7 @@ enum class TypeKind {
     Struct,
     Union,
     Array,
+    Tuple,
     Function,
     Null,
     Void,
@@ -64,6 +65,7 @@ struct ASTVisitor {
     virtual void visit(struct BinaryOperation &) {}
     virtual void visit(struct Literal &) {}
     virtual void visit(struct ArrayLiteral &) {}
+    virtual void visit(struct TupleLiteral &) {}
     virtual void visit(struct FuncCall &) {}
     virtual void visit(struct StructDeclaration &) {}
     virtual void visit(struct UnionDeclaration &) {}
@@ -170,6 +172,7 @@ enum class NodeKind {
     TypeExpression,
     TryExpr,
     CatchExpr,
+    TupleLiteral,
     Unknown,
 };
 
@@ -773,6 +776,46 @@ struct UnionType : Type {
     }
 };
 
+
+struct TupleType : Type {
+    TypeKind kind() const override { return TypeKind::Tuple; }
+    std::vector<std::shared_ptr<Type>> elements;
+
+    TupleType(std::vector<std::shared_ptr<Type>> elems)
+        : elements(std::move(elems)) {}
+
+    std::string str() const override {
+        std::string result = "Tuple(";
+        for (size_t i = 0; i < elements.size(); ++i) {
+            if (i > 0)
+                result += ", ";
+            result += elements[i]->str();
+        }
+        result += ")";
+        return result;
+    }
+
+    bool equals(const std::shared_ptr<Type> &other) const override {
+        auto o = dynamic_cast<TupleType *>(other.get());
+        if (!o)
+            return false;
+        if (elements.size() != o->elements.size())
+            return false;
+        for (size_t i = 0; i < elements.size(); ++i)
+            if (!elements[i]->equals(o->elements[i]))
+                return false;
+        return true;
+    }
+
+    std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
+        std::vector<std::shared_ptr<Type>> elem_copies;
+        for (const auto &elem : elements) {
+            elem_copies.push_back(elem->instantiate(gp_replace));
+        }
+        return std::make_shared<TupleType>(elem_copies);
+    }
+};
+
 struct FunctionType : Type {
     TypeKind kind() const override { return TypeKind::Function; }
     std::vector<std::shared_ptr<Type>> params;
@@ -1184,6 +1227,27 @@ struct ArrayLiteral : public Expression {
         return result;
     }
     NodeKind kind() const override { return NodeKind::Literal; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
+};
+
+struct TupleLiteral : public Expression {
+    std::vector<ExprPtr> elements;
+
+    TupleLiteral(std::vector<ExprPtr> elems)
+        : elements(std::move(elems)) {}
+
+    std::string str() const override {
+        std::string result = "TupleLiteral(( ";
+        for (size_t i = 0; i < elements.size(); ++i) {
+            if (i > 0)
+                result += ", ";
+            result += elements[i]->toString();
+        }
+        result += " ))";
+        return result;
+    }
+    NodeKind kind() const override { return NodeKind::TupleLiteral; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };

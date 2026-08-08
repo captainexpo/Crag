@@ -211,7 +211,7 @@ std::optional<SymbolId> TypeChecker::lookupSymbolInScope(const std::string &name
     return std::nullopt;
 }
 
-bool TypeChecker::canImplicitCast(const std::shared_ptr<Type> &from, const std::shared_ptr<Type> &to) {
+bool canImplicitCast(const std::shared_ptr<Type> &from, const std::shared_ptr<Type> &to) {
     if (!from || !to)
         return false;
     if (from->equals(to))
@@ -404,6 +404,13 @@ static bool containsGenericType(const std::shared_ptr<Type> &t) {
     if (auto eu = std::dynamic_pointer_cast<ErrorUnionType>(t)) {
         return containsGenericType(eu->valueType) || containsGenericType(eu->errorType);
     }
+    if (auto tt = std::dynamic_pointer_cast<TupleType>(t)) {
+        for (const auto &elem : tt->elements) {
+            if (containsGenericType(elem))
+                return true;
+        }
+        return false;
+    }
     return false;
 }
 
@@ -444,6 +451,16 @@ static bool unifyGenericParam(const std::shared_ptr<Type> &paramType,
             return false;
         for (size_t i = 0; i < ti->type_args.size(); ++i) {
             if (!unifyGenericParam(ti->type_args[i], ati->type_args[i], associations))
+                return false;
+        }
+        return true;
+    }
+    if (auto tt = std::dynamic_pointer_cast<TupleType>(paramType)) {
+        auto att = std::dynamic_pointer_cast<TupleType>(argType);
+        if (!att || tt->elements.size() != att->elements.size())
+            return false;
+        for (size_t i = 0; i < tt->elements.size(); ++i) {
+            if (!unifyGenericParam(tt->elements[i], att->elements[i], associations))
                 return false;
         }
         return true;
@@ -501,6 +518,12 @@ static void substituteGenericTypes(std::shared_ptr<Type> &type,
         }
         return;
     }
+    if (auto tt = std::dynamic_pointer_cast<TupleType>(type)) {
+        for (auto &elem : tt->elements) {
+            substituteGenericTypes(elem, generic_map);
+        }
+        return;
+    }
 }
 
 std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t) {
@@ -530,6 +553,17 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
         if (!bt)
             throw TypeCheckError(current_module, node, "Could not resolve base type of pointer type '" + pt->str() + "'");
         return std::make_shared<PointerType>(bt, pt->pointer_const);
+    }
+    if (auto tt = std::dynamic_pointer_cast<TupleType>(t)) {
+        std::vector<std::shared_ptr<Type>> elems;
+        elems.reserve(tt->elements.size());
+        for (const auto &elem : tt->elements) {
+            auto rt = resolveType(node, elem);
+            if (!rt)
+                throw TypeCheckError(current_module, node, "Could not resolve one of the tuple element types in '" + tt->str() + "'");
+            elems.push_back(rt);
+        }
+        return std::make_shared<TupleType>(elems);
     }
     if (auto at = std::dynamic_pointer_cast<ArrayType>(t)) {
         auto bt = resolveType(node, at->element_type);
@@ -1672,6 +1706,8 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
     }
     if (auto al = std::dynamic_pointer_cast<ArrayLiteral>(expr))
         return inferArrayLiteral(al, expected);
+    if (auto tl = std::dynamic_pointer_cast<TupleLiteral>(expr))
+        return inferTupleLiteral(tl, expected);
     // Unknown expression kind
     throw TypeCheckError(current_module, expr, "Type inference: unhandled expression type: " + expr->str());
 }
@@ -1826,6 +1862,28 @@ std::shared_ptr<Type> TypeChecker::inferLiteral(const std::shared_ptr<Literal> &
 
     lit->inferred_type = preType;
     return lit->lit_type;
+}
+
+std::shared_ptr<Type> TypeChecker::inferTupleLiteral(const std::shared_ptr<TupleLiteral> &tl, const std::shared_ptr<Type> &expected) {
+    if (expected && expected->kind() != TypeKind::Tuple) {
+        throw TypeCheckError(current_module, tl, "Expected type is not a tuple type");
+    }
+    std::vector<std::shared_ptr<Type>> element_types;
+    for (size_t i = 0; i < tl->elements.size(); ++i) {
+        auto elem = tl->elements[i];
+        std::shared_ptr<Type> expected_elem_type = nullptr;
+        if (expected && expected->kind() == TypeKind::Tuple) {
+            auto expected_tuple = std::static_pointer_cast<TupleType>(expected);
+            if (i < expected_tuple->elements.size()) {
+                expected_elem_type = expected_tuple->elements[i];
+            }
+        }
+        auto elem_type = inferExpression(elem, expected_elem_type);
+        element_types.push_back(elem_type);
+    }
+    auto tuple_type = std::make_shared<TupleType>(element_types);
+    tl->inferred_type = tuple_type;
+    return tuple_type;
 }
 
 std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
@@ -2276,8 +2334,15 @@ std::shared_ptr<TemplateInstantiation> TypeChecker::tryInferGenericFunctionCall(
 
     for (auto &[name, type] : generic_associations) {
         auto idx = std::find(called_func->generic_params.begin(), called_func->generic_params.end(), name);
-        if (idx == called_func->generic_params.end())
+        if (idx == called_func->generic_params.end()){
+            std::cout << "Warning: inferred generic type for parameter " << name << " which is not in the function's generic parameters" << std::endl;
+            std::cout << "Generic associations: ";
+            for (auto &[n, t] : generic_associations) {
+                std::cout << n << " -> " << typeName(t) << ", ";
+            }
+            std::cout << std::endl;
             throw TypeCheckError(current_module, fc, "Generic type " + name + " not found in function declaration");
+        }
         size_t index = std::distance(called_func->generic_params.begin(), idx);
         concrete_params[index] = type;
     }
@@ -2465,6 +2530,17 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
             Symbol sym = *s;
             fa->inferred_type = resolveType(fa, sym.type);
             return sym.type;
+        }
+        auto tt = std::dynamic_pointer_cast<TupleType>(bt);
+        if (tt) {
+            auto idx = std::stoi(fa->field);
+            if (idx < 0 || idx >= tt->elements.size()) {
+                throw TypeCheckError(current_module, fa, "Tuple index out of bounds: " +
+                    std::to_string(idx) + " (tuple has " + std::to_string(tt->elements.size()) + " elements)");
+            }
+            fa->inferred_type = resolveType(fa, tt->elements[idx]);
+            fa->inferred_type->is_const = bt->is_const;
+            return tt->elements[idx];
         }
         throw TypeCheckError(current_module, fa, "Field access on disallowed type: " + typeName(bt));
     }

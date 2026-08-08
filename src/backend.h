@@ -164,6 +164,9 @@ typedef struct {
     bool do_runtime_safety;
     bool dump_ast_bsa;
     bool dump_ast_asa;
+    bool dump_cragir;
+    bool check_cragir;
+    bool emit_cragir_llvm;
     Target target;
 } CompilerOptions;
 

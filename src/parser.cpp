@@ -223,6 +223,10 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
             t = parse_function_ptr_type();
             break;
 
+        case TokenType::LPAREN:
+            t = parse_tuple_type();
+            break;
+
         default:
             throw ParseError(
                 "Unexpected token in type: " + describeToken(current),
@@ -259,6 +263,22 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
     }
 
     return t;
+}
+
+
+std::shared_ptr<TupleType> Parser::parse_tuple_type() {
+    consume(TokenType::LPAREN);
+    std::vector<std::shared_ptr<Type>> element_types;
+
+    if (peek().type != TokenType::RPAREN) {
+        do {
+            element_types.push_back(parse_type());
+        } while (match({TokenType::COMMA}));
+    }
+
+    consume(TokenType::RPAREN);
+
+    return std::make_shared<TupleType>(element_types);
 }
 
 std::shared_ptr<Type> Parser::parse_primitive_type() {
@@ -819,9 +839,36 @@ std::shared_ptr<Expression> Parser::parse_nud() {
             return expr;
         }
         case TokenType::LPAREN: {
-            auto expr = parse_expression();
+            if (peek().type == TokenType::RPAREN) {
+                // Empty tuple `()`
+                consume(TokenType::RPAREN);
+                auto tup = std::make_shared<TupleLiteral>(std::vector<ExprPtr>{});
+                tup->line = t.line;
+                tup->col = t.column;
+                return tup;
+            }
+
+            auto first = parse_expression();
+
+            if (peek().type != TokenType::COMMA) {
+                // Plain parenthesized (grouping) expression
+                consume(TokenType::RPAREN);
+                return first;
+            }
+
+            // Tuple literal: (a, b, ...) with an optional trailing comma
+            std::vector<ExprPtr> elements{first};
+            while (match({TokenType::COMMA})) {
+                if (peek().type == TokenType::RPAREN)
+                    break; // trailing comma
+                elements.push_back(parse_expression());
+            }
             consume(TokenType::RPAREN);
-            return expr;
+
+            auto tup = std::make_shared<TupleLiteral>(std::move(elements));
+            tup->line = t.line;
+            tup->col = t.column;
+            return tup;
         }
         case TokenType::NULL_T: {
             expr = std::make_shared<Literal>(0, std::make_shared<NullType>());
@@ -1078,6 +1125,16 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
             case TokenType::DOT: {
                 if (match({TokenType::STAR})) {
                     expr = std::make_shared<Dereference>(left);
+                    expr->line = t.line;
+                    expr->col = t.column;
+                    return expr;
+                }
+                if (peek().type == TokenType::NUMBER){
+                    if (peek().value.find('.') != std::string::npos) {
+                        throw ParseError("Floating point numbers cannot be used as field names", peek().line, peek().column);
+                    }
+                    std::string field_name = consume(TokenType::NUMBER).value;
+                    expr = std::make_shared<FieldAccess>(left, field_name);
                     expr->line = t.line;
                     expr->col = t.column;
                     return expr;
