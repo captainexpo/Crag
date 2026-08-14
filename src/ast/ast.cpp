@@ -101,12 +101,7 @@ void setLitVal(std::shared_ptr<Literal> lit, uint64_t raw_val) {
 }
 
 // Natural (non-packed) alignment of `type`, matching what LLVM's
-// StructType::setBody(..., /*packed=*/false) will actually use. Needed by
-// getTypeSize() so that struct sizes include the same inter-field and
-// trailing padding LLVM inserts -- without this, sizeof() on a struct that
-// mixes field sizes (e.g. a 4-byte enum next to 8-byte pointers) silently
-// undercounts the real in-memory size, and every malloc(sizeof(T)) for
-// such a type under-allocates.
+// StructType::setBody(..., /*packed=*/false) uses
 int getTypeAlign(const std::shared_ptr<Type> &type) {
     switch (type->kind()) {
         case TypeKind::I8:

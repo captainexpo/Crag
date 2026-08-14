@@ -668,6 +668,7 @@ struct FunctionDeclaration;
 struct StructType : Type {
     TypeKind kind() const override { return TypeKind::Struct; }
     std::string name;
+    std::string qualified_name;
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
     std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
     bool complete;

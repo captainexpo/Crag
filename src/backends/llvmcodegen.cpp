@@ -580,9 +580,8 @@ llvm::Type *LLVMCodegen::getLLVMType(const std::shared_ptr<Type> &type, const AS
     }
     if (IS_INSTANCE(type, StructType)) {
         auto structType = std::dynamic_pointer_cast<StructType>(type);
-        auto it = m_structTypes.find(structType->name);
-        if (it != m_structTypes.end()) {
-            return it->second;
+        if (llvm::StructType *llvmStruct = findLLVMStructType(structType)) {
+            return llvmStruct;
         } else {
             throw CodeGenError(nullptr, "Unknown struct type: " + structType->name);
         }
@@ -709,10 +708,6 @@ llvm::Value *LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &exp
         throw CodeGenError(expr,
                            "Cannot take address of method call result");
     } else if (IS_INSTANCE(expr, FuncCall)) {
-        // Same reasoning as the MethodCall case above: isLValue() allows a
-        // pointer-returning function call to act as an lvalue (e.g.
-        // `peek(ps).kind`), so treat it the same way rather than falling
-        // through to "not an lvalue" below.
         auto fc = std::dynamic_pointer_cast<FuncCall>(expr);
         if (fc->inferred_type && fc->inferred_type->kind() == TypeKind::Pointer) {
             llvm::Value *ptrVal = generateExpression(expr);
@@ -916,6 +911,14 @@ LLVMCodegen::generateStatement(const std::shared_ptr<Statement> &stmt) {
 
 llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> func,
                                                         std::shared_ptr<ExternDeclaration> externDecl) {
+    if (func->symbol_id != INVALID_SYMBOL_ID && m_type_table) {
+        if (auto sym = m_type_table->lookupSymbol(func->symbol_id)) {
+            if (auto resolvedType = std::dynamic_pointer_cast<FunctionType>(sym->type)) {
+                func->type = resolvedType;
+            }
+        }
+    }
+
     llvm::FunctionType *fType =
         llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type, func));
 
@@ -925,9 +928,6 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
     if (auto *existingFn = m_llvm_module->getFunction(fname)) {
         if (func->type->is_extern) {
             // Same underlying extern symbol may be declared by multiple modules
-            // (e.g. every module that does `extern fn malloc(...)`). Each
-            // declaration gets its own SymbolId at typecheck time, so each one
-            // needs to be pointed at the one shared llvm::Function.
             CUR_SCOPE.set(fname, existingFn, existingFn->getFunctionType(), func->type);
             if (func->symbol_id != INVALID_SYMBOL_ID) {
                 setSymValue(func->symbol_id, existingFn, existingFn->getFunctionType(), func->type);
@@ -1503,7 +1503,9 @@ void LLVMCodegen::generateStructDeclaration(
     llvm::StructType *llvmStruct =
         llvm::StructType::create(context, structDecl->name);
 
-    m_structTypes[structDecl->name] = llvmStruct;
+    m_structTypes[m_current_module->canonicalizeName(structDecl->name)] = llvmStruct;
+
+    m_structTypes.try_emplace(structDecl->name, llvmStruct);
 
     std::vector<llvm::Type *> fieldTypes;
     for (const auto &field : structDecl->fields) {
@@ -1573,8 +1575,6 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
     // lvalue is deliberately excluded here and falls through to the
     // general assignment path below (generateAddress + store), which
     // handles it fine since a `str` value is just an LLVM struct value;
-    // this block previously caught "=" too and unconditionally rejected
-    // it with "Unsupported operator on str type: =".
     if (left->inferred_type && left->inferred_type->kind() == TypeKind::Str && op != "=") {
         llvm::Value *lv = generateExpression(left);
         llvm::Value *rv = generateExpression(right);
@@ -1617,12 +1617,6 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
             llvm::FunctionCallee memcmpFn = m_llvm_module->getOrInsertFunction(
                 "memcmp", llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {ptrTy, ptrTy, i64Ty}, false));
 
-            // Lengths must match before comparing bytes. memcmp(lptr, rptr, llen)
-            // reads llen bytes from *both* buffers, so calling it unconditionally
-            // when llen > rlen reads past the end of the shorter string's
-            // allocation -- usually harmless slop but occasionally a real
-            // out-of-bounds page-boundary segfault. Only call memcmp once we
-            // know llen == rlen (so llen bytes is safe to read from rptr too).
             llvm::BasicBlock *startBlock = m_builder->GetInsertBlock();
             llvm::Function *currentFunc = startBlock->getParent();
             llvm::BasicBlock *cmpBlock = llvm::BasicBlock::Create(context, "streq.cmp", currentFunc);
@@ -1804,16 +1798,6 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
                 r = m_builder->CreateNeg(r, "neg_offset");
             }
 
-            // Use GEP for pointer arithmetic (returns pointer), scaled by
-            // the pointee's real element type. Using i8 unconditionally
-            // here made `ptr + i` silently advance by a fixed 1-byte
-            // stride regardless of the pointee's actual size (e.g. for a
-            // `*Token`, `ptr + i` would step by 1 byte instead of
-            // sizeof(Token), corrupting every subsequent access).
-            // `*void` (and function pointers) keep byte-wise (i8) stride:
-            // void has no size, and a function type isn't a valid GEP
-            // element type, so LLVM would generate/select malformed GEPs
-            // for either. C treats `void*` arithmetic as byte-wise too.
             llvm::Type *elemTy = llvm::Type::getInt8Ty(context);
             auto leftPtrType = std::dynamic_pointer_cast<PointerType>(left->inferred_type);
             if (leftPtrType && leftPtrType->base &&
@@ -2229,20 +2213,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(
 ) {
     auto structAccess = methodCall->object;
 
-    // Check the receiver's static type *before* deciding how to evaluate it:
-    //   - struct VALUE (e.g. a local `Line`, or `self.lines[i]`): we need its
-    //     address, so `self: *T` methods can bind directly to it and `self: T`
-    //     methods can load from it below.
-    //   - already a POINTER (e.g. a plain `*Line` variable, but just as often
-    //     a computed expression like `self.lines + i`, a field, or another
-    //     call's result): the expression already evaluates to the pointer we
-    //     need, so just evaluate it normally. Calling generateAddress() on it
-    //     instead -- as this used to do unconditionally -- only happens to
-    //     work when the receiver is a plain variable (whose "address" is its
-    //     alloca slot, loaded once more to get the pointer value out); for
-    //     anything else (arithmetic, a call result, ...) there is no address
-    //     to take, and generateAddress() throws "not an lvalue".
-    auto structType =
+     auto structType =
         std::dynamic_pointer_cast<StructType>(structAccess->inferred_type);
     llvm::Value *obj = nullptr;
 
@@ -3025,14 +2996,12 @@ llvm::Value *LLVMCodegen::generateFieldAccess(
     }
 
     // Confirm struct type is registered in LLVM mapping
-    auto accessee = m_structTypes.find(structType->name);
-    if (accessee == m_structTypes.end() || !accessee->second) {
+    llvm::StructType *llvmStruct = findLLVMStructType(structType);
+    if (!llvmStruct) {
         throw CodeGenError(fieldAccess->base,
                            "Unknown or unregistered struct type in field access: " +
                                structType->name);
     }
-
-    llvm::StructType *llvmStruct = accessee->second;
 
     // Validate field existence
     const auto &fieldName = fieldAccess->field;
@@ -3230,11 +3199,10 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
         throw CodeGenError(structInit, "Struct initializer has non-struct/union inferred type: " +
                                            (_if_type ? _if_type->str() : "null"));
     }
-    auto it = m_structTypes.find(if_type->name);
-    if (it == m_structTypes.end()) {
+    llvm::StructType *llvmStruct = findLLVMStructType(if_type);
+    if (!llvmStruct) {
         throw CodeGenError(structInit, "Unknown struct type: " + if_type->name);
     }
-    llvm::StructType *llvmStruct = it->second;
     if (loadValue) {
         llvm::Value *agg = llvm::UndefValue::get(llvmStruct);
         for (const auto &field : structInit->field_values) {
@@ -3692,11 +3660,7 @@ bool LLVMCodegen::shouldCoerceForABI(llvm::Type *type) {
     return size == 1 || size == 2 || size == 4 || size == 8 || size == 16;
 }
 
-// Determines which x86-64 SysV register class ([rangeStart, rangeEnd) bytes,
-// where rangeEnd - rangeStart <= 8) the leaf fields of `ty` fall into, merged
-// into `cls`. `baseOffset` is where `ty` itself starts within the enclosing
-// aggregate. INTEGER dominates SSE when a range contains a mix (matches the
-// SysV merging rule); ranges containing no overlapping field stay NONE.
+// Determines which x86-64 SysV register class
 void LLVMCodegen::classifyEightbyteRange(llvm::Type *ty, const llvm::DataLayout &DL, uint64_t baseOffset,
                                          uint64_t rangeStart, uint64_t rangeEnd, EightbyteClass &cls) {
     if (ty->isFloatTy() || ty->isDoubleTy()) {
@@ -3740,11 +3704,6 @@ llvm::Type *LLVMCodegen::getABICoercionType(llvm::Type *structType) {
     llvm::DataLayout DL = m_llvm_module->getDataLayout();
     uint64_t size = DL.getTypeAllocSize(structType);
 
-    // Structs made entirely of float/double fields must be coerced to a
-    // floating-point-compatible type (float/double), not an integer type --
-    // otherwise the value is passed/returned via a general-purpose register
-    // (e.g. RAX) instead of the SSE register (e.g. XMM0) real C code
-    // actually uses for it, silently corrupting the value.
     if (size == 1 || size == 2 || size == 4 || size == 8) {
         EightbyteClass cls = EightbyteClass::NONE;
         classifyEightbyteRange(structType, DL, 0, 0, size, cls);
@@ -3801,16 +3760,7 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
     }
 
     // Fallback: allocate temporary for struct and perform the usual ABI coercion.
-    // (A constant-aggregate fast path used to live here, reinterpreting the
-    // constant via llvm::ConstantExpr::getBitCast(C, abiType). That's not a
-    // legal bitcast -- LLVM requires bitcast operands to already have the
-    // same first-class representation, and aggregate-to-scalar is not one of
-    // the cases it actually supports -- so it silently produced a malformed
-    // constant (observed as e.g. a bitcast of just the struct's first i8
-    // field to i32) that only blew up later during instruction selection.
-    // The alloca+store+load path below is valid for constants too, so it's
-    // used unconditionally instead.
-    llvm::AllocaInst *structAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), structType, "struct_tmp");
+        llvm::AllocaInst *structAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), structType, "struct_tmp");
     if (!structAlloca)
         structAlloca = m_builder->CreateAlloca(structType, nullptr, "struct_tmp");
 

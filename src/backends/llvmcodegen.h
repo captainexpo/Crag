@@ -328,6 +328,21 @@ class LLVMCodegen : public Backend {
     void classifyEightbyteRange(llvm::Type *ty, const llvm::DataLayout &DL, uint64_t baseOffset,
                                 uint64_t rangeStart, uint64_t rangeEnd, EightbyteClass &cls);
 
+    // Looks up a StructType's LLVM type in m_structTypes, preferring its
+    // module-qualified name (to disambiguate same-named structs declared in
+    // different modules) and falling back to the bare name for struct
+    // references that were never stamped with qualified_name.
+    llvm::StructType *findLLVMStructType(const std::shared_ptr<StructType> &structType) {
+        if (!structType->qualified_name.empty()) {
+            auto it = m_structTypes.find(structType->qualified_name);
+            if (it != m_structTypes.end()) {
+                return it->second;
+            }
+        }
+        auto it = m_structTypes.find(structType->name);
+        return it != m_structTypes.end() ? it->second : nullptr;
+    }
+
     bool isExternMemoryAggregateType(const std::shared_ptr<Type> &type, const ASTNodePtr &node);
     llvm::FunctionType *getExternABIFunctionType(const std::shared_ptr<FunctionType> &funcType,
                                                  const ASTNodePtr &node,

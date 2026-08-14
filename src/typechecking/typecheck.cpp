@@ -290,11 +290,6 @@ bool canExplicitCast(const std::shared_ptr<Type> &from,
         return true; // TODO: Figure out if this is bad
     if (from_tk == TypeKind::Enum && to->isNumeric())
         return true;
-    // Enums with a non-numeric base type (e.g. `enum E(bool)`) can be
-    // implicitly assigned to their base type (see canImplicitCast above),
-    // but until this check existed there was no way to explicitly `as`-cast
-    // back to that same base type, since `to->isNumeric()` above only covers
-    // numeric bases.
     if (auto from_enum = std::dynamic_pointer_cast<EnumType>(from)) {
         if (from_enum->base_type->equals(to))
             return true;
@@ -416,8 +411,6 @@ static bool containsGenericType(const std::shared_ptr<Type> &t) {
 
 // Structurally matches a (possibly generic-containing) parameter type against a
 // concrete argument type, filling in `associations` for any GenericType found.
-// Returns false if the shapes don't match or an already-associated generic
-// conflicts with this occurrence.
 static bool unifyGenericParam(const std::shared_ptr<Type> &paramType,
                                const std::shared_ptr<Type> &argType,
                                std::unordered_map<std::string, std::shared_ptr<Type>> &associations) {
@@ -543,10 +536,10 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
     }
     if (auto st = std::dynamic_pointer_cast<StructType>(t)) {
         auto resolved = lookupStructType(st->name);
-        if (resolved) {
+        if (resolved && (st->qualified_name.empty() || st->qualified_name == resolved->qualified_name)) {
             return resolved;
         }
-        return st; // unknown struct type
+        return st; // unknown struct type, or resolving to an unrelated same-named struct
     }
     if (auto pt = std::dynamic_pointer_cast<PointerType>(t)) {
         auto bt = resolveType(node, pt->base);
@@ -612,10 +605,6 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                 throw TypeCheckError(current_module, node, "Symbol '" + qt->type_name + "' in module '" + cur_mod->canon_name + "' is not a type for qualified type '" + qt->str() + "'");
             }
             if (!resolved->type) {
-                // Generic (template) type: no concrete type until instantiated with
-                // concrete args. Keep the QualifiedType (module_path + name) intact so
-                // later TemplateInstanceType resolution can still route it through
-                // module-aware instantiation, mirroring the unqualified fallback above.
                 return qt;
             }
             return resolved->type;
@@ -686,10 +675,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                 auto collapsed = resolveType(node, base_copy);
                 if (auto collapsed_struct = std::dynamic_pointer_cast<StructType>(collapsed)) {
                     if (collapsed_struct->complete) {
-                        // Already a fully-instantiated concrete type (e.g. resolved via a
-                        // module-qualified template instantiation above) — re-instantiating
-                        // it by name would use an already-mangled name with no module
-                        // context and fail. Just return it.
+                        // Already a fully-instantiated concrete type
                         return collapsed;
                     }
                     auto ti = std::make_shared<TemplateInstantiation>(collapsed_struct->name, resolved_args);
@@ -767,6 +753,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     // Build a StructType and register
                     auto st = std::make_shared<StructType>(sd->name);
                     st->complete = false;
+                    st->qualified_name = module->canonicalizeName(sd->name);
                     insertSymbol(sd->name, SymbolKind::Type, st, sd);
                     struct_decls.push_back(sd);
                 }
@@ -1114,10 +1101,6 @@ void TypeChecker::checkVariableDeclaration(
                 var->var_type = init_type;
             }
 
-            // var_type may be a shared/interned type object (e.g. a named
-            // struct/union/enum resolved via lookupNamedType). Clone before
-            // stamping const-ness so we don't mutate that shared instance
-            // and leak "const" onto every other use of the type.
             if (var->is_const) {
                 var->var_type = var->var_type->instantiate();
             }
@@ -1259,14 +1242,6 @@ void TypeChecker::handleArrayLiteralAssignment(
 
     arr_lit->defined_len = final_len;
 
-    // Only fill in a concrete length/size for a variable that was *declared*
-    // sized (e.g. `[10]i32`, possibly partially initialized). A variable
-    // declared unsized (`[]i32 = {...}`) must keep unsized = true: it's the
-    // same Type object as var->var_type, and other code (generic parameter
-    // unification, equals()) compares against that declared type elsewhere --
-    // flipping it to sized here made e.g. passing such a variable as a
-    // generic T argument bind T to a differently-sized array type than the
-    // one used at the call site's other, explicitly-unsized annotations.
     if (!arr_type->unsized) {
         arr_type->length_expr = len_lit;
         arr_type->actualSize = final_len;
@@ -1628,15 +1603,6 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
     if (auto mc = std::dynamic_pointer_cast<MethodCall>(expr))
         return inferMethodCall(mc);
     if (auto ma = std::dynamic_pointer_cast<ModuleAccess>(expr)) {
-        // `a.b.c...` is always parsed as a single (possibly too-long) module
-        // path, since the parser can't tell "field access on a value"
-        // (`rl.GRAY.r`: value `rl.GRAY`, field `r`) apart from "a qualified
-        // module path" (`std.cstdlib.malloc`: module `std.cstdlib`, symbol
-        // `malloc`) without type info. Probe module_path here first: if some
-        // suffix of it doesn't actually resolve as nested submodules, the
-        // first such segment is the real member to look up, and everything
-        // after it -- module_path's tail, plus the original member_name --
-        // is really a chain of ordinary field accesses on that value.
         std::shared_ptr<Module> probe = current_module;
         size_t resolved = 0;
         for (; resolved < ma->module_path.size(); ++resolved) {
@@ -1803,11 +1769,7 @@ TypeChecker::inferTypeCast(const std::shared_ptr<TypeCast> &tc) {
 
 std::shared_ptr<Type> TypeChecker::inferVarAccess(std::shared_ptr<VarAccess> &v) {
     if (v->symbol_id != INT64_MAX) {
-        // Already resolved to a concrete symbol (e.g. by generic template
-        // instantiation, which runs with a different module temporarily active
-        // than whatever module is current now). Trust the resolved symbol id
-        // instead of re-resolving by name, which only searches the *current*
-        // module's scope and can fail even though the symbol is known to exist.
+        // Already resolved to a concrete symbol
         auto pre_resolved = symbol_table.lookupSymbol(v->symbol_id);
         if (pre_resolved) {
             if (!pre_resolved->type) {
