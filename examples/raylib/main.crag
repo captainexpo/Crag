@@ -90,8 +90,8 @@ pub fn main() -> i32 {
             }
             let pos_delta = ball_future_y - (p2_y + PADDLE_HEIGHT / 2);
             let movement = PADDLE_SPEED;
-            if (std.math.abs::<f32>(pos_delta) > movement) {
-                movement = movement * std.math.sign::<f32>(pos_delta);
+            if (std.math.abs(pos_delta) > movement) {
+                movement = movement * std.math.sign(pos_delta);
             }
             if (ball_future_y < p2_y + PADDLE_HEIGHT / 2) {
                 p2_y -= movement * delta;

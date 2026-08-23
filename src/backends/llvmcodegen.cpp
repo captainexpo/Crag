@@ -1933,7 +1933,7 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
 
     const OpInfo &info = it->second;
     if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
-        if (op == "/" && r->getType()->isIntegerTy()) {
+        if ((op == "/" || op == "%") && r->getType()->isIntegerTy()) {
             llvm::Value *zero = llvm::ConstantInt::get(r->getType(), 0);
             llvm::Value *isZero = m_builder->CreateICmpNE(r, zero, "divbyzerotmp");
             conditionOrPanic(isZero, DivisionByZero, left->line, left->col);
@@ -1957,6 +1957,8 @@ llvm::Value *
 LLVMCodegen::generateUnaryOp(const std::shared_ptr<UnaryOperation> &operation,
                              bool load_value) {
     auto val = generateExpression(operation->operand);
+    auto baseTy = operation->operand->inferred_type;
+    auto basellvmty = getLLVMType(baseTy, operation->operand);
     auto op = operation->op;
     if (op == "-") {
         if (val->getType()->isFloatingPointTy()) {
@@ -1972,36 +1974,43 @@ LLVMCodegen::generateUnaryOp(const std::shared_ptr<UnaryOperation> &operation,
     else if (op == "~") {
         return m_builder->CreateNot(val, "bwnottmp");
     } else if (op == "++") {
-        if (operation->is_prefix) {
-            llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
-            llvm::Value *inc = m_builder->CreateAdd(val, one, "inc");
-            llvm::Value *addr = generateAddress(operation->operand);
-            m_builder->CreateStore(inc, addr);
-            return inc;
+        llvm::Value *inc;
+        if (val->getType()->isFloatingPointTy()) { // Use llvm type because it could be any width
+            auto one = llvm::ConstantFP::get(val->getType(), 1.0);
+            inc = m_builder->CreateFAdd(val, one, "incf");
+        } else if (val->getType()->isIntegerTy()) { // Use llvm type because it could be any width
+            auto one = llvm::ConstantInt::get(val->getType(), 1);
+            inc = m_builder->CreateAdd(val, one, "inci");
+        } else if (auto ptrTy = std::dynamic_pointer_cast<PointerType>(baseTy)) {
+            auto one = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1);
+            inc = m_builder->CreateGEP(getLLVMType(ptrTy->base, operation->operand), val, one, "incp");
         } else {
-            llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
-            llvm::Value *inc = m_builder->CreateAdd(val, one, "inc");
-            llvm::Value *addr = generateAddress(operation->operand);
-            m_builder->CreateStore(inc, addr);
-            return val;
+            throw CodeGenError(operation, "Unsupported type for increment operator");
         }
+        llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
+        llvm::Value *addr = generateAddress(operation->operand);
+        m_builder->CreateStore(inc, addr);
+        return operation->is_prefix ? inc : val;
     } else if (op == "--") {
-        if (operation->is_prefix) {
-            llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
-            llvm::Value *dec = m_builder->CreateSub(val, one, "dec");
-            llvm::Value *addr = generateAddress(operation->operand);
-            m_builder->CreateStore(dec, addr);
-            return dec;
+        llvm::Value *dec;
+        if (val->getType()->isFloatingPointTy()) {
+            auto one = llvm::ConstantFP::get(val->getType(), 1.0);
+            dec = m_builder->CreateFSub(val, one, "decf");
+        } else if (val->getType()->isIntegerTy()) {
+            auto one = llvm::ConstantInt::get(val->getType(), 1);
+            dec = m_builder->CreateSub(val, one, "deci");
+        } else if (auto ptrTy = std::dynamic_pointer_cast<PointerType>(baseTy)) {
+            auto one = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1);
+            dec = m_builder->CreateGEP(getLLVMType(ptrTy->base, operation->operand), val, m_builder->CreateNeg(one), "decp");
         } else {
-            llvm::Value *one = llvm::ConstantInt::get(val->getType(), 1);
-            llvm::Value *dec = m_builder->CreateSub(val, one, "dec");
-            llvm::Value *addr = generateAddress(operation->operand);
-            m_builder->CreateStore(dec, addr);
-            return val;
+            throw CodeGenError(operation, "Unsupported type for decrement operator");
         }
+        llvm::Value *addr = generateAddress(operation->operand);
+        m_builder->CreateStore(dec, addr);
+        return operation->is_prefix ? dec : val;
+    } else {
+        throw CodeGenError(operation, "Unsupported unary operator: " + op);
     }
-
-    throw CodeGenError(operation, "Unsupported unary operator: " + op);
 }
 
 llvm::Value *LLVMCodegen::generateLogicalOp(
