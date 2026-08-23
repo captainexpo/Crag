@@ -549,11 +549,6 @@ void LLVMCodegen::emitObjectToFile(const std::string &filename) {
     auto CPU = "generic";
     auto Features = "";
 
-    // Verify the module before emitting object code
-    // if (llvm::verifyModule(*m_llvm_module, &llvm::errs())) {
-    //     throw CodeGenError(nullptr, "Module verification failed - invalid IR");
-    // }
-
     const llvm::TargetOptions opt{};
 
     llvm::CodeGenOptLevel opt_level = llvm::CodeGenOptLevel::Default;
@@ -1226,17 +1221,16 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
         m_builder->SetCurrentDebugLocation(llvm::DebugLoc());
     }
 
-    // Validate function
-    // if (llvm::verifyFunction(*function, &llvm::errs())) {
-    //     // Dump IR
-    //     std::string str;
-    //     llvm::raw_string_ostream rso(str);
-    //     function->print(rso);
-    //     std::cout << "Generated IR for function " << func->name << ":\n"
-    //               << rso.str() << "\n";
-    //     throw CodeGenError(func, "Generated invalid IR for function: " + func->name);
-    // }
-    //
+    if (llvm::verifyFunction(*function, &llvm::errs())) {
+        // Dump IR
+        std::string str;
+        llvm::raw_string_ostream rso(str);
+        function->print(rso);
+        std::cout << "Generated IR for function " << func->name << ":\n"
+                  << rso.str() << "\n";
+        throw CodeGenError(func, "Generated invalid IR for function: " + func->name);
+    }
+
     return function;
 }
 
@@ -1258,17 +1252,17 @@ void LLVMCodegen::finished() {
             m_builder->SetInsertPoint(currentBB);
         }
     }
-    //
-    // // Verify the module
-    // if (llvm::verifyModule(*m_llvm_module, &llvm::errs())) {
-    //     // Dump IR
-    //     std::string str;
-    //     llvm::raw_string_ostream rso(str);
-    //     m_llvm_module->print(rso, nullptr);
-    //     std::cout << "Generated IR for module " << (m_current_module ? m_current_module->canon_name : "<unknown>") << ":\n"
-    //               << rso.str() << "\n";
-    //     throw CodeGenError(nullptr, "Module verification failed - invalid IR");
-    // }
+
+    // Verify the module
+    if (llvm::verifyModule(*m_llvm_module, &llvm::errs())) {
+        // Dump IR
+        // std::string str;
+        // llvm::raw_string_ostream rso(str);
+        // m_llvm_module->print(rso, nullptr);
+        // std::cout << "Generated IR for module " << (m_current_module ? m_current_module->canon_name : "<unknown>") << ":\n"
+        //           << rso.str() << "\n";
+        throw CodeGenError(nullptr, "Module verification failed - invalid IR");
+    }
 
     finalizeDebugInfo();
 }
@@ -1474,7 +1468,7 @@ llvm::Constant *LLVMCodegen::getConstantLiteralValue(const std::shared_ptr<ASTNo
     return nullptr;
 }
 
-llvm::Function* getCurrentFunction(llvm::IRBuilder<> &builder) {
+llvm::Function *getCurrentFunction(llvm::IRBuilder<> &builder) {
     llvm::BasicBlock *currentBlock = builder.GetInsertBlock();
     if (!currentBlock) {
         return nullptr;
@@ -2186,13 +2180,13 @@ llvm::Value *LLVMCodegen::generateTupleLiteral(std::shared_ptr<TupleLiteral> tup
         elementValues.push_back(elementValue);
     }
 
-    llvm::Type* tupleType = getLLVMType(tupleLit->inferred_type, tupleLit);
+    llvm::Type *tupleType = getLLVMType(tupleLit->inferred_type, tupleLit);
 
     // Alloca for the tuple
-    llvm::Value* tupleAlloca = createEntryBlockAlloca(m_builder->GetInsertBlock()->getParent(), tupleType, "tuple");
+    llvm::Value *tupleAlloca = createEntryBlockAlloca(m_builder->GetInsertBlock()->getParent(), tupleType, "tuple");
     // Store each element into the tuple
     for (size_t i = 0; i < elementValues.size(); ++i) {
-        llvm::Value* elementPtr = m_builder->CreateStructGEP(tupleType, tupleAlloca, i);
+        llvm::Value *elementPtr = m_builder->CreateStructGEP(tupleType, tupleAlloca, i);
         m_builder->CreateStore(elementValues[i], elementPtr);
     }
 
@@ -2251,8 +2245,8 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
 
     // Allocate struct { ptr, i64 }
     llvm::Value *arrayStructAlloc = createEntryBlockAlloca(getCurrentFunction(*m_builder), arrayLLVMType, "arraystruct");
-    if (!arrayStructAlloc){
-        arrayStructAlloc  = m_builder->CreateAlloca(arrayLLVMType, nullptr, "arraystruct");
+    if (!arrayStructAlloc) {
+        arrayStructAlloc = m_builder->CreateAlloca(arrayLLVMType, nullptr, "arraystruct");
     }
 
     // Store array length into struct
@@ -2320,7 +2314,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(
 ) {
     auto structAccess = methodCall->object;
 
-     auto structType =
+    auto structType =
         std::dynamic_pointer_cast<StructType>(structAccess->inferred_type);
     llvm::Value *obj = nullptr;
 
@@ -2710,21 +2704,21 @@ llvm::Value *LLVMCodegen::generateArrayFieldAccess(const std::shared_ptr<FieldAc
         throw CodeGenError(fieldAccess, "Unknown field on array: " + fieldAccess->field);
     }
 }
-llvm::Value* LLVMCodegen::generateTupleFieldAccess(const std::shared_ptr<FieldAccess>& fieldAccess, bool loadValue) {
+llvm::Value *LLVMCodegen::generateTupleFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
     bool baseIsAddressable = isLValue(fieldAccess->base);
 
-    llvm::Value* basePtr = nullptr;
+    llvm::Value *basePtr = nullptr;
 
     if (baseIsAddressable) {
         basePtr = generateAddress(fieldAccess->base);
     } else {
         if (!loadValue) {
             throw CodeGenError(fieldAccess,
-                "Cannot assign to field of temporary value");
+                               "Cannot assign to field of temporary value");
         }
 
-        llvm::Value* baseVal = generateExpression(fieldAccess->base);
-        llvm::StructType* structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
+        llvm::Value *baseVal = generateExpression(fieldAccess->base);
+        llvm::StructType *structType = llvm::cast<llvm::StructType>(getLLVMType(fieldAccess->base->inferred_type, fieldAccess->base));
         basePtr = materializeAggregate(baseVal, structType);
     }
     if (!basePtr) {
@@ -2739,13 +2733,13 @@ llvm::Value* LLVMCodegen::generateTupleFieldAccess(const std::shared_ptr<FieldAc
         throw CodeGenError(fieldAccess, "Tuple index out of bounds: " + fieldAccess->field);
     }
 
-    llvm::StructType* tupleStructType =
+    llvm::StructType *tupleStructType =
         llvm::cast<llvm::StructType>(getLLVMType(tuple_type, fieldAccess->base));
 
     auto gep = m_builder->CreateStructGEP(tupleStructType, basePtr, index, "tuple_field_access");
     return loadValue
-        ? m_builder->CreateLoad(getLLVMType(tuple_type->elements[index], fieldAccess), gep, "load_tuple_field")
-        : gep;
+               ? m_builder->CreateLoad(getLLVMType(tuple_type->elements[index], fieldAccess), gep, "load_tuple_field")
+               : gep;
 }
 
 llvm::Value *LLVMCodegen::generateStringFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue) {
@@ -3245,7 +3239,7 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
         }
 
         llvm::Value *alloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), llvmArray, "slicetmp");
-        if (!alloca){
+        if (!alloca) {
             alloca = m_builder->CreateAlloca(llvmArray, nullptr, "slicetmp");
         }
 
@@ -3264,7 +3258,7 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
         return alloca;
     }
 
-    if (string_type){
+    if (string_type) {
         auto llvmString = llvm::cast<llvm::StructType>(getLLVMType(string_type, structInit));
         auto ptrIt = structInit->field_values.find("ptr");
         auto lenIt = structInit->field_values.find("len");
@@ -3283,7 +3277,7 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
         }
 
         llvm::Value *alloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), llvmString, "stringtmp");
-        if (!alloca){
+        if (!alloca) {
             alloca = m_builder->CreateAlloca(llvmString, nullptr, "stringtmp");
         }
 
@@ -3326,7 +3320,7 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
     }
 
     llvm::Value *alloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), llvmStruct, "structtmp");
-    if (!alloca){
+    if (!alloca) {
         alloca = m_builder->CreateAlloca(llvmStruct, nullptr, "structtmp");
     }
 
@@ -3356,12 +3350,30 @@ LLVMCodegen::generateBlock(const std::shared_ptr<Block> &blockNode) {
     m_scopeStack.push_back(*parent_scope);
     llvm::Value *lastValue = nullptr;
     for (const auto &stmt : blockNode->statements) {
+        if (m_builder->GetInsertBlock() && m_builder->GetInsertBlock()->getTerminator()) {
+            goto found_terminator;
+        }
         if (std::dynamic_pointer_cast<ReturnStatement>(stmt)) {
             // If it's a return statement, we generate it and then break out of the block
             lastValue = generateStatement(stmt);
-            break;
+            goto found_terminator;
+        }
+        if (std::dynamic_pointer_cast<BreakStatement>(stmt)) {
+            // If it's a break statement, we generate it and then break out of the block
+            lastValue = generateStatement(stmt);
+            goto found_terminator;
+        }
+        if (std::dynamic_pointer_cast<ContinueStatement>(stmt)) {
+            // If it's a continue statement, we generate it and then break out of the block
+            lastValue = generateStatement(stmt);
+            goto found_terminator;
         }
         lastValue = generateStatement(stmt);
+        continue;
+
+    found_terminator:
+        // if there's more statements after a terminator, we don't generate them
+        break;
     }
     m_scopeStack.pop_back();
     return lastValue;
@@ -3379,13 +3391,13 @@ LLVMCodegen::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
         llvm::BasicBlock::Create(context, "then", theFunction);
     llvm::BasicBlock *elseBB =
         llvm::BasicBlock::Create(context, "else", theFunction);
-    llvm::BasicBlock *mergeBB =
-        llvm::BasicBlock::Create(context, "ifcont", theFunction);
+    llvm::BasicBlock *mergeBB = nullptr;
     m_builder->CreateCondBr(condV, thenBB, elseBB);
     m_builder->SetInsertPoint(thenBB);
     llvm::Value *thenV = generateStatement(ifStmt->then_branch);
     // Only branch to merge if the then block is not already terminated
     if (!m_builder->GetInsertBlock()->getTerminator()) {
+        mergeBB = llvm::BasicBlock::Create(context, "ifcont", theFunction);
         m_builder->CreateBr(mergeBB);
     }
     thenBB = m_builder->GetInsertBlock();
@@ -3394,14 +3406,14 @@ LLVMCodegen::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
         llvm::Value *elseV = generateStatement(ifStmt->else_branch);
     // Only branch to merge if the else block is not already terminated
     if (!m_builder->GetInsertBlock()->getTerminator()) {
+        if (!mergeBB) {
+            mergeBB = llvm::BasicBlock::Create(context, "ifcont", theFunction);
+        }
         m_builder->CreateBr(mergeBB);
     }
-    m_builder->SetInsertPoint(mergeBB);
+    if (mergeBB != nullptr)
+        m_builder->SetInsertPoint(mergeBB);
 
-    // If both branches terminated mergeBB is unreachable
-    if (mergeBB->use_empty()) {
-        m_builder->CreateUnreachable();
-    }
     return nullptr;
 }
 
@@ -3867,7 +3879,7 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
     }
 
     // Fallback: allocate temporary for struct and perform the usual ABI coercion.
-        llvm::AllocaInst *structAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), structType, "struct_tmp");
+    llvm::AllocaInst *structAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), structType, "struct_tmp");
     if (!structAlloca)
         structAlloca = m_builder->CreateAlloca(structType, nullptr, "struct_tmp");
 
@@ -3892,7 +3904,6 @@ llvm::Value *LLVMCodegen::coerceFromABI(llvm::Value *abiValue, llvm::Type *struc
     llvm::AllocaInst *abiAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), abiType, "abi_tmp");
     if (!abiAlloca)
         abiAlloca = m_builder->CreateAlloca(abiType, nullptr, "abi_tmp");
-
 
     m_builder->CreateStore(abiValue, abiAlloca);
 

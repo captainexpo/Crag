@@ -15,7 +15,6 @@ fn min(a: i32, b: i32) -> i32 {
   } else {
     return b;
   }
-  return 0;
 }
 
 struct Str {

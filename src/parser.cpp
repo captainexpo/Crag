@@ -65,7 +65,7 @@ void Parser::error(const std::string &msg, const Token &token, bool throw_now_an
 }
 
 Token Parser::peek(int lookahead) const {
-    if (position + lookahead < tokens.size() + lookahead)
+    if ((position + lookahead) < (tokens.size() + lookahead))
         return tokens[position + lookahead];
     return Token{TokenType::EOF_T, "", -1, -1};
 }
@@ -152,64 +152,33 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
     std::shared_ptr<Type> t = nullptr;
 
     switch (current.type) {
-        case TokenType::ID:
-
-            if (declared_structs.count(current.value)) {
-                std::string name = consume(TokenType::ID).value;
-                t = declared_structs[name];
-                break;
-            }
-            if (declared_unions.count(current.value)) {
-                std::string name = consume(TokenType::ID).value;
-                t = declared_unions[name];
-                break;
-            }
-            if (declared_enums.count(current.value)) {
-                std::string name = consume(TokenType::ID).value;
-                t = declared_enums[name]->enum_type;
-                break;
-            }
-            if (declared_type_aliases.count(current.value)) {
-                std::string name = consume(TokenType::ID).value;
-                t = declared_type_aliases[name];
-                break;
-            }
+        case TokenType::ID: {
             size_t index;
             if (str_in_vector(current.value, current_generic_params, &index)) {
                 std::string name = consume(TokenType::ID).value;
                 t = std::make_shared<GenericType>(index, name);
                 break;
             }
-            if (imported_modules.count(current.value) && peek(1).type == TokenType::DOT) {
-                std::vector<std::string> path;
+
+            std::vector<std::string> path;
+            path.push_back(consume(TokenType::ID).value);
+            while (peek().type == TokenType::DOT) {
+                consume(TokenType::DOT);
                 path.push_back(consume(TokenType::ID).value);
-                while (peek().type == TokenType::DOT) {
-                    consume(TokenType::DOT);
-                    path.push_back(consume(TokenType::ID).value);
-                }
-                auto b = path.back();
-                path.pop_back();
-                t = std::make_shared<QualifiedType>(path, b);
-                break;
             }
-            // if (peek(1).type == TokenType::DOUBLE_COLON) {
-            //     std::vector<std::string> path;
-            //     path.push_back(consume(TokenType::ID).value);
-            //     while (peek().type == TokenType::DOUBLE_COLON) {
-            //         // Check if this is a template instantiation
-            //         if (peek(1).type == TokenType::LT) {
-            //             break;
-            //         }
-            //         consume(TokenType::DOUBLE_COLON);
-            //         path.push_back(consume(TokenType::ID).value);
-            //     }
-            //     auto b = path.back();
-            //     path.pop_back();
-            //     t = std::make_shared<QualifiedType>(path, b);
-            //     break;
-            // }
-            t = parse_primitive_type();
+
+            if (path.size() > 1) {
+                std::string name = path.back();
+                path.pop_back();
+                t = std::make_shared<QualifiedType>(path, name);
+            } else {
+                t = parse_primitive_type(path[0]);
+                if (!t) {
+                    t = std::make_shared<QualifiedType>(std::vector<std::string>{}, path[0]);
+                }
+            }
             break;
+        }
 
         case TokenType::STAR:
             t = parse_pointer_type();
@@ -300,8 +269,7 @@ std::shared_ptr<TupleType> Parser::parse_tuple_type() {
     return std::make_shared<TupleType>(element_types);
 }
 
-std::shared_ptr<Type> Parser::parse_primitive_type() {
-    std::string val = consume(TokenType::ID).value;
+std::shared_ptr<Type> Parser::parse_primitive_type(const std::string &val) {
     if (val == "u8")
         return std::make_shared<U8>();
     if (val == "u16")
@@ -332,11 +300,7 @@ std::shared_ptr<Type> Parser::parse_primitive_type() {
         return std::make_shared<Void>();
     if (val == "str")
         return std::make_shared<StringType>();
-    auto find = std::find(current_generic_params.begin(), current_generic_params.end(), val);
-    if (find != current_generic_params.end())
-        return std::make_shared<GenericType>(std::distance(current_generic_params.begin(), find), val);
-    throw ParseError("Unknown type '" + val + "'", peek().line,
-                     peek().column);
+    return nullptr;
 }
 
 std::shared_ptr<PointerType> Parser::parse_pointer_type() {
@@ -444,7 +408,6 @@ std::shared_ptr<ASTNode> Parser::parse_declaration() {
             auto type_alias = std::make_shared<TypeAliasDeclaration>(alias_name, alias_type);
             type_alias->is_pub = is_pub;
             type_alias->generic_params = generic_params;
-            declared_type_aliases[alias_name] = alias_type;
             for (const auto &gp : generic_params) {
                 current_generic_params.pop_back();
             }
@@ -556,7 +519,6 @@ std::shared_ptr<ImportDeclaration> Parser::parse_import_declaration() {
     consume(TokenType::AS);
     std::string alias = consume(TokenType::ID).value;
     consume(TokenType::SEMICOLON);
-    imported_modules.insert(alias);
 
     return std::make_shared<ImportDeclaration>(path, alias);
 }
@@ -636,7 +598,6 @@ std::shared_ptr<EnumDeclaration> Parser::parse_enum_declaration() {
     enum_decl->enum_type = std::make_shared<EnumType>(name, enum_type);
     enum_decl->line = start_token.line;
     enum_decl->col = start_token.column;
-    declared_enums[name] = enum_decl;
     return enum_decl;
 }
 std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
@@ -649,8 +610,6 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
         this->current_generic_params.push_back(gp);
     }
 
-    declared_structs[name] = std::make_shared<StructType>(
-        name, std::vector<std::pair<std::string, std::shared_ptr<Type>>>{});
     consume(TokenType::LBRACE);
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
     std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
@@ -673,12 +632,7 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
             consume(TokenType::COMMA);
     }
     consume(TokenType::RBRACE);
-    std::vector<std::pair<std::string, std::shared_ptr<Type>>> fmap;
-    for (size_t i = 0; i < fields.size(); ++i)
-        fmap.push_back({fields[i].first, fields[i].second});
-    auto st = std::make_shared<StructType>(name, fmap);
 
-    declared_structs[name] = st;
     auto struct_decl = std::make_shared<StructDeclaration>(name, fields);
     struct_decl->methods = methods;
     struct_decl->line = start_token.line;
@@ -694,8 +648,6 @@ std::shared_ptr<UnionDeclaration> Parser::parse_union_declaration() {
     Token start_token = peek(); // Store the start token for line and col
     consume(TokenType::UNION);
     std::string name = consume(TokenType::ID).value;
-    declared_unions[name] = std::make_shared<UnionType>(
-        name, std::vector<std::pair<std::string, std::shared_ptr<Type>>>{});
     consume(TokenType::LBRACE);
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
 
@@ -712,12 +664,6 @@ std::shared_ptr<UnionDeclaration> Parser::parse_union_declaration() {
             consume(TokenType::COMMA);
     }
     consume(TokenType::RBRACE);
-
-    std::vector<std::pair<std::string, std::shared_ptr<Type>>> fmap;
-    for (size_t i = 0; i < fields.size(); ++i)
-        fmap.push_back({fields[i].first, fields[i].second});
-    auto ut = std::make_shared<UnionType>(name, fmap);
-    declared_unions[name] = ut;
 
     auto union_decl = std::make_shared<UnionDeclaration>(name, fields);
     union_decl->line = start_token.line;
@@ -1159,19 +1105,9 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
                     return expr;
                 }
                 std::string field_name = consume(TokenType::ID).value;
-                if (auto va = std::dynamic_pointer_cast<VarAccess>(left)) {
-                    if (imported_modules.count(va->name)) {
-                        expr = std::make_shared<ModuleAccess>(std::vector<std::string>{va->name}, field_name);
-                    } else {
-                        expr = std::make_shared<FieldAccess>(left, field_name);
-                    }
-                } else if (auto ma = std::dynamic_pointer_cast<ModuleAccess>(left)) {
-                    auto module_path = ma->module_path;
-                    module_path.push_back(ma->member_name);
-                    expr = std::make_shared<ModuleAccess>(module_path, field_name);
-                } else {
-                    expr = std::make_shared<FieldAccess>(left, field_name);
-                }
+
+                // Assume field access
+                expr = std::make_shared<FieldAccess>(left, field_name);
                 expr->line = t.line;
                 expr->col = t.column;
                 if (peek().type == TokenType::LBRACE) { // Allow struct initialization syntax after field access, e.g. MyStruct { field: value }

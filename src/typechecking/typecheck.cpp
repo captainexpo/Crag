@@ -412,8 +412,8 @@ static bool containsGenericType(const std::shared_ptr<Type> &t) {
 // Structurally matches a (possibly generic-containing) parameter type against a
 // concrete argument type, filling in `associations` for any GenericType found.
 static bool unifyGenericParam(const std::shared_ptr<Type> &paramType,
-                               const std::shared_ptr<Type> &argType,
-                               std::unordered_map<std::string, std::shared_ptr<Type>> &associations) {
+                              const std::shared_ptr<Type> &argType,
+                              std::unordered_map<std::string, std::shared_ptr<Type>> &associations) {
     if (!paramType || !argType)
         return false;
 
@@ -595,7 +595,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
             auto resolved = lookupNamedType(qt->type_name);
             if (resolved)
                 return resolved;
-            return qt; // unknown type
+            throw TypeCheckError(current_module, node, "Unknown type '" + qt->type_name + "'");
         } else {
             auto og_mod = current_module;
             auto cur_mod = og_mod;
@@ -1026,7 +1026,9 @@ void TypeChecker::checkStructDeclaration(
 void TypeChecker::checkUnionDeclaration(
     const std::shared_ptr<UnionDeclaration> &ud) {
     auto fields = std::vector<std::pair<std::string, std::shared_ptr<Type>>>();
-    for (const auto &f : ud->fields) {
+    for (int i = 0; i < ud->fields.size(); ++i) {
+        auto &f = ud->fields[i];
+        ud->fields[i].second = resolveType(ud, f.second);
         fields.emplace_back(f.first, resolveType(ud, f.second));
     }
     auto ut = lookupUnionType(ud->name);
@@ -1600,8 +1602,15 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         }
         return inferFuncCall(call, expected);
     }
-    if (auto fa = std::dynamic_pointer_cast<FieldAccess>(expr))
+    if (auto fa = std::dynamic_pointer_cast<FieldAccess>(expr)) {
+        if (auto ma = tryModuleAccessChain(fa->base, fa->field)) {
+            ma->line = fa->line;
+            ma->col = fa->col;
+            expr = ma;
+            return inferExpression(expr, expected);
+        }
         return inferFieldAccess(fa);
+    }
     if (auto oa = std::dynamic_pointer_cast<OffsetAccess>(expr))
         return inferOffsetAccess(oa);
     if (auto si = std::dynamic_pointer_cast<StructInitializer>(expr))
@@ -1610,8 +1619,18 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         return inferTypeCast(tc);
     if (auto d = std::dynamic_pointer_cast<Dereference>(expr))
         return inferDereference(d);
-    if (auto mc = std::dynamic_pointer_cast<MethodCall>(expr))
+    if (auto mc = std::dynamic_pointer_cast<MethodCall>(expr)) {
+        if (auto ma = tryModuleAccessChain(mc->object, mc->method)) {
+            ma->line = mc->line;
+            ma->col = mc->col;
+            auto fc = std::make_shared<FuncCall>(ma, mc->args);
+            fc->line = mc->line;
+            fc->col = mc->col;
+            expr = fc;
+            return inferExpression(expr, expected);
+        }
         return inferMethodCall(mc);
+    }
     if (auto ma = std::dynamic_pointer_cast<ModuleAccess>(expr)) {
         std::shared_ptr<Module> probe = current_module;
         size_t resolved = 0;
@@ -1653,6 +1672,11 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         std::shared_ptr<EnumType> res;
         if (!va) {
             auto mod = std::dynamic_pointer_cast<ModuleAccess>(ea->enum_expr);
+            if (!mod) {
+                if (auto fa = std::dynamic_pointer_cast<FieldAccess>(ea->enum_expr)) {
+                    mod = tryModuleAccessChain(fa->base, fa->field);
+                }
+            }
             if (!mod) {
                 throw TypeCheckError(current_module, ea, "Enum access base is not allowed: " + ea->enum_expr->str());
             }
@@ -1698,6 +1722,24 @@ std::shared_ptr<Module> TypeChecker::resolveModulePath(std::shared_ptr<ASTNode> 
         current = it->second;
     }
     return current;
+}
+
+std::shared_ptr<ModuleAccess> TypeChecker::tryModuleAccessChain(const std::shared_ptr<Expression> &base, const std::string &field) {
+    std::vector<std::string> names{field};
+    std::shared_ptr<Expression> cursor = base;
+    while (auto inner = std::dynamic_pointer_cast<FieldAccess>(cursor)) {
+        names.push_back(inner->field);
+        cursor = inner->base;
+    }
+    auto root_va = std::dynamic_pointer_cast<VarAccess>(cursor);
+    if (!root_va || !current_module->imports.count(root_va->name)) {
+        return nullptr;
+    }
+    std::vector<std::string> module_path{root_va->name};
+    for (size_t i = names.size(); i > 1; --i) {
+        module_path.push_back(names[i - 1]);
+    }
+    return std::make_shared<ModuleAccess>(module_path, names[0]);
 }
 
 std::shared_ptr<Type> TypeChecker::inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma) {
@@ -2306,7 +2348,7 @@ std::shared_ptr<TemplateInstantiation> TypeChecker::tryInferGenericFunctionCall(
 
     for (auto &[name, type] : generic_associations) {
         auto idx = std::find(called_func->generic_params.begin(), called_func->generic_params.end(), name);
-        if (idx == called_func->generic_params.end()){
+        if (idx == called_func->generic_params.end()) {
             std::cout << "Warning: inferred generic type for parameter " << name << " which is not in the function's generic parameters" << std::endl;
             std::cout << "Generic associations: ";
             for (auto &[n, t] : generic_associations) {
@@ -2507,8 +2549,7 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
         if (tt) {
             auto idx = std::stoi(fa->field);
             if (idx < 0 || idx >= tt->elements.size()) {
-                throw TypeCheckError(current_module, fa, "Tuple index out of bounds: " +
-                    std::to_string(idx) + " (tuple has " + std::to_string(tt->elements.size()) + " elements)");
+                throw TypeCheckError(current_module, fa, "Tuple index out of bounds: " + std::to_string(idx) + " (tuple has " + std::to_string(tt->elements.size()) + " elements)");
             }
             fa->inferred_type = resolveType(fa, tt->elements[idx]);
             fa->inferred_type->is_const = bt->is_const;

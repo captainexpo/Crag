@@ -45,14 +45,6 @@ class Parser {
 
     size_t position;
 
-    std::map<std::string, std::shared_ptr<StructType>> declared_structs;
-    std::map<std::string, std::shared_ptr<UnionType>> declared_unions;
-    std::map<std::string, std::shared_ptr<EnumDeclaration>> declared_enums;
-
-    std::map<std::string, std::shared_ptr<Type>> declared_type_aliases;
-
-    std::unordered_set<std::string> imported_modules;
-
     // Helper methods
     Token peek(int lookahead = 0) const;
     Token advance();
@@ -65,7 +57,7 @@ class Parser {
     // Parsing methods
     std::shared_ptr<Type> parse_type(bool top_level = true);
     std::shared_ptr<Type> parse_non_error_type(bool top_level);
-    std::shared_ptr<Type> parse_primitive_type();
+    std::shared_ptr<Type> parse_primitive_type(const std::string &val);
     std::shared_ptr<PointerType> parse_pointer_type();
     std::shared_ptr<ArrayType> parse_array_type();
     std::shared_ptr<PointerType> parse_function_ptr_type();
