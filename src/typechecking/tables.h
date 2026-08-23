@@ -55,6 +55,8 @@ class SymbolTable {
 
     bool remove(SymbolId id);
 
+    bool updateType(SymbolId id, std::shared_ptr<Type> type);
+
     const std::deque<Symbol> &entries() const;
 
     // Id for the module this table belongs to, set by the global symbol table when the module is inserted
@@ -71,6 +73,8 @@ class GlobalSymbolTable {
     std::pair<SymbolTable, std::shared_ptr<Module>> *lookupModule(uint32_t module_id);
 
     std::optional<const Symbol> lookupSymbol(SymbolId id) const;
+
+    bool updateSymbolType(SymbolId id, std::shared_ptr<Type> type);
 
     const std::pair<SymbolTable, std::shared_ptr<Module>> *lookupModule(uint32_t module_id) const;
 

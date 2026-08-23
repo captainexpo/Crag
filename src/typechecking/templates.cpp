@@ -297,21 +297,30 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         // Clear generic_params since this is now an instantiated function, not a template
         declCopy->generic_params.clear();
 
+        // Register the function symbol before checking its body (mirroring the struct
+        // branch above), so that a self-referential instantiation — e.g. a generic
+        // type's factory method calling itself while this function's own return type
+        // is being resolved — finds this instantiation via lookupNamedSymbol instead
+        // of recursing back in and creating a duplicate definition.
+        SymbolId inst_id = INVALID_SYMBOL_ID;
+        insertSymbol(new_name, SymbolKind::Function, declCopy->type, declCopy, &inst_id);
+        declCopy->symbol_id = inst_id;
+        ti->template_id = inst_id;
+        ti->symbol_id = inst_id;
+
         auto saved_expected_return_type = m_expected_return_type;
 
         checkFunctionDeclaration(declCopy);
 
         m_expected_return_type = saved_expected_return_type;
 
-        ti->inferred_type = declCopy->type;
+        // The symbol was registered above with the pre-resolution type (before
+        // checkFunctionDeclaration resolved param/return types in place, which
+        // replaces declCopy->type wholesale rather than mutating it), so refresh
+        // the symbol table entry now that the fully resolved type is known.
+        symbol_table.updateSymbolType(inst_id, declCopy->type);
 
-        SymbolId inst_id = INVALID_SYMBOL_ID;
-        insertSymbol(new_name, SymbolKind::Function, ti->inferred_type, declCopy, &inst_id);
-        declCopy->symbol_id = inst_id;
-
         ti->inferred_type = declCopy->type;
-        ti->template_id = inst_id;
-        ti->symbol_id = inst_id;
 
         instantiationModule(current_module)->ast->declarations.push_back(declCopy);
 

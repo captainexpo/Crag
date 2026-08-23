@@ -20,6 +20,10 @@ pub struct ArrayList<T> {
         return 0;
     }
 
+    fn deinit(self: *ArrayList::<T>) {
+        libc::stdlib::free(self.elements as *void);
+    }
+
     fn append(self: *ArrayList::<T>, elem: T) -> i32!ArrayListError {
         if (self.cur_elem >= self.size) {
             self.size *= 2;
@@ -53,14 +57,15 @@ pub struct ArrayList<T> {
     }
 
 
-    //fn map(self: *ArrayList::<T>, f: fn(T) -> T) -> ArrayList::<T> {
-    //    let new_list = new::<T>();
-    //    for (let i = 0; i < self.cur_elem; i += 1) {
-    //        let elem = self.get(i).ok;
-    //        new_list.append(f(elem));
-    //    }
-    //    return new_list;
-    //}
+    fn map(self: *ArrayList::<T>, f: fn(T) -> T) -> ArrayList::<T> {
+        let new_list = new::<T>();
+        for (let i = 0; i < self.cur_elem; i += 1) {
+            let elem = self.get(i).ok;
+            new_list.append(f(elem));
+        }
+        return new_list;
+    }
+
     fn foreach<K>(self: *ArrayList::<T>, f: fn(T) -> void) {
         for (let i = 0; i < self.cur_elem; i += 1) {
             let elem = self.get(i).ok;

@@ -90,3 +90,17 @@ pub fn c_str(s: str) -> *const u8 {
     buffer[len] = 0;
     return buffer;
 }
+
+
+pub fn concat(a: str, b: str) -> str {
+    let len_a: usize = a.len;
+    let len_b: usize = b.len;
+    let buffer: *u8 = cstdlib.malloc(len_a + len_b + 1) as *u8;
+    if (buffer == null) {
+        return "";
+    }
+    cstring.memcpy(buffer as *void, a.ptr as *void, len_a);
+    cstring.memcpy(buffer as *void + (len_a) * sizeof(u8), b.ptr as *void, len_b);
+    buffer[len_a + len_b] = 0;
+    return newstr(buffer, len_a + len_b);
+}

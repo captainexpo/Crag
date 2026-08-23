@@ -12,13 +12,6 @@ fn main() -> i32 {
     let ch: u8 = greeting[1];
     std.testing.assert(ch == 'e', "greeting[1] should be 'e'");
 
-    // concatenation
-    let a: str = "foo";
-    let b: str = "bar";
-    let c: str = a + b;
-    std.testing.assert(c == "foobar", "a + b should equal 'foobar'");
-    std.testing.assert(c.len == 6, "c.len should be 6");
-
     // equality
     let x: str = "abc";
     let y: str = "abc";
@@ -29,6 +22,12 @@ fn main() -> i32 {
     // coercion to *const u8
     let raw: *const u8 = greeting as *const u8;
     std.testing.assert(std.cstring.strcmp(raw, "hello") == 0, "coercing str to *const u8 should preserve the same bytes");
+
+    // Concatenation
+    let a: str = "Hello, ";
+    let b: str = "World!";
+    let c = std.string.concat(a, b);
+    std.testing.assert(c == "Hello, World!", "concat(Hello, ', 'World!') should be equal to 'Hello, World!'");
 
     return 0;
 }

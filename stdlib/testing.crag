@@ -3,34 +3,59 @@ import "string.crag" as string;
 
 pub fn assert(condition: bool, message: str){
     if (!condition) {
-        io.panic("[FAIL] " + message);
+        io.panic(message);
         return;
     }
-    io.println("[PASS] " + message);
+    io.println(message);
 }
 
 pub fn assert_equal<T>(expected: T, actual: T, message: str) {
     if (expected != actual) {
-        io.panic("[FAIL] " + message + ": expected " + string.tostring(expected) + ", got " + string.tostring(actual));
+        io.print("[FAIL] ");
+        io.print(message);
+        io.print(" Expected: ");
+        io.print(string.tostring(expected));
+        io.print(" Actual: ");
+        io.println(string.tostring(actual));
+        io.panic("Test failed");
         return;
     }
-    io.println("[PASS] " + message);
+    io.print("[PASS] ");
+    io.println(message);
 }
 
 pub fn assert_array_equal<T>(expected: []T, actual: []T, message: str) {
     if (expected.len != actual.len) {
-        io.panic("[FAIL] " + message + ": expected array length " + string.tostring(expected.len) + ", got " + string.tostring(actual.len));
+        io.print("[FAIL] ");
+        io.print(message);
+        io.print(" Expected length: ");
+        io.print(string.tostring(expected.len));
+        io.print(" Actual length: ");
+        io.println(string.tostring(actual.len));
+        io.panic("Test failed");
         return;
     }
     for (let i = 0; i < expected.len; i++) {
         if (expected[i] != actual[i]) {
             if (expected.len > 10) {
-                io.panic("[FAIL] " + message + ": expected element at index " + string.tostring(i) + " to be " + string.tostring(expected[i]) + ", got " + string.tostring(actual[i]));
+                io.print("[FAIL] ");
+                io.print(message);
+                io.print(" Arrays differ at index ");
+                io.print(string.tostring(i));
+                io.println(". Too many elements to display.");
             } else {
-                io.panic("[FAIL] " + message + ": expected " + string.tostring::<[]T>(expected) + ", got " + string.tostring::<[]T>(actual));
+                io.print("[FAIL] ");
+                io.print(message);
+                io.print(" Arrays differ at index ");
+                io.print(string.tostring(i));
+                io.print(". Expected: ");
+                io.print(string.tostring(expected[i]));
+                io.print(" Actual: ");
+                io.println(string.tostring(actual[i]));
             }
             return;
         }
     }
-    io.println("[PASS] " + message);
+    io.print("[PASS] ");
+    io.println(message);
 }

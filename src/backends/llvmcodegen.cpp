@@ -1718,33 +1718,6 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
         llvm::Value *rptr = m_builder->CreateExtractValue(rv, {0}, "rstr_ptr");
         llvm::Value *rlen = m_builder->CreateExtractValue(rv, {1}, "rstr_len");
 
-        if (op == "+") {
-            // get-or-declare malloc and memcpy lazily
-            auto ptrTy = llvm::PointerType::getUnqual(context);
-            auto i64Ty = llvm::Type::getInt64Ty(context);
-            auto i8Ty = llvm::Type::getInt8Ty(context);
-            llvm::FunctionCallee mallocFn = m_llvm_module->getOrInsertFunction(
-                "malloc", llvm::FunctionType::get(ptrTy, {i64Ty}, false));
-            llvm::FunctionCallee memcpyFn = m_llvm_module->getOrInsertFunction(
-                "memcpy", llvm::FunctionType::get(ptrTy, {ptrTy, ptrTy, i64Ty}, false));
-
-            // new_len = llen + rlen; allocate new_len + 1 bytes
-            llvm::Value *newLen = m_builder->CreateAdd(llen, rlen, "cat_len");
-            llvm::Value *allocLen = m_builder->CreateAdd(newLen, llvm::ConstantInt::get(i64Ty, 1), "alloc_len");
-            llvm::Value *newPtr = m_builder->CreateCall(mallocFn, {allocLen}, "cat_ptr");
-            // copy left, then right
-            m_builder->CreateCall(memcpyFn, {newPtr, lptr, llen});
-            llvm::Value *offsetPtr = m_builder->CreateGEP(i8Ty, newPtr, llen, "rhs_offset");
-            m_builder->CreateCall(memcpyFn, {offsetPtr, rptr, rlen});
-            // null-terminate
-            llvm::Value *nullTerm = m_builder->CreateGEP(i8Ty, newPtr, newLen, "null_term");
-            m_builder->CreateStore(llvm::ConstantInt::get(i8Ty, 0), nullTerm);
-            // build result str struct
-            llvm::Value *result = llvm::UndefValue::get(strStructType);
-            result = m_builder->CreateInsertValue(result, newPtr, {0});
-            result = m_builder->CreateInsertValue(result, newLen, {1});
-            return result;
-        }
         if (op == "==" || op == "!=") {
             auto ptrTy = llvm::PointerType::getUnqual(context);
             auto i64Ty = llvm::Type::getInt64Ty(context);

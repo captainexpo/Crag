@@ -6,6 +6,9 @@ import "./string.crag" as string;
 
 pub fn panic(msg: str) -> void {
     cstdio.fprintf(cstdio.stderr, "PANIC: %s\n", msg.ptr);
+    // Flush stdout and stderr to ensure all output is written before aborting
+    cstdio.fflush(cstdio.stdout);
+    cstdio.fflush(cstdio.stderr);
     cstdlib.abort();
 }
 

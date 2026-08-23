@@ -1,0 +1,29 @@
+//NAME: Self-Referential Generic Function Instantiation
+//DESC:
+
+//BEGIN CODE
+import "stdlib" as std;
+
+fn double(x: i32) -> i32 {
+    return x * 2;
+}
+
+fn main() -> i32 {
+    let v = std.arraylist.new::<i32>();
+    v.append(1);
+    v.append(2);
+    v.append(3);
+
+    let mapped = v.map(&double);
+
+    std.testing.assert(mapped.get(0).ok == 2, "mapped[0] should be 2");
+    std.testing.assert(mapped.get(1).ok == 4, "mapped[1] should be 4");
+    std.testing.assert(mapped.get(2).ok == 6, "mapped[2] should be 6");
+
+    mapped.deinit();
+    v.deinit();
+
+    return 0;
+}
+
+//END CODE

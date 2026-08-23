@@ -31,6 +31,15 @@ const std::deque<Symbol> &SymbolTable::entries() const {
     return symbols;
 }
 
+bool SymbolTable::updateType(SymbolId id, std::shared_ptr<Type> type) {
+    id = extractSymbolIndex(id); // Ensure we only use the symbol index part of the ID
+    if (id >= symbols.size())
+        return false;
+
+    symbols[id].type = std::move(type);
+    return true;
+}
+
 bool SymbolTable::remove(SymbolId id) {
     id = extractSymbolIndex(id); // Ensure we only use the symbol index part of the ID
     if (id >= symbols.size())
@@ -64,6 +73,15 @@ void GlobalSymbolTable::dump() const {
             std::cerr << "  " << entry.name << " (" << module_id << ", " << i << ", " << entry.id << ", " << &entry << "): " << (entry.type ? entry.type->str() : "null") << "\n";
         }
     }
+}
+
+bool GlobalSymbolTable::updateSymbolType(SymbolId id, std::shared_ptr<Type> type) {
+    uint32_t module_id = extractModuleId(id);
+    auto mod = lookupModule(module_id);
+    if (!mod) {
+        return false;
+    }
+    return mod->first.updateType(id, std::move(type));
 }
 
 std::pair<SymbolTable, std::shared_ptr<Module>> *GlobalSymbolTable::lookupModule(uint32_t module_id) {
