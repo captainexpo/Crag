@@ -43,6 +43,16 @@ enum RuntimePanicType {
     // Add others as needed
 };
 
+// CodeGenError itself carries no module reference (unlike TypeCheckError), but the
+// whole-program phases below accumulate errors from many modules before reporting,
+// so we need to know which module's source to point prettyError() at. Wrapping it
+// here (rather than adding a module field to CodeGenError) keeps CodeGenError, which
+// is used elsewhere, untouched.
+struct AttributedCodeGenError {
+    CodeGenError error;
+    std::shared_ptr<Module> module;
+};
+
 struct CGSymbol {
     llvm::Value *value;
     llvm::Type *type;               // original type, needed for opaque pointers
@@ -102,6 +112,11 @@ class LLVMCodegen : public Backend {
         if (options.do_runtime_safety)
             emitBuiltinDeclarations();
     }
+    // Backend interface: generates one module's types, signatures and bodies in one
+    // shot, in phase order. Not used by compiler.cpp's driver (which needs the
+    // phases interleaved whole-program, across all modules, for cross-module
+    // ordering-independence — see generateTypeSkeletons() et al. below) but kept so
+    // the Backend interface stays satisfiable for a single module in isolation.
     void generate(std::shared_ptr<Module> module, class GlobalSymbolTable *symbol_table) override;
     void emitIrToFile(const std::string &filepath) override;
     void emitObjectToFile(const std::string &filepath) override;
@@ -110,9 +125,25 @@ class LLVMCodegen : public Backend {
                                        const std::filesystem::path &runtime_path,
                                        bool no_runtime, std::optional<std::vector<std::string>> backend_args = std::nullopt) override;
 
-    void finished(bool is_final_module); // Call after all code generation is done
+    void setGlobalSymbols(GlobalSymbolTable *symbol_table) { m_type_table = symbol_table; }
 
-    const std::vector<CodeGenError> &errors() const {
+    // Whole-program phases, meant to be called once per module, per phase, across
+    // ALL modules before moving to the next phase (see compiler.cpp's driver). This
+    // makes struct/union type resolution order-independent: every struct/union's
+    // opaque LLVM type exists (1a) before any struct field is resolved (1b), and
+    // every struct body is set before any union computes field layout (1c, which
+    // needs full sizedness via DataLayout, not just name existence). Phases 2a/2b
+    // mirror this for functions/variables so an instantiated generic function is
+    // safe to call from any module regardless of processing order.
+    void generateTypeSkeletons(std::shared_ptr<Module> module);      // 1a: opaque struct/union types
+    void generateStructBodies(std::shared_ptr<Module> module);       // 1b: struct fields + setBody
+    void generateUnionAndEnumBodies(std::shared_ptr<Module> module); // 1c: union fields + setBody; enums
+    void generateSignatures(std::shared_ptr<Module> module);         // 2a: function/method signatures, global var storage
+    void generateBodies(std::shared_ptr<Module> module);             // 2b: function bodies, global var initializers
+
+    void finished(); // Call once, after generateBodies() has run for every module
+
+    const std::vector<AttributedCodeGenError> &errors() const {
         return m_errors;
     }
     bool ok() const { return m_errors.empty(); }
@@ -145,7 +176,18 @@ class LLVMCodegen : public Backend {
     CompilerOptions m_options;
 
     std::vector<LoopInfo> m_loop_stack;
-    std::vector<CodeGenError> m_errors;
+    std::vector<AttributedCodeGenError> m_errors;
+
+    // Function bodies and global-variable initializers created during a module's
+    // generateSignatures() (2a) but deferred until generateBodies() (2b), once every
+    // module's signatures exist program-wide. Keyed by raw Module* since modules are
+    // kept alive elsewhere (ModuleResolver / TypeChecker::instantiationModules) for
+    // the duration of codegen.
+    struct PendingModuleWork {
+        std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> funcBodies;
+        std::vector<std::pair<llvm::GlobalVariable *, std::shared_ptr<VariableDeclaration>>> varInits;
+    };
+    std::unordered_map<Module *, PendingModuleWork> m_pending_module_work;
 
     GlobalSymbolTable *m_type_table = nullptr;
 
@@ -225,12 +267,29 @@ class LLVMCodegen : public Backend {
 
     llvm::Value* generateVariableDeclaration(
         const std::shared_ptr<VariableDeclaration> &varDecl);
+    // Global variable declarations (module scope) go through these instead, split
+    // into a signature step (create the global, no initializer) and a deferred
+    // initializer step, so top-level codegen can run every module's signatures
+    // before any module's initializer/body codegen (see generateSignatures/
+    // generateBodies). generateVariableDeclaration above now only ever runs for
+    // locals inside a function body.
+    llvm::GlobalVariable *generateGlobalVariableSignature(
+        const std::shared_ptr<VariableDeclaration> &varDecl);
+
     void generateStructDeclaration(
         const std::shared_ptr<StructDeclaration> &structDecl);
     void generateUnionDeclaration(
         const std::shared_ptr<UnionDeclaration> &unionDecl);
     void generateEnumDeclaration(
         const std::shared_ptr<EnumDeclaration> &enumDecl);
+    // Split out of generateStructDeclaration/generateUnionDeclaration so the type
+    // phases can register every struct/union's opaque LLVM type across the whole
+    // program (createOpaque*) before resolving any of their fields (resolve*) —
+    // see the class-level comment on generateTypeSkeletons().
+    void createOpaqueStructType(const std::shared_ptr<StructDeclaration> &structDecl);
+    void resolveStructBody(const std::shared_ptr<StructDeclaration> &structDecl);
+    void createOpaqueUnionType(const std::shared_ptr<UnionDeclaration> &unionDecl);
+    void resolveUnionBody(const std::shared_ptr<UnionDeclaration> &unionDecl);
     std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> generateStructMethods(
         const std::shared_ptr<StructDeclaration> &structDecl);
     llvm::Value *generateBinaryOp(const std::shared_ptr<Expression> &left,

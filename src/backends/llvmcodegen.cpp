@@ -317,95 +317,213 @@ void LLVMCodegen::emitBuiltinDeclarations() {
 
 // Public API stubs
 void LLVMCodegen::generate(std::shared_ptr<Module> module, GlobalSymbolTable *globalSymbols) {
-
-    std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> funcDecls;
-
     m_type_table = globalSymbols;
+    generateTypeSkeletons(module);
+    generateStructBodies(module);
+    generateUnionAndEnumBodies(module);
+    generateSignatures(module);
+    generateBodies(module);
+}
 
+void LLVMCodegen::generateTypeSkeletons(std::shared_ptr<Module> module) {
     m_current_module = module;
     if (m_emit_debug) {
         if (!m_di_builder) {
             initDebugInfo();
         }
         if (m_di_builder) {
-            m_di_file = getDIFileForPath(m_current_module ? m_current_module->path : "");
+            m_di_file = getDIFileForPath(module ? module->path : "");
         }
     }
 
-    try {
-        for (const auto &decl : module->ast->declarations) {
-            auto actualDecl = decl;
-            if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
-                actualDecl = externDecl->declaration;
-            }
-
-            if (IS_INSTANCE(actualDecl, StructDeclaration)) {
-                auto sd = std::dynamic_pointer_cast<StructDeclaration>(actualDecl);
-                // Skip template declarations - only generate instantiations
-                if (!sd->generic_params.empty()) {
-                    continue;
-                }
-                generateStructDeclaration(sd);
-                auto sms = generateStructMethods(sd);
-                for (const auto &pair : sms) {
-                    funcDecls.push_back(pair);
-                }
-                continue;
-            }
-            if (IS_INSTANCE(actualDecl, UnionDeclaration)) {
-                auto ud = std::dynamic_pointer_cast<UnionDeclaration>(actualDecl);
-                generateUnionDeclaration(ud);
-                continue;
-            }
-            if (IS_INSTANCE(actualDecl, EnumDeclaration)) {
-                generateEnumDeclaration(
-                    std::dynamic_pointer_cast<EnumDeclaration>(actualDecl));
-                continue;
-            }
+    for (const auto &decl : module->ast->declarations) {
+        auto actualDecl = decl;
+        if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+            actualDecl = externDecl->declaration;
         }
 
-        for (const auto &decl : module->ast->declarations) {
-            auto actualDecl = decl;
-            if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
-                actualDecl = externDecl->declaration;
+        if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(actualDecl)) {
+            // Skip template declarations - only generate instantiations
+            if (!sd->generic_params.empty()) {
+                continue;
             }
+            createOpaqueStructType(sd);
+            continue;
+        }
+        if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(actualDecl)) {
+            createOpaqueUnionType(ud);
+            continue;
+        }
+    }
+}
 
-            if (IS_INSTANCE(actualDecl, FunctionDeclaration)) {
-                auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(actualDecl);
-                std::shared_ptr<ExternDeclaration> externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl);
-                // Skip template declarations - only generate instantiations
-                if (!fd->generic_params.empty()) {
-                    continue;
+void LLVMCodegen::generateStructBodies(std::shared_ptr<Module> module) {
+    m_current_module = module;
+    if (m_emit_debug) {
+        if (!m_di_builder) {
+            initDebugInfo();
+        }
+        if (m_di_builder) {
+            m_di_file = getDIFileForPath(module ? module->path : "");
+        }
+    }
+
+    for (const auto &decl : module->ast->declarations) {
+        auto actualDecl = decl;
+        if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+            actualDecl = externDecl->declaration;
+        }
+
+        auto sd = std::dynamic_pointer_cast<StructDeclaration>(actualDecl);
+        if (!sd || !sd->generic_params.empty()) {
+            continue;
+        }
+        try {
+            resolveStructBody(sd);
+        } catch (const CodeGenError &e) {
+            m_errors.push_back({e, module});
+        }
+    }
+}
+
+void LLVMCodegen::generateUnionAndEnumBodies(std::shared_ptr<Module> module) {
+    m_current_module = module;
+    if (m_emit_debug) {
+        if (!m_di_builder) {
+            initDebugInfo();
+        }
+        if (m_di_builder) {
+            m_di_file = getDIFileForPath(module ? module->path : "");
+        }
+    }
+
+    for (const auto &decl : module->ast->declarations) {
+        auto actualDecl = decl;
+        if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
+            actualDecl = externDecl->declaration;
+        }
+
+        if (auto ud = std::dynamic_pointer_cast<UnionDeclaration>(actualDecl)) {
+            try {
+                resolveUnionBody(ud);
+            } catch (const CodeGenError &e) {
+                m_errors.push_back({e, module});
+            }
+            continue;
+        }
+        if (auto ed = std::dynamic_pointer_cast<EnumDeclaration>(actualDecl)) {
+            try {
+                generateEnumDeclaration(ed);
+            } catch (const CodeGenError &e) {
+                m_errors.push_back({e, module});
+            }
+            continue;
+        }
+    }
+}
+
+void LLVMCodegen::generateSignatures(std::shared_ptr<Module> module) {
+    m_current_module = module;
+    if (m_emit_debug) {
+        if (!m_di_builder) {
+            initDebugInfo();
+        }
+        if (m_di_builder) {
+            m_di_file = getDIFileForPath(module ? module->path : "");
+        }
+    }
+
+    auto &pending = m_pending_module_work[module.get()];
+
+    for (const auto &decl : module->ast->declarations) {
+        auto actualDecl = decl;
+        std::shared_ptr<ExternDeclaration> externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl);
+        if (externDecl) {
+            actualDecl = externDecl->declaration;
+        }
+
+        if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(actualDecl)) {
+            // Skip template declarations - only generate instantiations
+            if (!sd->generic_params.empty()) {
+                continue;
+            }
+            try {
+                for (const auto &pair : generateStructMethods(sd)) {
+                    pending.funcBodies.push_back(pair);
                 }
+            } catch (const CodeGenError &e) {
+                m_errors.push_back({e, module});
+            }
+            continue;
+        }
+        if (auto fd = std::dynamic_pointer_cast<FunctionDeclaration>(actualDecl)) {
+            // Skip template declarations - only generate instantiations
+            if (!fd->generic_params.empty()) {
+                continue;
+            }
+            try {
                 llvm::Function *fn = generateFunctionDefinition(fd, externDecl);
-                funcDecls.push_back({fn, fd});
-                continue;
+                pending.funcBodies.push_back({fn, fd});
+            } catch (const CodeGenError &e) {
+                m_errors.push_back({e, module});
             }
-            if (IS_INSTANCE(actualDecl, VariableDeclaration)) {
-                generateVariableDeclaration(
-                    std::dynamic_pointer_cast<VariableDeclaration>(actualDecl));
-                continue;
-            }
-            if (IS_INSTANCE(actualDecl, StructDeclaration) || IS_INSTANCE(actualDecl, UnionDeclaration) || IS_INSTANCE(actualDecl, EnumDeclaration)) {
-                // Already handled in first pass
-                continue;
-            }
-            if (IS_INSTANCE(actualDecl, ImportDeclaration)) {
-                continue; // Handled elsewhere
-            }
-            if (IS_INSTANCE(actualDecl, TypeAliasDeclaration)) {
-                continue; // No codegen needed
-            }
-            throw CodeGenError(actualDecl, "Unknown top-level declaration: " + actualDecl->str());
+            continue;
         }
-        for (const auto &fnPair : funcDecls) {
-            generateFunctionBody(fnPair.second, fnPair.first);
+        if (auto vd = std::dynamic_pointer_cast<VariableDeclaration>(actualDecl)) {
+            try {
+                generateGlobalVariableSignature(vd);
+            } catch (const CodeGenError &e) {
+                m_errors.push_back({e, module});
+            }
+            continue;
         }
-    } catch (const CodeGenError &e) {
-        m_errors.push_back(e);
+        if (IS_INSTANCE(actualDecl, UnionDeclaration) || IS_INSTANCE(actualDecl, EnumDeclaration)) {
+            continue; // Handled in the type phases
+        }
+        if (IS_INSTANCE(actualDecl, ImportDeclaration)) {
+            continue; // Handled elsewhere
+        }
+        if (IS_INSTANCE(actualDecl, TypeAliasDeclaration)) {
+            continue; // No codegen needed
+        }
+        m_errors.push_back({CodeGenError(actualDecl, "Unknown top-level declaration: " + actualDecl->str()), module});
+    }
+}
+
+void LLVMCodegen::generateBodies(std::shared_ptr<Module> module) {
+    m_current_module = module;
+    if (m_emit_debug) {
+        if (!m_di_builder) {
+            initDebugInfo();
+        }
+        if (m_di_builder) {
+            m_di_file = getDIFileForPath(module ? module->path : "");
+        }
     }
 
-    addGlobalVarInitializer(nullptr, nullptr);
+    auto it = m_pending_module_work.find(module.get());
+    if (it != m_pending_module_work.end()) {
+        for (const auto &varInit : it->second.varInits) {
+            try {
+                auto expr = std::dynamic_pointer_cast<Expression>(varInit.second->initializer);
+                if (!expr) {
+                    throw CodeGenError(varInit.second, "Unsupported initializer type for global variable");
+                }
+                addGlobalVarInitializer(varInit.first, expr);
+            } catch (const CodeGenError &e) {
+                m_errors.push_back({e, module});
+            }
+        }
+        for (const auto &fnPair : it->second.funcBodies) {
+            try {
+                generateFunctionBody(fnPair.second, fnPair.first);
+            } catch (const CodeGenError &e) {
+                m_errors.push_back({e, module});
+            }
+        }
+    }
+
+    prepareForNewModule();
 }
 
 void LLVMCodegen::emitObjectToFile(const std::string &filename) {
@@ -1122,10 +1240,7 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
     return function;
 }
 
-void LLVMCodegen::finished(bool is_final_module) {
-    if (!is_final_module) {
-        return;
-    }
+void LLVMCodegen::finished() {
     // Finalize global variable initialization function
     llvm::Function *globalVarInitFunc = m_llvm_module->getFunction(GLOBAL_VAR_INIT_FUNC_NAME);
     if (globalVarInitFunc) {
@@ -1367,70 +1482,70 @@ llvm::Function* getCurrentFunction(llvm::IRBuilder<> &builder) {
     return currentBlock->getParent();
 }
 
-llvm::Value *LLVMCodegen::generateVariableDeclaration(
+llvm::GlobalVariable *LLVMCodegen::generateGlobalVariableSignature(
     const std::shared_ptr<VariableDeclaration> &varDecl) {
-    static int varCounter = 0;
-    bool is_global = m_scopeStack.size() == 1;
-    bool isExtern = is_global && m_current_module && m_current_module->externLinkage.count(varDecl->name);
+    bool isExtern = m_current_module && m_current_module->externLinkage.count(varDecl->name);
 
-    if (is_global) {
-        if (isExtern) {
-            // Extern global variable declaration
-            // Don't canonicalize name due to extern linkage
-            llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
-            llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
-                *m_llvm_module, varType, varDecl->is_const,
-                llvm::GlobalValue::ExternalLinkage, nullptr,
-                varDecl->name);
-            CUR_SCOPE.set(varDecl->name, gVar, varType, varDecl->var_type);
-            setSymValue(varDecl->symbol_id, gVar, varType, varDecl->var_type);
-            return gVar;
-        }
+    if (isExtern) {
+        // Extern global variable declaration
+        // Don't canonicalize name due to extern linkage
         llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
-        llvm::Constant *initVal = nullptr;
-        bool has_const_init = false;
-        if (varDecl->initializer->constant_evaluated) {
-            auto ret = getConstantLiteralValue(varDecl->initializer);
-            if (ret) {
-                initVal = ret;
-                has_const_init = true;
-            }
-        }
-
-        if (!initVal) {
-            initVal = llvm::Constant::getNullValue(varType);
-        }
-
         llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
-            *m_llvm_module, varType, false,
-            llvm::GlobalValue::ExternalLinkage, initVal, canonicalizeNonexternName(varDecl->name));
-        CUR_SCOPE.set(canonicalizeNonexternName(varDecl->name), gVar, varType, varDecl->var_type);
-
+            *m_llvm_module, varType, varDecl->is_const,
+            llvm::GlobalValue::ExternalLinkage, nullptr,
+            varDecl->name);
+        CUR_SCOPE.set(varDecl->name, gVar, varType, varDecl->var_type);
         setSymValue(varDecl->symbol_id, gVar, varType, varDecl->var_type);
-
-        if (m_emit_debug && m_di_builder && m_di_compile_unit) {
-            llvm::DIFile *file = m_di_file ? m_di_file : getDIFileForPath(m_current_module ? m_current_module->path : "");
-            unsigned line = varDecl->line > 0 ? static_cast<unsigned>(varDecl->line) : 1;
-            llvm::DIType *diType = getDIType(varDecl->var_type, varDecl);
-            auto *expr = m_di_builder->createGlobalVariableExpression(
-                m_di_compile_unit,
-                varDecl->name,
-                gVar->getName(),
-                file,
-                line,
-                diType,
-                false);
-            gVar->addDebugInfo(expr);
-        }
-        if (varDecl->initializer && !has_const_init) {
-            if (auto expr = std::dynamic_pointer_cast<Expression>(varDecl->initializer)) {
-                addGlobalVarInitializer(gVar, expr);
-            } else {
-                throw CodeGenError(varDecl, "Unsupported initializer type for global variable");
-            }
-        }
         return gVar;
     }
+    llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
+    llvm::Constant *initVal = nullptr;
+    bool has_const_init = false;
+    if (varDecl->initializer->constant_evaluated) {
+        auto ret = getConstantLiteralValue(varDecl->initializer);
+        if (ret) {
+            initVal = ret;
+            has_const_init = true;
+        }
+    }
+
+    if (!initVal) {
+        initVal = llvm::Constant::getNullValue(varType);
+    }
+
+    llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
+        *m_llvm_module, varType, false,
+        llvm::GlobalValue::ExternalLinkage, initVal, canonicalizeNonexternName(varDecl->name));
+    CUR_SCOPE.set(canonicalizeNonexternName(varDecl->name), gVar, varType, varDecl->var_type);
+
+    setSymValue(varDecl->symbol_id, gVar, varType, varDecl->var_type);
+
+    if (m_emit_debug && m_di_builder && m_di_compile_unit) {
+        llvm::DIFile *file = m_di_file ? m_di_file : getDIFileForPath(m_current_module ? m_current_module->path : "");
+        unsigned line = varDecl->line > 0 ? static_cast<unsigned>(varDecl->line) : 1;
+        llvm::DIType *diType = getDIType(varDecl->var_type, varDecl);
+        auto *expr = m_di_builder->createGlobalVariableExpression(
+            m_di_compile_unit,
+            varDecl->name,
+            gVar->getName(),
+            file,
+            line,
+            diType,
+            false);
+        gVar->addDebugInfo(expr);
+    }
+
+    // Deferred to generateBodies()
+    if (varDecl->initializer && !has_const_init) {
+        m_pending_module_work[m_current_module.get()].varInits.push_back({gVar, varDecl});
+    }
+    return gVar;
+}
+
+llvm::Value *LLVMCodegen::generateVariableDeclaration(
+    const std::shared_ptr<VariableDeclaration> &varDecl) {
+
+    // This only runs for local variables
 
     llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
     llvm::Value *alloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), varType, varDecl->name);
@@ -1497,15 +1612,19 @@ std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> L
     return methods;
 }
 
-void LLVMCodegen::generateStructDeclaration(
+void LLVMCodegen::createOpaqueStructType(
     const std::shared_ptr<StructDeclaration> &structDecl) {
-
     llvm::StructType *llvmStruct =
         llvm::StructType::create(context, structDecl->name);
 
     m_structTypes[m_current_module->canonicalizeName(structDecl->name)] = llvmStruct;
 
     m_structTypes.try_emplace(structDecl->name, llvmStruct);
+}
+
+void LLVMCodegen::resolveStructBody(
+    const std::shared_ptr<StructDeclaration> &structDecl) {
+    llvm::StructType *llvmStruct = m_structTypes[m_current_module->canonicalizeName(structDecl->name)];
 
     std::vector<llvm::Type *> fieldTypes;
     for (const auto &field : structDecl->fields) {
@@ -1516,13 +1635,23 @@ void LLVMCodegen::generateStructDeclaration(
     llvmStruct->setBody(fieldTypes, /*packed=*/false);
 }
 
-void LLVMCodegen::generateUnionDeclaration(
-    const std::shared_ptr<UnionDeclaration> &unionDecl) {
+void LLVMCodegen::generateStructDeclaration(
+    const std::shared_ptr<StructDeclaration> &structDecl) {
+    createOpaqueStructType(structDecl);
+    resolveStructBody(structDecl);
+}
 
+void LLVMCodegen::createOpaqueUnionType(
+    const std::shared_ptr<UnionDeclaration> &unionDecl) {
     llvm::StructType *llvmUnion =
         llvm::StructType::create(context, unionDecl->name);
 
     m_unionTypes[unionDecl->name] = llvmUnion;
+}
+
+void LLVMCodegen::resolveUnionBody(
+    const std::shared_ptr<UnionDeclaration> &unionDecl) {
+    llvm::StructType *llvmUnion = m_unionTypes[unionDecl->name];
 
     // Unions in LLVM are represented as a struct with a single field
     // that is the size of the largest field in the union.
@@ -1551,6 +1680,12 @@ void LLVMCodegen::generateUnionDeclaration(
     llvmUnion->setBody({storageType}, /*packed=*/false);
 }
 
+void LLVMCodegen::generateUnionDeclaration(
+    const std::shared_ptr<UnionDeclaration> &unionDecl) {
+    createOpaqueUnionType(unionDecl);
+    resolveUnionBody(unionDecl);
+}
+
 void LLVMCodegen::generateEnumDeclaration(
     const std::shared_ptr<EnumDeclaration> &enumDecl) {
     // No actual code-gen here, just putting the type in global scope
@@ -1573,8 +1708,7 @@ llvm::Value *LLVMCodegen::generateBinaryOp(
 
     // str concatenation and comparison. Assignment ("=") to a str-typed
     // lvalue is deliberately excluded here and falls through to the
-    // general assignment path below (generateAddress + store), which
-    // handles it fine since a `str` value is just an LLVM struct value;
+    // general assignment path below (generateAddress + store)
     if (left->inferred_type && left->inferred_type->kind() == TypeKind::Str && op != "=") {
         llvm::Value *lv = generateExpression(left);
         llvm::Value *rv = generateExpression(right);

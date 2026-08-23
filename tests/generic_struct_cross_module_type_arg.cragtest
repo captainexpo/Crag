@@ -1,0 +1,17 @@
+//NAME: Generic Struct Cross-Module Type Argument
+//DESC:
+//REQUIRES:mod_test_requires/generic_pair.crag,mod_test_requires/pair_color.crag
+//BEGIN CODE
+
+import "generic_pair.crag" as pairmod;
+import "pair_color.crag" as colormod;
+import "stdlib" as std;
+
+const g_pair: *pairmod.Pair::<i32, colormod.Color> = null;
+
+fn main() -> i32 {
+    std.testing.assert(g_pair == null, "g_pair should be null");
+    return 0;
+}
+
+//END CODE

@@ -89,6 +89,18 @@ class TypeChecker {
         return symbol_table;
     }
 
+    // Monomorphized (template-instantiated) declarations no longer get spliced into
+    // whichever module happens to declare the template — each declaring module gets
+    // its own synthetic, non-file-backed Module to hold its instantiations instead
+    // (see templates.cpp). Per-origin rather than one shared module because a
+    // synthetic module needs a real imports/externLinkage map (copied from its
+    // origin) for module-qualified references inside instantiated code to resolve.
+    std::shared_ptr<Module> instantiationModule(const std::shared_ptr<Module> &origin);
+
+    const std::unordered_map<Module *, std::shared_ptr<Module>> &instantiationModules() const {
+        return m_instantiation_modules;
+    }
+
   private:
     friend class ModuleType;     // For module-level type checking and access
     friend class ConstEvaluator; // For constant evaluation
@@ -108,6 +120,8 @@ class TypeChecker {
     std::shared_ptr<Module> main_module;
 
     std::vector<TypeCheckError> m_errors; // Collected errors
+
+    std::unordered_map<Module *, std::shared_ptr<Module>> m_instantiation_modules;
 
     ConstEvaluator m_const_eval;
 

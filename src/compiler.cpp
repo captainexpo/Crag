@@ -6,6 +6,7 @@
 #include "backends/llvmcodegen.h"
 #endif
 
+#include "diagnostic.h"
 #include "module_resolver.h"
 
 #include "typechecking/typecheck.h"
@@ -15,6 +16,32 @@
 #include <memory>
 
 // #define DBG_PRINT_AST
+
+static DiagnosticSink toDiagnostics(const std::vector<TypeCheckError> &errs) {
+    DiagnosticSink sink;
+    for (const auto &err : errs) {
+        sink.diags.push_back({err.node ? err.node->line : -1,
+                              err.node ? err.node->col : -1,
+                              err.what(),
+                              err.module ? err.module->name : "<unknown>",
+                              err.module ? err.module->source_code : ""});
+    }
+    return sink;
+}
+
+#ifndef NO_LLVM
+static DiagnosticSink toDiagnostics(const std::vector<AttributedCodeGenError> &errs) {
+    DiagnosticSink sink;
+    for (const auto &err : errs) {
+        sink.diags.push_back({err.error.node() ? err.error.node()->line : -1,
+                              err.error.node() ? err.error.node()->col : -1,
+                              err.error.what(),
+                              err.module ? err.module->name : "<unknown>",
+                              err.module ? err.module->source_code : ""});
+    }
+    return sink;
+}
+#endif
 
 void initializeLLVM() {
     static bool initialized = false;
@@ -72,13 +99,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
     }
     if (!typeChecker->ok()) {
         std::cout << typeChecker->errors().size() << " errors during type checking:\n";
-        for (const auto &err : typeChecker->errors()) {
-            prettyError(err.node != nullptr ? err.node->line : -1,
-                        err.node != nullptr ? err.node->col : -1,
-                        err.what(),
-                        err.module->source_code,
-                        err.module->name);
-        }
+        toDiagnostics(typeChecker->errors()).report();
         return nullptr;
     }
 
@@ -100,28 +121,60 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
 #ifndef NO_LLVM
     // Call llvm codegen directly here, should probably make it more modular later
     auto codegen = std::make_shared<LLVMCodegen>("mainmod", moduleResolver, options);
-    bool has_errors = false;
-    std::vector<std::string> order = moduleResolver.getBestOrder();
-    for (std::string path : order) {
-        auto module = moduleResolver.getModule(path);
-        // std::cout << "Generating code for module: " << path << "\n";
-        codegen->generate(module, &typeChecker->globalSymbols());
-        // Check for errors after each module
-        if (!codegen->ok()) {
-            std::cerr << codegen->errors().size() << " errors during code generation:\n";
-            for (const auto &err : codegen->errors()) {
-                prettyError(err.node() ? err.node()->line : -1,
-                            err.node() ? err.node()->col : -1, err.what(), module->source_code, module->name);
-            }
-            has_errors = true;
-        }
-        // Set insert point back to main module after each compiled module
-        bool is_final_module = (path == order.back());
-        codegen->finished(is_final_module);
-        codegen->prepareForNewModule();
-        codegen->clearErrors();
+    codegen->setGlobalSymbols(&typeChecker->globalSymbols());
+
+    // Every real module, plus one synthetic module per declaring module holding its
+    // monomorphized (template-instantiated) declarations (see
+    // TypeChecker::instantiationModule). These aren't threaded through
+    // ModuleResolver's import-graph machinery — the whole point of the phase split
+    // below is that struct/union type resolution no longer depends on it.
+    std::vector<std::shared_ptr<Module>> allModules;
+    for (const auto &[path, mod] : moduleResolver.moduleCache()) {
+        allModules.push_back(mod);
     }
-    if (has_errors) {
+    for (const auto &[origin, synth] : typeChecker->instantiationModules()) {
+        allModules.push_back(synth);
+    }
+
+    // Phase 1: whole-program type codegen. Every struct/union's opaque LLVM type is
+    // registered (1a) before any struct field is resolved (1b), and every struct
+    // body is set before any union computes its field layout via DataLayout (1c) —
+    // see the comment on LLVMCodegen::generateTypeSkeletons(). This makes struct
+    // resolution independent of module import order, which is what generic
+    // instantiation can otherwise silently violate (a template's own module may
+    // have no import edge to a type its instantiation ends up needing).
+    for (const auto &mod : allModules) codegen->generateTypeSkeletons(mod);
+    for (const auto &mod : allModules) codegen->generateStructBodies(mod);
+    for (const auto &mod : allModules) codegen->generateUnionAndEnumBodies(mod);
+
+    if (!codegen->ok()) {
+        std::cerr << codegen->errors().size() << " errors during code generation:\n";
+        toDiagnostics(codegen->errors()).report();
+        std::cerr << "Code generation failed due to previous errors.\n";
+        return nullptr;
+    }
+
+    // Phase 2: whole-program function/variable codegen, in import order (plus the
+    // synthetic instantiation modules last) — every module's signatures (2a) exist
+    // before any module's bodies/initializers (2b) run, so a real module calling a
+    // generic function it triggers the instantiation of finds it already declared,
+    // regardless of processing order.
+    std::vector<std::string> order = moduleResolver.getBestOrder();
+    std::vector<std::shared_ptr<Module>> functionPhaseOrder;
+    for (const std::string &path : order) {
+        functionPhaseOrder.push_back(moduleResolver.getModule(path));
+    }
+    for (const auto &[origin, synth] : typeChecker->instantiationModules()) {
+        functionPhaseOrder.push_back(synth);
+    }
+
+    for (const auto &mod : functionPhaseOrder) codegen->generateSignatures(mod);
+    for (const auto &mod : functionPhaseOrder) codegen->generateBodies(mod);
+    codegen->finished();
+
+    if (!codegen->ok()) {
+        std::cerr << codegen->errors().size() << " errors during code generation:\n";
+        toDiagnostics(codegen->errors()).report();
         std::cerr << "Code generation failed due to previous errors.\n";
         return nullptr;
     }

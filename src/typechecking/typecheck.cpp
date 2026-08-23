@@ -458,6 +458,16 @@ static bool unifyGenericParam(const std::shared_ptr<Type> &paramType,
         }
         return true;
     }
+    if (auto ft = std::dynamic_pointer_cast<FunctionType>(paramType)) {
+        auto aft = std::dynamic_pointer_cast<FunctionType>(argType);
+        if (!aft || ft->params.size() != aft->params.size())
+            return false;
+        for (size_t i = 0; i < ft->params.size(); ++i) {
+            if (!unifyGenericParam(ft->params[i], aft->params[i], associations))
+                return false;
+        }
+        return unifyGenericParam(ft->ret, aft->ret, associations);
+    }
 
     return paramType->equals(argType);
 }

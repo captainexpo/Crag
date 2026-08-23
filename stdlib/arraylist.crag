@@ -1,0 +1,77 @@
+import "libc/libc.crag" as libc;
+
+pub enum ArrayListError(i32){
+    ALLOC_ERROR = 1,
+    OUT_OF_BOUNDS,
+}
+
+
+pub struct ArrayList<T> {
+    cur_elem: usize,
+    size: usize,
+    elements: *T,
+
+    fn init(self: *ArrayList::<T>) -> i32!ArrayListError {
+        self.size = 10;
+        self.elements = libc::stdlib::malloc(self.size*sizeof(T)) as *T;
+        if (self.elements == null){
+            return! ArrayListError:ALLOC_ERROR;
+        }
+        return 0;
+    }
+
+    fn append(self: *ArrayList::<T>, elem: T) -> i32!ArrayListError {
+        if (self.cur_elem >= self.size) {
+            self.size *= 2;
+            self.elements = libc::stdlib::realloc(self.elements as *void, self.size * sizeof(T)) as *T;
+            if (self.elements == null){
+                return! ArrayListError:ALLOC_ERROR;
+            }
+        }
+        self.elements[self.cur_elem] = elem;
+        self.cur_elem += 1;
+        return 0;
+    }
+
+    fn set(self: *ArrayList::<T>, idx: usize, elem: T) -> i32!ArrayListError {
+        if (idx >= self.cur_elem || idx < 0) {
+            return! ArrayListError:OUT_OF_BOUNDS;
+        }
+        self.elements[idx] = elem;
+        return 0;
+    }
+
+    fn get(self: *ArrayList::<T>, idx: usize) -> T!ArrayListError {
+        if (idx >= self.cur_elem || idx < 0) {
+            return! ArrayListError:OUT_OF_BOUNDS;
+        }
+        return self.elements[idx];
+    }
+
+    fn len(self: *ArrayList::<T>) -> usize {
+        return self.cur_elem;
+    }
+
+
+    //fn map(self: *ArrayList::<T>, f: fn(T) -> T) -> ArrayList::<T> {
+    //    let new_list = new::<T>();
+    //    for (let i = 0; i < self.cur_elem; i += 1) {
+    //        let elem = self.get(i).ok;
+    //        new_list.append(f(elem));
+    //    }
+    //    return new_list;
+    //}
+    fn foreach<K>(self: *ArrayList::<T>, f: fn(T) -> void) {
+        for (let i = 0; i < self.cur_elem; i += 1) {
+            let elem = self.get(i).ok;
+            f(elem);
+        }
+    }
+}
+
+pub fn new<T>() -> ArrayList::<T> {
+    let v = ArrayList::<T> { cur_elem: 0, size: 0, elements: null };
+    v.init();
+    return v;
+}
+

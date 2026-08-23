@@ -262,6 +262,25 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
         t = std::make_shared<TemplateInstanceType>(t, type_args);
     }
 
+    if (peek().type == TokenType::LT) {
+        consume(TokenType::LT);
+
+        std::vector<std::shared_ptr<Type>> type_args;
+
+        while (true) {
+            type_args.push_back(parse_type());
+
+            if (peek().type == TokenType::COMMA)
+                consume(TokenType::COMMA);
+            else
+                break;
+        }
+
+        consume(TokenType::GT);
+
+        t = std::make_shared<TemplateInstanceType>(t, type_args);
+    }
+
     return t;
 }
 

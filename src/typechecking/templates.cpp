@@ -137,6 +137,23 @@ static std::string getTemplateCacheKey(const std::shared_ptr<TypeDecl> &decl,
     return mangleTemplateName(decl->name, params);
 }
 
+std::shared_ptr<Module> TypeChecker::instantiationModule(const std::shared_ptr<Module> &origin) {
+    auto it = m_instantiation_modules.find(origin.get());
+    if (it != m_instantiation_modules.end()) {
+        return it->second;
+    }
+    auto synth = std::make_shared<Module>();
+    synth->canon_name = origin->canon_name + ".__instantiations__";
+    synth->name = synth->canon_name;
+    synth->path = origin->path;
+    synth->ast = std::make_shared<Program>();
+    synth->imports = origin->imports;
+    synth->externLinkage = origin->externLinkage;
+    synth->source_code = origin->source_code;
+    m_instantiation_modules[origin.get()] = synth;
+    return synth;
+}
+
 static std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>>
 makeCachedTemplateResult(const std::shared_ptr<TemplateInstantiation> &ti,
                          const TypeDecl::InstantiationCacheEntry &entry) {
@@ -296,7 +313,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         ti->template_id = inst_id;
         ti->symbol_id = inst_id;
 
-        current_module->ast->declarations.push_back(declCopy);
+        instantiationModule(current_module)->ast->declarations.push_back(declCopy);
 
         type_decl->instantiations[cache_key] = {ti->inferred_type, inst_id};
 
@@ -369,7 +386,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         }
         checkStructDeclaration(declCopy);
         // std::cout << "TYP " << st->str() << "\n";
-        current_module->ast->declarations.push_back(declCopy);
+        instantiationModule(current_module)->ast->declarations.push_back(declCopy);
 
         declCopy->symbol_id = inst_id;
         ti->inferred_type = st;

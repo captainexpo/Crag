@@ -76,12 +76,6 @@ pub fn main() -> i32 {
         if (rl.IsKeyDown(rl.Key:S)) {
             p1_y += PADDLE_SPEED * delta;
         }
-        //if (rl.IsKeyDown(rl.Key:UP)) {
-        //    p2_y -= PADDLE_SPEED * delta;
-        //}
-        //if (rl.IsKeyDown(rl.Key:DOWN)) {
-        //    p2_y += PADDLE_SPEED * delta;
-        //}
 
         // Right paddle AI
         // Ball will bounce?

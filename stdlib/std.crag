@@ -1,6 +1,7 @@
 pub import "builtin.crag"     as builtin;
 
 pub import "vector.crag"      as vector;
+pub import "arraylist.crag"   as arraylist;
 pub import "random.crag"      as random;
 pub import "string.crag"      as string;
 pub import "io.crag"          as io;
