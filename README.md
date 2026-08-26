@@ -15,7 +15,7 @@ The language was created as a learning project to explore compiler design and im
 - Manual memory management
 - Simple runtime safety checks (e.g. bounds checking, null pointer checks)
 - Simple module system
-- Generics for functions, structs, and unions
+- Generics for functions and types
 - Small standard library (currently just a few basic utilities)
 - Built on top of LLVM for code generation and optimization (bloated and slow, but it works)
 
@@ -44,8 +44,7 @@ Hello World:
 import "stdlib" as std;
 
 fn main() -> i32 {
-    // I hope to eventually have a more ergonomic standard library, but for now it needs to borrow from C's standard library for basic functionality.
-    std.cstdio.printf("Hello, World!");
+    std.io.println("Hello, World!");
     return 0;
 }
 ```
@@ -71,14 +70,14 @@ import "stdlib" as std;
 
 struct Node<T> {
     value: T,
-    next: *Node::<T>,
+    next: *Node<T>,
 
-    fn append(self: Node::<T>, value: T) -> void {
+    fn append(self: Node<T>, value: T) -> void {
         if (self.next != null) {
             self.next.append(value);
             return;
         }
-        let new_node = Node::<T>{ value: value, next: null };
+        let new_node = Node<T>{ value: value, next: null };
         let current = self;
         while (current.next != null) {
             current = current.next;
@@ -116,7 +115,6 @@ Build outputs:
 
 - Compiler executable: `build/crag`
 - Runtime static library: `build/lib/libruntime.a`
-
 
 ### Testing
 
