@@ -51,6 +51,10 @@ void rebuildModuleMetadata(const std::shared_ptr<Module> &module) {
             if (isExtern) {
                 module->externLinkage.insert(v->name);
             }
+        } else if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(actualDecl)) {
+            if (ta->is_pub) {
+                module->exports[ta->name] = ta;
+            }
         }
     }
 }
@@ -758,6 +762,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 if (sd->generic_params.size() > 0) {
                     SymbolId tid;
                     insertSymbol(sd->name, SymbolKind::Type, nullptr, sd, &tid);
+                    actualDecl->symbol_id = tid;
                     m_templates[tid] = sd;
                 } else {
                     // Build a StructType and register
@@ -829,6 +834,13 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     }
 
                     current_module = og_module;
+
+                    // Add the import trees to the symbol table
+                    for (const auto &tree : im->import_trees){
+                        if (!addImportTreeToSymbolTable(tree, current_module, imported_module)) {
+                            throw TypeCheckError(current_module, im, "Failed to add import tree to symbol table: " + tree->toString());
+                        }
+                    }
                 }
             } else if (auto ta = std::dynamic_pointer_cast<TypeAliasDeclaration>(decl)) {
                 std::shared_ptr<Type> alias_type = ta->aliased_type;
@@ -944,6 +956,61 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
     // currentScopes() = std::move(old_scopes);
     // Dump whole symbol table for debugging
     // symbol_table.dump();
+}
+
+bool TypeChecker::addImportTreeToSymbolTable(std::shared_ptr<ImportTree> tree, std::shared_ptr<Module> current_module, std::shared_ptr<Module> imported_module) {
+    auto og_current_mod = this->current_module;
+    this->current_module = current_module;
+    CurrentModuleGuard guard(this, og_current_mod);
+
+    auto it = imported_module->exports.find(tree->name);
+
+    if (it == imported_module->exports.end()) {
+        auto it2 = imported_module->imports.find(tree->name);
+        if (it2 == imported_module->imports.end()) {
+            return false;
+        }
+
+        // Register the module if it isn't already known to the global symbol table.
+        if (!symbol_table.lookupModule(it2->second->id)) {
+            symbol_table.insertModule(it2->second);
+        }
+        current_module->imports[tree->name] = it2->second;
+        if (tree->children.empty()) {
+            return true;
+        }
+        for (const auto &child : tree->children) {
+            if (!addImportTreeToSymbolTable(child, current_module, it2->second)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    auto sym_id = m_mod_scopes[imported_module->id].front().find(tree->name);
+    if (sym_id == INVALID_SYMBOL_ID) {
+        return false;
+    }
+
+    // The symbol lives in imported_module's own SymbolTable
+    auto *imported_table = symbol_table.lookupModule(imported_module->id);
+    if (!imported_table) {
+        return false;
+    }
+    auto entry = imported_table->first.get(sym_id);
+    if (!entry) {
+        return false;
+    }
+
+    // Two overlapping import trees pulling in the same symbol shouldn't fail
+    auto existing_id = currentScopes().empty() ? INVALID_SYMBOL_ID : currentScopes().front().find(tree->name);
+    if (existing_id != INVALID_SYMBOL_ID) {
+        auto existing_entry = symbolTable().get(existing_id);
+        return existing_entry && existing_entry->decl == entry->decl;
+    }
+
+    SymbolId new_id;
+    return insertSymbol(tree->name, entry->kind, entry->type, entry->decl, &new_id);
 }
 
 void TypeChecker::checkNode(const std::shared_ptr<ASTNode> &node) {
@@ -1743,23 +1810,6 @@ std::shared_ptr<ModuleAccess> TypeChecker::tryModuleAccessChain(const std::share
 }
 
 std::shared_ptr<Type> TypeChecker::inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma) {
-    // if (ma->module_path.size() == 0) {
-    //     if (ma->member_name.empty()) {
-    //         throw TypeCheckError(current_module, ma, "Invalid module access with empty module path and member name");
-    //     }
-    //     if (ma->member_name == "") {
-    //         throw TypeCheckError(current_module, ma, "Invalid module access with empty member name");
-    //     }
-    //     if (lookupSymbolInScope(ma->member_name) == std::nullopt) {
-    //         throw TypeCheckError(current_module, ma, "Unknown symbol in imported module: " + ma->member_name);
-    //     }
-    //     auto og_mod = current_module;
-    //     current_module = mod;
-    //     auto t = inferVarAccess(std::make_shared<VarAccess>(ma->member_name));
-    //     current_module = og_mod;
-    //     return t;
-    // }
-    //
     auto mod = resolveModulePath(ma, ma->module_path);
     if (ma->member_name.empty()) {
         throw TypeCheckError(current_module, ma, "Invalid module access with empty member name");
@@ -1773,13 +1823,6 @@ std::shared_ptr<Type> TypeChecker::inferModuleAccess(const std::shared_ptr<Modul
         throw TypeCheckError(current_module, ma, "Module '" + mod->canon_name + "' has not been type-checked yet");
     }
     auto exported = it->second;
-    // auto og_mod = current_module;
-    // current_module = mod;
-    // auto va = std::make_shared<VarAccess>(ma->member_name);
-    // va->line = ma->line;
-    // va->col = ma->col;
-    // std::shared_ptr<Type> t;
-
     auto sym_id = m_mod_scopes[mod->id].front().find(ma->member_name);
 
     if (sym_id == INVALID_SYMBOL_ID) {

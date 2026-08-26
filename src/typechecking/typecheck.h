@@ -89,12 +89,7 @@ class TypeChecker {
         return symbol_table;
     }
 
-    // Monomorphized (template-instantiated) declarations no longer get spliced into
-    // whichever module happens to declare the template — each declaring module gets
-    // its own synthetic, non-file-backed Module to hold its instantiations instead
-    // (see templates.cpp). Per-origin rather than one shared module because a
-    // synthetic module needs a real imports/externLinkage map (copied from its
-    // origin) for module-qualified references inside instantiated code to resolve.
+    // Instantiated templates get their own module
     std::shared_ptr<Module> instantiationModule(const std::shared_ptr<Module> &origin);
 
     const std::unordered_map<Module *, std::shared_ptr<Module>> &instantiationModules() const {
@@ -203,6 +198,9 @@ class TypeChecker {
     std::shared_ptr<Type> inferStructInit(const std::shared_ptr<StructInitializer> &init,
                                           const std::shared_ptr<Type> &expected = nullptr);
     std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti);
+
+
+    bool addImportTreeToSymbolTable(std::shared_ptr<ImportTree> tree, std::shared_ptr<Module> current_module, std::shared_ptr<Module> imported_module);
 
     void handleArrayLiteralAssignment(
         const std::string &name,
