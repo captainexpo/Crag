@@ -135,6 +135,14 @@ int getTypeAlign(const std::shared_ptr<Type> &type) {
             }
             return max_align;
         }
+        case TypeKind::Tuple: {
+            auto st = std::dynamic_pointer_cast<TupleType>(type);
+            int max_align = 1;
+            for (const auto &elem : st->elements) {
+                max_align = std::max(max_align, getTypeAlign(elem));
+            }
+            return max_align;
+        }
         case TypeKind::Union: {
             auto ut = std::dynamic_pointer_cast<UnionType>(type);
             int max_align = 1;
@@ -204,6 +212,18 @@ int getTypeSize(const std::shared_ptr<Type> &type) {
             }
             return alignUp(offset, max_align);
         }
+        case TypeKind::Tuple: {
+            auto st = std::dynamic_pointer_cast<TupleType>(type);
+            int offset = 0;
+            int max_align = 1;
+            for (const auto &elem : st->elements) {
+                int falign = getTypeAlign(elem);
+                offset = alignUp(offset, falign);
+                offset += getTypeSize(elem);
+                max_align = std::max(max_align, falign);
+            }
+            return alignUp(offset, max_align);
+        }
         case TypeKind::Union: {
             auto ut = std::dynamic_pointer_cast<UnionType>(type);
             int max_size = 0;
@@ -254,6 +274,13 @@ bool typeContainsGeneric(const std::shared_ptr<Type> &t) {
             }
         }
     }
+    if (auto st = std::dynamic_pointer_cast<TupleType>(t)) {
+        for (const auto &elem : st->elements) {
+            if (typeContainsGeneric(elem)) {
+                return true;
+            }
+        }
+    }
     if (auto at = std::dynamic_pointer_cast<ArrayType>(t)) {
         return typeContainsGeneric(at->element_type);
     }
@@ -273,4 +300,3 @@ bool typeContainsGeneric(const std::shared_ptr<Type> &t) {
     }
     return false;
 }
-
