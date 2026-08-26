@@ -1462,13 +1462,45 @@ struct VariableDeclaration : Statement, Declaration {
     void accept(ASTVisitor &v) override { v.visit(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
+
+struct ImportTree {
+    std::string name;
+    std::vector<std::shared_ptr<ImportTree>> children;
+
+    ImportTree(std::string n, std::vector<std::shared_ptr<ImportTree>> c)
+        : name(std::move(n)), children(std::move(c)) {}
+
+    std::string toString() const {
+        std::string result = "ImportTree(" + name;
+        if (!children.empty()) {
+            result += ", children: [";
+            for (const auto &child : children) {
+                result += child->toString() + ", ";
+            }
+            result.pop_back(); // Remove last space
+            result.pop_back(); // Remove last comma
+            result += "]";
+        }
+        result += ")";
+        return result;
+    }
+};
+
 struct ImportDeclaration : Declaration {
     std::string path;
     std::string alias;
 
-    ImportDeclaration(std::string p, std::string a) : path(std::move(p)), alias(std::move(a)) {}
+    std::vector<std::shared_ptr<ImportTree>> import_trees;
+
+    ImportDeclaration(std::string p, std::string a, std::vector<std::shared_ptr<ImportTree>> it)
+        : path(std::move(p)), alias(std::move(a)), import_trees(std::move(it)) {}
     std::string str() const override {
-        return "ImportDeclaration(\"" + path + "\", \"" + alias + "\")";
+        std::string o = "ImportDeclaration(" + path + (alias.empty() ? "" : " as " + alias);
+        for (const auto &tree : import_trees) {
+            o += ", " + tree->toString();
+        }
+        o += ")";
+        return o;
     }
     NodeKind kind() const override { return NodeKind::ImportDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }

@@ -513,14 +513,41 @@ std::shared_ptr<Declaration> Parser::parse_extern_declaration() {
                      peek().column);
 }
 
+
+std::shared_ptr<ImportTree> Parser::parse_import_tree() {
+    auto name = consume(TokenType::ID).value;
+    if (match({TokenType::LBRACE})){
+        std::vector<std::shared_ptr<ImportTree>> children;
+        while (peek().type != TokenType::RBRACE) {
+            children.push_back(parse_import_tree());
+            if (!match({TokenType::COMMA}))
+                break;
+        }
+        consume(TokenType::RBRACE);
+        return std::make_shared<ImportTree>(name, children);
+    } else {
+        return std::make_shared<ImportTree>(name, std::vector<std::shared_ptr<ImportTree>>{});
+    }
+}
+
 std::shared_ptr<ImportDeclaration> Parser::parse_import_declaration() {
     consume(TokenType::IMPORT);
     std::string path = consume(TokenType::STRING).value;
     consume(TokenType::AS);
     std::string alias = consume(TokenType::ID).value;
+
+    std::vector<std::shared_ptr<ImportTree>> import_trees;
+    if (match({TokenType::LBRACE})) {
+        while (peek().type != TokenType::RBRACE) {
+            import_trees.push_back(parse_import_tree());
+            if (!match({TokenType::COMMA}))
+                break;
+        }
+        consume(TokenType::RBRACE);
+    }
     consume(TokenType::SEMICOLON);
 
-    return std::make_shared<ImportDeclaration>(path, alias);
+    return std::make_shared<ImportDeclaration>(path, alias, import_trees);
 }
 
 std::shared_ptr<VariableDeclaration> Parser::parse_variable_declaration() {

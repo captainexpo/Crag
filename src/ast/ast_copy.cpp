@@ -385,7 +385,7 @@ std::shared_ptr<ASTNode> TypeAliasDeclaration::instantiate(std::vector<std::shar
 }
 
 std::shared_ptr<ASTNode> ImportDeclaration::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
-    auto c = std::make_shared<ImportDeclaration>(path, alias);
+    auto c = std::make_shared<ImportDeclaration>(path, alias, import_trees);
     c->line = line;
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;

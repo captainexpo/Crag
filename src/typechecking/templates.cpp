@@ -203,6 +203,19 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         throw TypeCheckError(current_module, ti, "Unknown template: " + ti->template_name);
     }
 
+    // A template found by name in the calling module's scope (e.g. imported directly by
+    // name rather than accessed through its declaring module) still carries the symbol_id
+    // it was originally declared with, which records its true home module. Re-pin
+    // current_module to that home module before instantiating so the template body's own
+    // free names (helper functions, its module's imports, etc.) resolve against the module
+    // it was written in, not the module that happens to be calling it.
+    if (decl->symbol_id != (uint64_t)INT64_MAX) {
+        auto *home_entry = symbol_table.lookupModule((uint32_t)extractModuleId(decl->symbol_id));
+        if (home_entry && home_entry->second) {
+            current_module = home_entry->second;
+        }
+    }
+
     auto type_decl = getTemplateDecl(decl);
     if (!type_decl) {
         throw TypeCheckError(current_module, ti, "Template declaration is not a type declaration: " + ti->template_name);
