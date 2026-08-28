@@ -365,12 +365,6 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
             }
         }
 
-        for (const auto &field : sd->fields) {
-            std::cout << "Field: " << field.first << " : " << field.second->str() << "\n";
-        }
-        for (const auto &method: sd->methods) {
-            std::cout << "Method: " << method.first<< " : " << method.second->type->str() << "\n";
-        }
         std::shared_ptr<StructDeclaration> declCopy = std::dynamic_pointer_cast<StructDeclaration>(sd->instantiate());
         if (sd->generic_params.size() != params.size()) {
             throw TypeCheckError(current_module, ti, "Template instantiation parameter count mismatch for " + sd->name +
@@ -393,12 +387,6 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
 
         auto old_expected_return_type = m_expected_return_type;
         m_expected_return_type = nullptr;
-        for (const auto &field : declCopy->fields) {
-            std::cout << "Field: " << field.first << " : " << field.second->str() << "\n";
-        }
-        for (const auto &method: declCopy->methods) {
-            std::cout << "Method: " << method.first<< " : " << method.second->type->str() << "\n";
-        }
         checkStructDeclaration(declCopy);
         // std::cout << "TYP " << st->str() << "\n";
         instantiationModule(current_module)->ast->declarations.push_back(declCopy);

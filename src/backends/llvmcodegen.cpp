@@ -1255,12 +1255,18 @@ void LLVMCodegen::finished() {
 
     // Verify the module
     if (llvm::verifyModule(*m_llvm_module, &llvm::errs())) {
-        // Dump IR
-        // std::string str;
-        // llvm::raw_string_ostream rso(str);
-        // m_llvm_module->print(rso, nullptr);
-        // std::cout << "Generated IR for module " << (m_current_module ? m_current_module->canon_name : "<unknown>") << ":\n"
-        //           << rso.str() << "\n";
+
+        // open a file
+        std::error_code EC;
+        llvm::raw_fd_ostream errorFile("llvm_module_error.ll", EC, llvm::sys::fs::OF_None);
+        if (EC) {
+            std::cerr << "Could not open file: " << EC.message() << "\n";
+        } else {
+            m_llvm_module->print(errorFile, nullptr);
+            errorFile.close();
+            std::cerr << "LLVM module written to llvm_module_error.ll\n";
+        }
+
         throw CodeGenError(nullptr, "Module verification failed - invalid IR");
     }
 

@@ -2392,12 +2392,12 @@ std::shared_ptr<TemplateInstantiation> TypeChecker::tryInferGenericFunctionCall(
     for (auto &[name, type] : generic_associations) {
         auto idx = std::find(called_func->generic_params.begin(), called_func->generic_params.end(), name);
         if (idx == called_func->generic_params.end()) {
-            std::cout << "Warning: inferred generic type for parameter " << name << " which is not in the function's generic parameters" << std::endl;
-            std::cout << "Generic associations: ";
-            for (auto &[n, t] : generic_associations) {
-                std::cout << n << " -> " << typeName(t) << ", ";
-            }
-            std::cout << std::endl;
+            // std::cout << "Warning: inferred generic type for parameter " << name << " which is not in the function's generic parameters" << std::endl;
+            // std::cout << "Generic associations: ";
+            // for (auto &[n, t] : generic_associations) {
+            //     std::cout << n << " -> " << typeName(t) << ", ";
+            // }
+            // std::cout << std::endl;
             throw TypeCheckError(current_module, fc, "Generic type " + name + " not found in function declaration");
         }
         size_t index = std::distance(called_func->generic_params.begin(), idx);

@@ -1,4 +1,5 @@
 import "libc/libc.crag" as libc;
+import "string.crag" as string;
 
 pub enum ArrayListError(i32){
     ALLOC_ERROR = 1,
@@ -11,23 +12,23 @@ pub struct ArrayList<T> {
     size: usize,
     elements: *T,
 
-    fn init(self: *ArrayList::<T>) -> i32!ArrayListError {
+    fn init(self: *ArrayList<T>) -> i32!ArrayListError {
         self.size = 10;
-        self.elements = libc::stdlib::malloc(self.size*sizeof(T)) as *T;
+        self.elements = libc.stdlib.malloc(self.size*sizeof(T)) as *T;
         if (self.elements == null){
             return! ArrayListError:ALLOC_ERROR;
         }
         return 0;
     }
 
-    fn deinit(self: *ArrayList::<T>) {
-        libc::stdlib::free(self.elements as *void);
+    fn deinit(self: *ArrayList<T>) {
+        libc.stdlib.free(self.elements as *void);
     }
 
-    fn append(self: *ArrayList::<T>, elem: T) -> i32!ArrayListError {
+    fn append(self: *ArrayList<T>, elem: T) -> i32!ArrayListError {
         if (self.cur_elem >= self.size) {
             self.size *= 2;
-            self.elements = libc::stdlib::realloc(self.elements as *void, self.size * sizeof(T)) as *T;
+            self.elements = libc.stdlib.realloc(self.elements as *void, self.size * sizeof(T)) as *T;
             if (self.elements == null){
                 return! ArrayListError:ALLOC_ERROR;
             }
@@ -37,7 +38,7 @@ pub struct ArrayList<T> {
         return 0;
     }
 
-    fn set(self: *ArrayList::<T>, idx: usize, elem: T) -> i32!ArrayListError {
+    fn set(self: *ArrayList<T>, idx: usize, elem: T) -> i32!ArrayListError {
         if (idx >= self.cur_elem || idx < 0) {
             return! ArrayListError:OUT_OF_BOUNDS;
         }
@@ -45,19 +46,18 @@ pub struct ArrayList<T> {
         return 0;
     }
 
-    fn get(self: *ArrayList::<T>, idx: usize) -> T!ArrayListError {
+    fn get(self: *ArrayList<T>, idx: usize) -> T!ArrayListError {
         if (idx >= self.cur_elem || idx < 0) {
             return! ArrayListError:OUT_OF_BOUNDS;
         }
         return self.elements[idx];
     }
 
-    fn len(self: *ArrayList::<T>) -> usize {
+    fn len(self: *ArrayList<T>) -> usize {
         return self.cur_elem;
     }
 
-
-    fn map(self: *ArrayList::<T>, f: fn(T) -> T) -> ArrayList::<T> {
+    fn map(self: *ArrayList<T>, f: fn(T) -> T) -> *ArrayList<T> {
         let new_list = new::<T>();
         for (let i = 0; i < self.cur_elem; i += 1) {
             let elem = self.get(i).ok;
@@ -66,16 +66,32 @@ pub struct ArrayList<T> {
         return new_list;
     }
 
-    fn foreach<K>(self: *ArrayList::<T>, f: fn(T) -> void) {
+    fn foreach<K>(self: *ArrayList<T>, f: fn(T) -> void) {
         for (let i = 0; i < self.cur_elem; i += 1) {
             let elem = self.get(i).ok;
             f(elem);
         }
     }
+
+    fn tostring(self: *ArrayList<T>) -> str {
+        let s: str = "{";
+        for (let i = 0; i < self.cur_elem; i += 1) {
+            let elem = self.get(i).ok;
+            let news = string.concat(s, string.tostring(elem));
+            s = news;
+            if (i < self.cur_elem - 1) {
+                let news = string.concat(s, ", ");
+                s = news;
+            }
+        }
+        let news = string.concat(s, "}");
+        s = news;
+        return s;
+    }
 }
 
-pub fn new<T>() -> ArrayList::<T> {
-    let v = ArrayList::<T> { cur_elem: 0, size: 0, elements: null };
+pub fn new<T>() -> *ArrayList<T> {
+    let v: *ArrayList<T> = libc.stdlib.malloc(sizeof(ArrayList<T>)) as *ArrayList<T>;
     v.init();
     return v;
 }

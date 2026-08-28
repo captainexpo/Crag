@@ -701,12 +701,11 @@ struct StructType : Type {
     }
 
     std::string str() const override {
-        std::string result = "Struct " + name + " { ";
-        for (const auto &field : fields)
-            result += field.first + ", ";
-        for (const auto &method : methods)
-            result += method.first + "(), ";
-        result += "}";
+        std::string result = name;
+        // for (const auto &field : fields)
+        //     result += field.first + ", ";
+        // for (const auto &method : methods)
+        //     result += method.first + "(), ";
         return result;
     }
 

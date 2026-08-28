@@ -18,7 +18,7 @@ fn main() -> i32 {
     n.value = 42;
     std.testing.assert(n.value == 42, "ordinary local field access should still work");
 
-    let v: std.arraylist.ArrayList<i32> = std.arraylist.new::<i32>();
+    let v = std.arraylist.new::<i32>();
     v.append(10);
     v.append(20);
     std.testing.assert(v.len() == 2, "cross-module generic type + dotted turbofish instantiation should work");
