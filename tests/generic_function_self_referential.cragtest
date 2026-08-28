@@ -9,7 +9,7 @@ fn double(x: i32) -> i32 {
 }
 
 fn main() -> i32 {
-    let v = std.arraylist.new::<i32>();
+    let v = std.arraylist.ArrayList.new::<i32>();
     v.append(1);
     v.append(2);
     v.append(3);

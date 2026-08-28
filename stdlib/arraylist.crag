@@ -1,5 +1,6 @@
 import "libc/libc.crag" as libc;
 import "string.crag" as string;
+import "io.crag" as io;
 
 pub enum ArrayListError(i32){
     ALLOC_ERROR = 1,
@@ -11,6 +12,12 @@ pub struct ArrayList<T> {
     cur_elem: usize,
     size: usize,
     elements: *T,
+
+    static fn new<T>() -> *ArrayList<T> {
+        let v: *ArrayList<T> = libc.stdlib.malloc(sizeof(ArrayList<T>)) as *ArrayList<T>;
+        v.init();
+        return v;
+    }
 
     fn init(self: *ArrayList<T>) -> i32!ArrayListError {
         self.size = 10;
@@ -58,7 +65,7 @@ pub struct ArrayList<T> {
     }
 
     fn map(self: *ArrayList<T>, f: fn(T) -> T) -> *ArrayList<T> {
-        let new_list = new::<T>();
+        let new_list = ArrayList.new::<T>();
         for (let i = 0; i < self.cur_elem; i += 1) {
             let elem = self.get(i).ok;
             new_list.append(f(elem));
@@ -88,11 +95,23 @@ pub struct ArrayList<T> {
         s = news;
         return s;
     }
-}
 
-pub fn new<T>() -> *ArrayList<T> {
-    let v: *ArrayList<T> = libc.stdlib.malloc(sizeof(ArrayList<T>)) as *ArrayList<T>;
-    v.init();
-    return v;
-}
+    fn print(self: *ArrayList<T>) {
+        io.print("{");
+        for (let i = 0; i < self.cur_elem; i += 1) {
+            let elem = self.get(i).ok;
+            io.print(elem);
+            if (i < self.cur_elem - 1) {
+                io.print(", ");
+            }
+        }
+        io.print("}");
+    }
 
+    fn println(self: *ArrayList<T>) {
+        self.print();
+        io.println("");
+    }
+
+
+}

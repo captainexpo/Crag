@@ -836,7 +836,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     current_module = og_module;
 
                     // Add the import trees to the symbol table
-                    for (const auto &tree : im->import_trees){
+                    for (const auto &tree : im->import_trees) {
                         if (!addImportTreeToSymbolTable(tree, current_module, imported_module)) {
                             throw TypeCheckError(current_module, im, "Failed to add import tree to symbol table: " + tree->toString());
                         }
@@ -1086,7 +1086,7 @@ void TypeChecker::checkStructDeclaration(
 
     for (const auto &m : sd->methods) {
         // Type check method bodies
-        checkFunctionDeclaration(m.second);
+        checkFunctionDeclaration(m.second.method_decl);
     }
 }
 
@@ -2309,6 +2309,32 @@ TypeChecker::inferDereference(const std::shared_ptr<Dereference> &d) {
 }
 
 std::shared_ptr<Type>
+TypeChecker::inferStaticMethodCall(const std::shared_ptr<StructType> &st, const MethodInfo methodInfo, const std::shared_ptr<MethodCall> &mc) {
+    auto ftype = std::dynamic_pointer_cast<FunctionType>(resolveType(mc, methodInfo.method_decl->type));
+    // check arity (naive, no implicit conversions)
+    if (!ftype->variadic &&
+        mc->args.size() != ftype->params.size()) {
+        throw TypeCheckError(current_module, mc, "Static method call argument count mismatch: expected " + std::to_string(ftype->params.size() - 1) + " got " + std::to_string(mc->args.size()));
+    }
+    size_t n = ftype->params.size();
+    for (size_t i = 0; i < mc->args.size(); ++i) {
+        auto at = inferExpression(mc->args[i]);
+
+        if (!at)
+            throw TypeCheckError(current_module, mc, "Failed to infer type of method call argument " + std::to_string(i));
+        if (i < ftype->params.size() && !at->equals(ftype->params[i])) {
+            if (canImplicitCast(at, ftype->params[i])) {
+                mc->args[i] = std::make_shared<TypeCast>(mc->args[i], ftype->params[i], CastType::Normal);
+            } else
+                throw TypeCheckError(current_module, mc, "Method call argument " + std::to_string(i) + " type mismatch: expected " + typeName(ftype->params[i + 1]) + " got " + typeName(at));
+        }
+    }
+    mc->inferred_type = resolveType(mc, ftype->ret);
+    mc->is_static_call = true;
+    return ftype->ret;
+}
+
+std::shared_ptr<Type>
 TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
     auto bt = inferExpression(mc->object);
     if (!bt)
@@ -2328,7 +2354,12 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
     if (it == st->methods.end()) {
         throw TypeCheckError(current_module, mc, "Struct " + st->name + " has no method " + mc->method);
     }
-    auto ftype = std::dynamic_pointer_cast<FunctionType>(resolveType(mc, it->second->type));
+
+    if (it->second.is_static) {
+        return inferStaticMethodCall(st, it->second, mc);
+    }
+
+    auto ftype = std::dynamic_pointer_cast<FunctionType>(resolveType(mc, it->second.method_decl->type));
     // check arity (naive, no implicit conversions)
     if (!ftype->variadic &&
         mc->args.size() !=
@@ -2349,6 +2380,7 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
         }
     }
     mc->inferred_type = resolveType(mc, ftype->ret);
+    mc->is_static_call = false;
     return ftype->ret;
 }
 

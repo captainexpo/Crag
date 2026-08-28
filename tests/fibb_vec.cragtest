@@ -1,11 +1,11 @@
-//NAME: Fibb with vector
+//NAME: Fibb with arraylist
 //DESC:
 //BEGIN CODE
 
-import "stdlib" as std;
+import "stdlib" as std { arraylist { ArrayList } };
 
 fn main() -> i32 {
-    let a = std.vector.new::<i64>();
+    let a = ArrayList.new::<i64>();
 
     a.append(0);
     a.append(1);

@@ -39,6 +39,7 @@ enum class TokenType {
     SWITCH,
     TRY,
     CATCH,
+    STATIC,
 
     // Operators
     EQ,

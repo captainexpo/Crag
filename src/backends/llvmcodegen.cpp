@@ -1595,19 +1595,19 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
 std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> LLVMCodegen::generateStructMethods(
     const std::shared_ptr<StructDeclaration> &structDecl) {
     std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> methods;
-    for (std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>>::iterator iter = structDecl->methods.begin();
+    for (std::unordered_map<std::string, MethodInfo>::iterator iter = structDecl->methods.begin();
          iter != structDecl->methods.end(); ++iter) {
         auto method = iter->second;
-        std::string mangledName = structDecl->name + "." + method->name;
-        method->name = mangledName;
+        std::string mangledName = structDecl->name + "." + method.method_decl->name;
+        method.method_decl->name = mangledName;
 
         // Mark struct methods as having external linkage so they're not namespaced
         // This allows methods to be called across modules
         m_current_module->externLinkage.insert(mangledName);
 
         // HACK: Just get this done for now, should probably be better somehow
-        llvm::Function *fn = generateFunctionDefinition(method);
-        methods.push_back({fn, method});
+        llvm::Function *fn = generateFunctionDefinition(method.method_decl);
+        methods.push_back({fn, {method.method_decl}});
     }
     return methods;
 }
@@ -2333,25 +2333,26 @@ llvm::Value *LLVMCodegen::generateMethodCall(
         std::dynamic_pointer_cast<StructType>(structAccess->inferred_type);
     llvm::Value *obj = nullptr;
 
-    if (structType) {
-        obj = generateAddress(std::static_pointer_cast<Expression>(structAccess));
-    } else {
-        auto ptrType =
-            std::dynamic_pointer_cast<PointerType>(structAccess->inferred_type);
-        if (ptrType) {
-            structType = std::dynamic_pointer_cast<StructType>(ptrType->base);
-            obj = generateExpression(std::static_pointer_cast<Expression>(structAccess));
+    if (!methodCall->is_static_call) {
+        if (structType) {
+            obj = generateAddress(std::static_pointer_cast<Expression>(structAccess));
+        } else {
+            auto ptrType =
+                std::dynamic_pointer_cast<PointerType>(structAccess->inferred_type);
+            if (ptrType) {
+                structType = std::dynamic_pointer_cast<StructType>(ptrType->base);
+                obj = generateExpression(std::static_pointer_cast<Expression>(structAccess));
+            }
         }
-    }
+        if (!obj) {
+            throw CodeGenError(structAccess,
+                               "Failed to generate address for method call object");
+        }
 
-    if (!obj) {
-        throw CodeGenError(structAccess,
-                           "Failed to generate address for method call object");
-    }
-
-    if (!structType) {
-        throw CodeGenError(structAccess,
-                           "Method call on non-struct type");
+        if (!structType) {
+            throw CodeGenError(structAccess,
+                               "Method call on non-struct type");
+        }
     }
 
     std::string mangledName =
@@ -2367,15 +2368,18 @@ llvm::Value *LLVMCodegen::generateMethodCall(
 
     std::vector<llvm::Value *> args;
 
-    // If method expects struct by value, load it
-    if (callee->getArg(0)->getType()->isStructTy()) {
-        obj = m_builder->CreateLoad(
-            callee->getArg(0)->getType(),
-            obj,
-            "load_this");
-    }
+    if (!methodCall->is_static_call) {
 
-    args.push_back(obj);
+        // If method expects struct by value, load it
+        if (callee->getArg(0)->getType()->isStructTy()) {
+            obj = m_builder->CreateLoad(
+                callee->getArg(0)->getType(),
+                obj,
+                "load_this");
+        }
+
+        args.push_back(obj);
+    }
 
     for (const auto &arg : methodCall->args) {
         args.push_back(generateExpression(arg));
@@ -2386,6 +2390,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(
 
     return call;
 }
+
 llvm::Value *
 LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
                               bool loadValue) {

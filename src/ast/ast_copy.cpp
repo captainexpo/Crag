@@ -92,6 +92,7 @@ std::shared_ptr<ASTNode> MethodCall::instantiate(std::vector<std::shared_ptr<Typ
     c->col = col;
     c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
     c->symbol_id = symbol_id;
+    c->is_static_call = is_static_call;
     return c;
 }
 
@@ -432,7 +433,7 @@ std::shared_ptr<ASTNode> StructDeclaration::instantiate(std::vector<std::shared_
     c->generic_params = generic_params;
 
     for (const auto &[mname, method] : methods) {
-        c->methods[mname] = std::dynamic_pointer_cast<FunctionDeclaration>(method->instantiate(gp_replace));
+        c->methods[mname] = {std::dynamic_pointer_cast<FunctionDeclaration>(method.method_decl->instantiate(gp_replace)), method.is_static};
     }
     // std::cout << "Copied struct declaration: " << c->str() << "\n";
     c->symbol_id = symbol_id;

@@ -4,14 +4,14 @@
 
 import "stdlib" as std;
 
-using Vec<T> = std.vector.Vec::<T>;
+using List<T> = std.arraylist.ArrayList::<T>;
 
 struct Box {
-    items: Vec::<u64>,
+    items: List::<u64>,
 }
 
 fn main() -> i32 {
-    let v = std.vector.new::<u64>();
+    let v = std.arraylist.ArrayList.new::<u64>();
     v.append(1);
     v.append(2);
     v.append(3);

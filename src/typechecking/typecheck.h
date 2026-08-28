@@ -188,6 +188,7 @@ class TypeChecker {
                                         const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<TemplateInstantiation> tryInferGenericFunctionCall(const std::shared_ptr<FuncCall> &fc, const std::shared_ptr<FunctionType> &ft);
     std::shared_ptr<Type> inferMethodCall(const std::shared_ptr<MethodCall> &mc);
+    std::shared_ptr<Type> inferStaticMethodCall(const std::shared_ptr<StructType> &st, const MethodInfo methodInfo, const std::shared_ptr<MethodCall> &call);
     std::shared_ptr<Type> inferFieldAccess(const std::shared_ptr<FieldAccess> &fa);
     std::shared_ptr<Type> inferModuleAccess(const std::shared_ptr<ModuleAccess> &ma);
 

@@ -1,0 +1,25 @@
+//NAME: Context-Free Parser Regression
+//DESC:
+//BEGIN CODE
+
+import "stdlib" as std;
+
+
+struct Point {
+    x: i32,
+    y: i32,
+
+    static fn new(x: i32, y: i32) -> Point {
+        return Point{x: x, y: y};
+    }
+}
+
+fn main() -> i32 {
+    let p = Point.new(10, 20);
+
+    std.testing.assert_equal(p.x, 10, "Point.x should be 10");
+    std.testing.assert_equal(p.y, 20, "Point.y should be 20");
+    return 0;
+}
+
+//END CODE

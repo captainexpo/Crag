@@ -162,7 +162,43 @@ makeCachedTemplateResult(const std::shared_ptr<TemplateInstantiation> &ti,
 
 // Returns type of expression, and replacement for the instantiation
 std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::inferTemplateInstantiation(const std::shared_ptr<TemplateInstantiation> &ti) {
-    auto target_mod = resolveModulePath(ti, ti->module_path);
+    std::shared_ptr<Module> probe = current_module;
+    size_t resolved_segments = 0;
+    for (; resolved_segments < ti->module_path.size(); ++resolved_segments) {
+        auto it = probe->imports.find(ti->module_path[resolved_segments]);
+        if (it == probe->imports.end())
+            break;
+        probe = it->second;
+    }
+    std::shared_ptr<Module> target_mod = probe;
+    std::shared_ptr<StructDeclaration> static_method_owner;
+
+    if (resolved_segments + 1 == ti->module_path.size()) {
+        auto saved_mod = current_module;
+        current_module = probe;
+        SymbolId sid = currentScopes().empty() ? INVALID_SYMBOL_ID : currentScopes().front().find(ti->module_path.back());
+        if (sid != INVALID_SYMBOL_ID) {
+            auto entry = symbolTable().get(sid);
+            if (entry) {
+                static_method_owner = std::dynamic_pointer_cast<StructDeclaration>(entry->decl);
+            }
+        }
+        current_module = saved_mod;
+        if (!static_method_owner) {
+            throw TypeCheckError(current_module, ti, "Module '" + ti->module_path.back() +
+                                         "' not found in imports of module '" + probe->canon_name + "'");
+        }
+
+        if (static_method_owner->symbol_id != (uint64_t)INT64_MAX) {
+            auto *home_entry = symbol_table.lookupModule((uint32_t)extractModuleId(static_method_owner->symbol_id));
+            if (home_entry && home_entry->second) {
+                target_mod = home_entry->second;
+            }
+        }
+    } else if (resolved_segments != ti->module_path.size()) {
+        throw TypeCheckError(current_module, ti, "Module '" + ti->module_path[resolved_segments] +
+                                     "' not found in imports of module '" + probe->canon_name + "'");
+    }
 
     auto og_current_mod = current_module;
     current_module = target_mod;
@@ -188,16 +224,26 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         }
     }
 
-    SymbolId template_id = currentScopes().front().find(ti->template_name);
-    if (template_id == INVALID_SYMBOL_ID) {
-        throw TypeCheckError(current_module, ti, "Template '" + ti->template_name + "' not found");
-        return {nullptr, nullptr};
+    std::shared_ptr<Declaration> decl;
+    if (static_method_owner) {
+        auto mit = static_method_owner->methods.find(ti->template_name);
+        if (mit == static_method_owner->methods.end() || !mit->second.is_static) {
+            throw TypeCheckError(current_module, ti, "Struct '" + static_method_owner->name +
+                                         "' has no static method '" + ti->template_name + "'");
+        }
+        decl = mit->second.method_decl;
+    } else {
+        SymbolId template_id = currentScopes().front().find(ti->template_name);
+        if (template_id == INVALID_SYMBOL_ID) {
+            throw TypeCheckError(current_module, ti, "Template '" + ti->template_name + "' not found");
+            return {nullptr, nullptr};
+        }
+        auto entry = symbolTable().get(template_id);
+
+        // symbol_table.dump();
+
+        decl = entry ? std::dynamic_pointer_cast<Declaration>(entry->decl) : nullptr;
     }
-    auto entry = symbolTable().get(template_id);
-
-    // symbol_table.dump();
-
-    auto decl = entry ? std::dynamic_pointer_cast<Declaration>(entry->decl) : nullptr;
 
     if (!decl) {
         throw TypeCheckError(current_module, ti, "Unknown template: " + ti->template_name);
@@ -674,7 +720,7 @@ void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map
             replaceInType(field.second, generic_map);
         }
         for (auto &method_pair : sd->methods) {
-            replaceGenericTypes(method_pair.second, generic_map);
+            replaceGenericTypes(method_pair.second.method_decl, generic_map);
         }
         return;
     }

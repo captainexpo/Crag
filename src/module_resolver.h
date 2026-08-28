@@ -268,7 +268,6 @@ class ModuleResolver {
     void initializeBuiltinShortcuts() {
         m_shortcuts["stdlib"] = "<STDLIB>/std.crag";
         m_shortcuts["string"] = "<STDLIB>/string.crag";
-        m_shortcuts["vector"] = "<STDLIB>/vector.crag";
         m_shortcuts["random"] = "<STDLIB>/random.crag";
         m_shortcuts["libc"] = "<STDLIB>/libc/libc.crag";
     }

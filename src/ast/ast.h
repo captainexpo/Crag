@@ -665,12 +665,18 @@ struct GenericType : Type {
 
 struct FunctionDeclaration;
 
+struct MethodInfo {
+    std::shared_ptr<FunctionDeclaration> method_decl;
+    bool is_static;
+};
+
 struct StructType : Type {
     TypeKind kind() const override { return TypeKind::Struct; }
     std::string name;
     std::string qualified_name;
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
-    std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
+    std::unordered_map<std::string, MethodInfo> methods;
+
     bool complete;
 
     StructType(std::string n,
@@ -1001,6 +1007,9 @@ struct MethodCall : public Expression {
     ExprPtr object;
     std::string method;
     std::vector<ExprPtr> args;
+
+    bool is_static_call;
+
     MethodCall(ExprPtr o, std::string m, std::vector<ExprPtr> a)
         : object(std::move(o)), method(std::move(m)), args(std::move(a)) {}
     std::string str() const override {
@@ -1560,9 +1569,10 @@ struct EnumDeclaration : public TypeDecl {
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
 
+
 struct StructDeclaration : public TypeDecl {
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
-    std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
+    std::unordered_map<std::string, MethodInfo> methods;
     std::vector<std::string> generic_params;
 
     std::pair<std::string, std::shared_ptr<Type>> getField(const std::string &fname) const {
@@ -1586,7 +1596,7 @@ struct StructDeclaration : public TypeDecl {
         }
         for (const auto &method : methods) {
             result += "Method: " + method.first + "\n";
-            result += method.second->toString() + " ";
+            result += method.second.method_decl->str() + "\n";
         }
         result += "}";
 

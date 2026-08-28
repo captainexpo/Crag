@@ -67,6 +67,8 @@ std::string tokenTypeName(TokenType type) {
             return "TRY";
         case TokenType::CATCH:
             return "CATCH";
+        case TokenType::STATIC:
+            return "STATIC";
         case TokenType::TYPE:
             return "TYPE";
         case TokenType::QUESTION:
@@ -210,6 +212,7 @@ Lexer::Lexer(const std::string &src) : code(src) {
         {"switch", TokenType::SWITCH},
         {"try", TokenType::TRY},
         {"catch", TokenType::CATCH},
+        {"static", TokenType::STATIC},
     };
 }
 

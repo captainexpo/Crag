@@ -639,16 +639,17 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
 
     consume(TokenType::LBRACE);
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
-    std::unordered_map<std::string, std::shared_ptr<FunctionDeclaration>> methods;
+    std::unordered_map<std::string, MethodInfo> methods;
     while (peek().type != TokenType::RBRACE) {
         if (peek().type == TokenType::EOF_T) {
             throw ParseError("Unterminated struct declaration, expected '}'", peek());
             break;
         }
-        if (peek().type == TokenType::FN) {
+        if (peek().type == TokenType::FN || peek().type == TokenType::STATIC) {
+            bool is_static = match({TokenType::STATIC});
             std::shared_ptr<FunctionDeclaration> method =
                 parse_function_declaration();
-            methods.insert({method->name, method});
+            methods.insert({method->name, { method, is_static } });
             continue;
         }
         std::string fname = consume(TokenType::ID).value;
@@ -923,54 +924,6 @@ std::shared_ptr<Expression> Parser::parse_nud() {
                     }
                     return expr;
                 }
-                // Module access
-                std::vector<std::string> module_path;
-                module_path.push_back(name);
-                consume(TokenType::DOUBLE_COLON);
-                std::shared_ptr<TemplateInstantiation> temp_inst = nullptr;
-                while (true) {
-                    std::string part = consume(TokenType::ID).value;
-                    module_path.push_back(part);
-                    // Check if the next token is :: followed by <
-                    // If so, this is a template instantiation, not further module access
-                    if (peek().type == TokenType::DOUBLE_COLON) {
-                        if (peek(1).type == TokenType::LT) {
-                            // This is a template instantiation
-                            break;
-                        }
-                        // Otherwise, continue with module path
-                        if (!match({TokenType::DOUBLE_COLON}))
-                            break;
-                    } else {
-                        break;
-                    }
-                }
-                std::string member_name = module_path.back();
-                module_path.pop_back();
-
-                // Check for template instantiation after module access
-                if (peek().type == TokenType::DOUBLE_COLON && peek(1).type == TokenType::LT) {
-                    // Module-qualified template instantiation: module::template::<Type>
-                    consume(TokenType::DOUBLE_COLON);
-                    consume(TokenType::LT);
-                    std::vector<std::shared_ptr<Type>> type_args;
-                    while (true) {
-                        type_args.push_back(parse_type());
-                        if (peek().type == TokenType::COMMA)
-                            consume(TokenType::COMMA);
-                        else
-                            break;
-                    }
-                    consume(TokenType::GT);
-
-                    expr = std::make_shared<TemplateInstantiation>(module_path, member_name, type_args);
-                    expr->line = t.line;
-                    expr->col = t.column;
-                } else {
-                    expr = std::make_shared<ModuleAccess>(module_path, member_name);
-                    expr->line = t.line;
-                    expr->col = t.column;
-                }
 
             } else {
                 expr = std::make_shared<VarAccess>(name);
@@ -1068,7 +1021,7 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
                 return expr;
             }
             case TokenType::DOUBLE_COLON: {
-                if (peek().type != TokenType::LT) {
+                if (peek().type != TokenType::LT && peek().type != TokenType::ID) {
                     throw ParseError("Unexpected token after '::'", peek().line, peek().column);
                 }
 
