@@ -23,6 +23,7 @@ class DICompileUnit;
 class DIFile;
 class DIScope;
 class DIType;
+class TargetMachine;
 }
 
 struct LoopInfo {
@@ -43,11 +44,6 @@ enum RuntimePanicType {
     // Add others as needed
 };
 
-// CodeGenError itself carries no module reference (unlike TypeCheckError), but the
-// whole-program phases below accumulate errors from many modules before reporting,
-// so we need to know which module's source to point prettyError() at. Wrapping it
-// here (rather than adding a module field to CodeGenError) keeps CodeGenError, which
-// is used elsewhere, untouched.
 struct AttributedCodeGenError {
     CodeGenError error;
     std::shared_ptr<Module> module;
@@ -112,11 +108,9 @@ class LLVMCodegen : public Backend {
         if (options.do_runtime_safety)
             emitBuiltinDeclarations();
     }
-    // Backend interface: generates one module's types, signatures and bodies in one
-    // shot, in phase order. Not used by compiler.cpp's driver (which needs the
-    // phases interleaved whole-program, across all modules, for cross-module
-    // ordering-independence — see generateTypeSkeletons() et al. below) but kept so
-    // the Backend interface stays satisfiable for a single module in isolation.
+
+    Target target() const { return m_options.target; }
+
     void generate(std::shared_ptr<Module> module, class GlobalSymbolTable *symbol_table) override;
     void emitIrToFile(const std::string &filepath) override;
     void emitObjectToFile(const std::string &filepath) override;
@@ -128,13 +122,7 @@ class LLVMCodegen : public Backend {
     void setGlobalSymbols(GlobalSymbolTable *symbol_table) { m_type_table = symbol_table; }
 
     // Whole-program phases, meant to be called once per module, per phase, across
-    // ALL modules before moving to the next phase (see compiler.cpp's driver). This
-    // makes struct/union type resolution order-independent: every struct/union's
-    // opaque LLVM type exists (1a) before any struct field is resolved (1b), and
-    // every struct body is set before any union computes field layout (1c, which
-    // needs full sizedness via DataLayout, not just name existence). Phases 2a/2b
-    // mirror this for functions/variables so an instantiated generic function is
-    // safe to call from any module regardless of processing order.
+    // ALL modules before moving to the next phase
     void generateTypeSkeletons(std::shared_ptr<Module> module);      // 1a: opaque struct/union types
     void generateStructBodies(std::shared_ptr<Module> module);       // 1b: struct fields + setBody
     void generateUnionAndEnumBodies(std::shared_ptr<Module> module); // 1c: union fields + setBody; enums
@@ -179,10 +167,7 @@ class LLVMCodegen : public Backend {
     std::vector<AttributedCodeGenError> m_errors;
 
     // Function bodies and global-variable initializers created during a module's
-    // generateSignatures() (2a) but deferred until generateBodies() (2b), once every
-    // module's signatures exist program-wide. Keyed by raw Module* since modules are
-    // kept alive elsewhere (ModuleResolver / TypeChecker::instantiationModules) for
-    // the duration of codegen.
+    // generateSignatures() (2a) but deferred until generateBodies() (2b)
     struct PendingModuleWork {
         std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> funcBodies;
         std::vector<std::pair<llvm::GlobalVariable *, std::shared_ptr<VariableDeclaration>>> varInits;
@@ -226,6 +211,12 @@ class LLVMCodegen : public Backend {
 
     llvm::Value* addGlobalVarInitializer(llvm::Value* var, std::shared_ptr<Expression> initializer);
 
+    // Initializes the LLVM target machine for the host triple
+    llvm::TargetMachine *createTargetMachine();
+    // Runs LLVM's standard per-module optimization pipeline over m_llvm_module
+    // when m_options.opt_level == Release; a no-op otherwise.
+    void optimizeModule(llvm::TargetMachine *targetMachine);
+
     void emitBuiltinDeclarations();
     void initDebugInfo();
     void finalizeDebugInfo();
@@ -267,12 +258,7 @@ class LLVMCodegen : public Backend {
 
     llvm::Value* generateVariableDeclaration(
         const std::shared_ptr<VariableDeclaration> &varDecl);
-    // Global variable declarations (module scope) go through these instead, split
-    // into a signature step (create the global, no initializer) and a deferred
-    // initializer step, so top-level codegen can run every module's signatures
-    // before any module's initializer/body codegen (see generateSignatures/
-    // generateBodies). generateVariableDeclaration above now only ever runs for
-    // locals inside a function body.
+
     llvm::GlobalVariable *generateGlobalVariableSignature(
         const std::shared_ptr<VariableDeclaration> &varDecl);
 
@@ -282,10 +268,7 @@ class LLVMCodegen : public Backend {
         const std::shared_ptr<UnionDeclaration> &unionDecl);
     void generateEnumDeclaration(
         const std::shared_ptr<EnumDeclaration> &enumDecl);
-    // Split out of generateStructDeclaration/generateUnionDeclaration so the type
-    // phases can register every struct/union's opaque LLVM type across the whole
-    // program (createOpaque*) before resolving any of their fields (resolve*) —
-    // see the class-level comment on generateTypeSkeletons().
+
     void createOpaqueStructType(const std::shared_ptr<StructDeclaration> &structDecl);
     void resolveStructBody(const std::shared_ptr<StructDeclaration> &structDecl);
     void createOpaqueUnionType(const std::shared_ptr<UnionDeclaration> &unionDecl);
@@ -387,10 +370,6 @@ class LLVMCodegen : public Backend {
     void classifyEightbyteRange(llvm::Type *ty, const llvm::DataLayout &DL, uint64_t baseOffset,
                                 uint64_t rangeStart, uint64_t rangeEnd, EightbyteClass &cls);
 
-    // Looks up a StructType's LLVM type in m_structTypes, preferring its
-    // module-qualified name (to disambiguate same-named structs declared in
-    // different modules) and falling back to the bare name for struct
-    // references that were never stamped with qualified_name.
     llvm::StructType *findLLVMStructType(const std::shared_ptr<StructType> &structType) {
         if (!structType->qualified_name.empty()) {
             auto it = m_structTypes.find(structType->qualified_name);

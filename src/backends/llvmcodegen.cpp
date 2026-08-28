@@ -22,7 +22,11 @@
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Analysis/CGSCCPassManager.h>
+#include <llvm/Analysis/LoopAnalysisManager.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/MC/TargetRegistry.h>
+#include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
@@ -526,11 +530,11 @@ void LLVMCodegen::generateBodies(std::shared_ptr<Module> module) {
     prepareForNewModule();
 }
 
-void LLVMCodegen::emitObjectToFile(const std::string &filename) {
+llvm::TargetMachine *LLVMCodegen::createTargetMachine() {
     // REF:
     // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html
 
-    auto targetTriple = llvm::sys::getDefaultTargetTriple();
+    auto targetTriple = m_options.target.targetTriple();
     llvm::InitializeAllTargetInfos();
     llvm::InitializeAllTargets();
     llvm::InitializeAllTargetMCs();
@@ -564,6 +568,35 @@ void LLVMCodegen::emitObjectToFile(const std::string &filename) {
     m_llvm_module->setDataLayout(targetMachine->createDataLayout());
     m_llvm_module->setTargetTriple(Triple);
 
+    return targetMachine;
+}
+
+void LLVMCodegen::optimizeModule(llvm::TargetMachine *targetMachine) {
+    if (m_options.opt_level != Release) {
+        return;
+    }
+
+    llvm::LoopAnalysisManager LAM;
+    llvm::FunctionAnalysisManager FAM;
+    llvm::CGSCCAnalysisManager CGAM;
+    llvm::ModuleAnalysisManager MAM;
+
+    llvm::PassBuilder PB(targetMachine);
+
+    PB.registerModuleAnalyses(MAM);
+    PB.registerCGSCCAnalyses(CGAM);
+    PB.registerFunctionAnalyses(FAM);
+    PB.registerLoopAnalyses(LAM);
+    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+    llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
+    MPM.run(*m_llvm_module, MAM);
+}
+
+void LLVMCodegen::emitObjectToFile(const std::string &filename) {
+    auto targetMachine = createTargetMachine();
+    optimizeModule(targetMachine);
+
     std::error_code ec;
     llvm::raw_fd_ostream dest(filename, ec, llvm::sys::fs::OF_None);
 
@@ -585,6 +618,9 @@ void LLVMCodegen::emitObjectToFile(const std::string &filename) {
 
 void LLVMCodegen::emitIrToFile(const std::string &filepath) {
     if (m_llvm_module) {
+        auto targetMachine = createTargetMachine();
+        optimizeModule(targetMachine);
+
         finalizeDebugInfo();
         std::error_code ec;
         llvm::raw_fd_ostream out(filepath, ec, llvm::sys::fs::OF_None);

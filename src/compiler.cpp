@@ -123,11 +123,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
     auto codegen = std::make_shared<LLVMCodegen>("mainmod", moduleResolver, options);
     codegen->setGlobalSymbols(&typeChecker->globalSymbols());
 
-    // Every real module, plus one synthetic module per declaring module holding its
-    // monomorphized (template-instantiated) declarations (see
-    // TypeChecker::instantiationModule). These aren't threaded through
-    // ModuleResolver's import-graph machinery — the whole point of the phase split
-    // below is that struct/union type resolution no longer depends on it.
+
     std::vector<std::shared_ptr<Module>> allModules;
     for (const auto &[path, mod] : moduleResolver.moduleCache()) {
         allModules.push_back(mod);
@@ -136,13 +132,6 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
         allModules.push_back(synth);
     }
 
-    // Phase 1: whole-program type codegen. Every struct/union's opaque LLVM type is
-    // registered (1a) before any struct field is resolved (1b), and every struct
-    // body is set before any union computes its field layout via DataLayout (1c) —
-    // see the comment on LLVMCodegen::generateTypeSkeletons(). This makes struct
-    // resolution independent of module import order, which is what generic
-    // instantiation can otherwise silently violate (a template's own module may
-    // have no import edge to a type its instantiation ends up needing).
     for (const auto &mod : allModules) codegen->generateTypeSkeletons(mod);
     for (const auto &mod : allModules) codegen->generateStructBodies(mod);
     for (const auto &mod : allModules) codegen->generateUnionAndEnumBodies(mod);
@@ -154,11 +143,6 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
         return nullptr;
     }
 
-    // Phase 2: whole-program function/variable codegen, in import order (plus the
-    // synthetic instantiation modules last) — every module's signatures (2a) exist
-    // before any module's bodies/initializers (2b) run, so a real module calling a
-    // generic function it triggers the instantiation of finds it already declared,
-    // regardless of processing order.
     std::vector<std::string> order = moduleResolver.getBestOrder();
     std::vector<std::shared_ptr<Module>> functionPhaseOrder;
     for (const std::string &path : order) {
