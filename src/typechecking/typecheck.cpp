@@ -2326,7 +2326,7 @@ TypeChecker::inferStaticMethodCall(const std::shared_ptr<StructType> &st, const 
             if (canImplicitCast(at, ftype->params[i])) {
                 mc->args[i] = std::make_shared<TypeCast>(mc->args[i], ftype->params[i], CastType::Normal);
             } else
-                throw TypeCheckError(current_module, mc, "Method call argument " + std::to_string(i) + " type mismatch: expected " + typeName(ftype->params[i + 1]) + " got " + typeName(at));
+                throw TypeCheckError(current_module, mc, "Method call argument " + std::to_string(i) + " type mismatch: expected " + typeName(ftype->params[i]) + " got " + typeName(at));
         }
     }
     mc->inferred_type = resolveType(mc, ftype->ret);
