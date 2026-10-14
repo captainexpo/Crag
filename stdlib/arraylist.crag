@@ -21,6 +21,7 @@ pub struct ArrayList<T> {
 
     fn init(self: *ArrayList<T>) -> i32!ArrayListError {
         self.size = 10;
+        self.cur_elem = 0;
         self.elements = libc.stdlib.malloc(self.size*sizeof(T)) as *T;
         if (self.elements == null){
             return! ArrayListError:ALLOC_ERROR;
@@ -78,6 +79,16 @@ pub struct ArrayList<T> {
             let elem = self.get(i).ok;
             f(elem);
         }
+    }
+
+    fn find(self: *ArrayList<T>, f: fn(T) -> bool) -> T!ArrayListError {
+        for (let i = 0; i < self.cur_elem; i += 1) {
+            let elem = self.get(i).ok;
+            if (f(elem)) {
+                return elem;
+            }
+        }
+        return! ArrayListError:OUT_OF_BOUNDS;
     }
 
     fn tostring(self: *ArrayList<T>) -> str {

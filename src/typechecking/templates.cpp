@@ -249,12 +249,6 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         throw TypeCheckError(current_module, ti, "Unknown template: " + ti->template_name);
     }
 
-    // A template found by name in the calling module's scope (e.g. imported directly by
-    // name rather than accessed through its declaring module) still carries the symbol_id
-    // it was originally declared with, which records its true home module. Re-pin
-    // current_module to that home module before instantiating so the template body's own
-    // free names (helper functions, its module's imports, etc.) resolve against the module
-    // it was written in, not the module that happens to be calling it.
     if (decl->symbol_id != (uint64_t)INT64_MAX) {
         auto *home_entry = symbol_table.lookupModule((uint32_t)extractModuleId(decl->symbol_id));
         if (home_entry && home_entry->second) {
@@ -740,6 +734,19 @@ void replaceGenericTypes(std::shared_ptr<ASTNode> node, const std::unordered_map
     if (auto wb= std::dynamic_pointer_cast<WhenBlock>(node)) {
         if (wb->condition) {
             replaceGenericTypes(wb->condition, generic_map);
+        }
+        return;
+    }
+
+    if (auto ife = std::dynamic_pointer_cast<IfExpression>(node)) {
+        if (ife->condition) {
+            replaceGenericTypes(ife->condition, generic_map);
+        }
+        if (ife->then_branch) {
+            replaceGenericTypes(ife->then_branch, generic_map);
+        }
+        if (ife->else_branch) {
+            replaceGenericTypes(ife->else_branch, generic_map);
         }
         return;
     }

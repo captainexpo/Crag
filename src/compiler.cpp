@@ -162,6 +162,9 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
         std::cerr << "Code generation failed due to previous errors.\n";
         return nullptr;
     }
+
+    codegen->verifyModule();
+
     std::cout << "Compilation succeeded.\n";
     return codegen;
 #else

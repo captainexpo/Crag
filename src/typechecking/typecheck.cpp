@@ -1775,7 +1775,8 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         return inferArrayLiteral(al, expected);
     if (auto tl = std::dynamic_pointer_cast<TupleLiteral>(expr))
         return inferTupleLiteral(tl, expected);
-    // Unknown expression kind
+    if (auto ie = std::dynamic_pointer_cast<IfExpression>(expr))
+        return inferIfExpression(ie, expected);
     throw TypeCheckError(current_module, expr, "Type inference: unhandled expression type: " + expr->str());
 }
 
@@ -1943,6 +1944,45 @@ std::shared_ptr<Type> TypeChecker::inferTupleLiteral(const std::shared_ptr<Tuple
     return tuple_type;
 }
 
+std::shared_ptr<Type> TypeChecker::inferIfExpression(const std::shared_ptr<IfExpression> &if_expr, const std::shared_ptr<Type> &expected) {
+    auto cond_type = inferExpression(if_expr->condition);
+    if (!cond_type || cond_type->kind() != TypeKind::Bool) {
+        throw TypeCheckError(current_module, if_expr->condition, "Condition of if expression must be boolean");
+    }
+    auto then_type = inferExpression(if_expr->then_branch, expected);
+    auto else_type = inferExpression(if_expr->else_branch, expected);
+
+    if (!then_type || !else_type) {
+        throw TypeCheckError(current_module, if_expr, "Failed to infer type of branches in if expression");
+    }
+
+    auto fits = [&](const std::shared_ptr<Type> &from, const std::shared_ptr<Type> &to) {
+        return from->equals(to) || canImplicitCast(from, to);
+    };
+    // Unify to the expected type if both branches fit it, otherwise to the then
+    // branch's type (matching binary ops), so `let x: i64 = if (c) big else small`
+    // widens instead of truncating
+    std::shared_ptr<Type> result_type = nullptr;
+    if (expected && fits(then_type, expected) && fits(else_type, expected)) {
+        result_type = expected;
+    } else if (fits(else_type, then_type)) {
+        result_type = then_type;
+    } else if (fits(then_type, else_type)) {
+        result_type = else_type;
+    }
+
+    if (result_type) {
+        if (!then_type->equals(result_type))
+            if_expr->then_branch = std::make_shared<TypeCast>(if_expr->then_branch, result_type, CastType::Normal);
+        if (!else_type->equals(result_type))
+            if_expr->else_branch = std::make_shared<TypeCast>(if_expr->else_branch, result_type, CastType::Normal);
+        if_expr->inferred_type = result_type;
+        return result_type;
+    } else {
+        throw TypeCheckError(current_module, if_expr, "Branches of if expression have incompatible types: " + typeName(then_type) + " and " + typeName(else_type));
+    }
+}
+
 std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
                                                      const std::shared_ptr<Type> &expected) {
     auto expected_arr = std::dynamic_pointer_cast<ArrayType>(expected);
@@ -2074,13 +2114,6 @@ TypeChecker::inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
     auto rt = resolveType(bin, inferExpression(bin->right));
     if (!lt || !rt)
         throw TypeCheckError(current_module, bin, "Failed to infer types of binary operation operands");
-
-    // str concatenation
-    if (bin->op == "+" && lt->kind() == TypeKind::Str && rt->kind() == TypeKind::Str) {
-        auto s = std::make_shared<StringType>();
-        bin->inferred_type = s;
-        return s;
-    }
 
     // str comparison
     if ((bin->op == "==" || bin->op == "!=") && lt->kind() == TypeKind::Str && rt->kind() == TypeKind::Str) {

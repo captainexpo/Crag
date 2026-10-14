@@ -1,0 +1,30 @@
+//NAME: If Expressions
+//DESC:
+//BEGIN CODE
+
+import "stdlib" as std;
+
+fn min_max(a: i32, b: i32) -> (i32, i32) {
+    return if (a < b) (a, b) else (b, a);
+}
+
+fn main() -> i32 {
+    let x: i32 = 3;
+    let big: i64 = 10000000000;
+    let small = if (x > 1) 1 else 2;
+    std.testing.assert(small == 1, "same-type if expression");
+
+    let wide: i64 = if (x > 5) big else x;
+    std.testing.assert(wide == 3, "narrow branch widened to i64");
+    let wide2: i64 = if (x < 5) big else x;
+    std.testing.assert(wide2 == big, "wide branch selected");
+
+    let mm = min_max(7, 3);
+    std.testing.assert(mm.0 == 3 && mm.1 == 7, "tuple if expression");
+
+    let t = (if (x == 3) (1, 2) else (3, 4)).1;
+    std.testing.assert(t == 2, "field access on if expression");
+    return 0;
+}
+
+//END CODE

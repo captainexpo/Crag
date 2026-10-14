@@ -1,16 +1,24 @@
-import "stdlib" as std;
+// Import the ArrayList symbol from std.arraylist
+import "stdlib" as std { arraylist { ArrayList } };
 
 fn main() -> i32 {
-    let a = std.vector.new::<i64>();
+    // Create an array list of u64s
+    let a = ArrayList.new::<u64>();
 
+    // Append the first two Fibonacci numbers
     a.append(0);
     a.append(1);
-    for (let i: usize = 1; i < 100; i += 1) {
+
+    // Iteratively compute the next 48 Fibonacci numbers and append them to the list
+    for (let i: usize = 1; i < 50; i++) {
         a.append(a.get(i - 1).ok + a.get(i).ok);
     }
-    for (let i: usize = 0; i < a.len(); i += 1){
-        std.cstdio.printf("%lld\n", a.get(i).ok);
+
+    // Print the Fibonacci numbers
+    for (let i: usize = 0; i < a.len(); i++){
+        std.io.println(a.get(i).ok);
     }
+
     return 0;
 }
 

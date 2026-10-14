@@ -257,6 +257,19 @@ std::shared_ptr<ASTNode> Block::instantiate(std::vector<std::shared_ptr<Type>> g
     return c;
 }
 
+
+std::shared_ptr<ASTNode> IfExpression::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
+    auto c = std::make_shared<IfExpression>(
+        std::dynamic_pointer_cast<Expression>(condition->instantiate(gp_replace)),
+        std::dynamic_pointer_cast<Expression>(then_branch->instantiate(gp_replace)),
+        else_branch ? std::dynamic_pointer_cast<Expression>(else_branch->instantiate(gp_replace)) : nullptr);
+    c->line = line;
+    c->col = col;
+    c->inferred_type = inferred_type != nullptr ? inferred_type->instantiate(gp_replace) : nullptr;
+    c->symbol_id = symbol_id;
+    return c;
+}
+
 std::shared_ptr<ASTNode> IfStatement::instantiate(std::vector<std::shared_ptr<Type>> gp_replace) const {
     auto c = std::make_shared<IfStatement>(
         std::dynamic_pointer_cast<Expression>(condition->instantiate(gp_replace)),

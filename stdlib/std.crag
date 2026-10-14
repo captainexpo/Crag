@@ -1,6 +1,6 @@
 pub import "builtin.crag"     as builtin;
 
-pub import "arraylist.crag"   as arraylist;
+pub import "arraylist.crag"   as arraylist { ArrayList };
 pub import "random.crag"      as random;
 pub import "string.crag"      as string;
 pub import "io.crag"          as io;
@@ -16,4 +16,3 @@ pub import "libc/stdlib.crag" as cstdlib;
 pub import "libc/string.crag" as cstring;
 pub import "libc/math.crag"   as cmath;
 pub import "libc/time.crag"   as ctime;
-

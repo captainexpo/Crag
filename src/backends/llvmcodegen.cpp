@@ -952,6 +952,9 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
         return generateTupleLiteral(std::dynamic_pointer_cast<TupleLiteral>(expr),
                                     loadValue);
     }
+    if (IS_INSTANCE(expr, IfExpression)) {
+        return generateIfExpression(std::dynamic_pointer_cast<IfExpression>(expr), loadValue);
+    }
     throw CodeGenError(expr, "Unknown expression type: " + expr->str());
 }
 std::string llvmTypeToString(llvm::Type *ty) {
@@ -1288,11 +1291,11 @@ void LLVMCodegen::finished() {
             m_builder->SetInsertPoint(currentBB);
         }
     }
+    finalizeDebugInfo();
+}
 
-    // Verify the module
+void LLVMCodegen::verifyModule() {
     if (llvm::verifyModule(*m_llvm_module, &llvm::errs())) {
-
-        // open a file
         std::error_code EC;
         llvm::raw_fd_ostream errorFile("llvm_module_error.ll", EC, llvm::sys::fs::OF_None);
         if (EC) {
@@ -1305,9 +1308,8 @@ void LLVMCodegen::finished() {
 
         throw CodeGenError(nullptr, "Module verification failed - invalid IR");
     }
-
-    finalizeDebugInfo();
 }
+
 llvm::Value *LLVMCodegen::addGlobalVarInitializer(llvm::Value *var, std::shared_ptr<Expression> initializer) {
     if (!var || !initializer) {
         return nullptr; // No initializer to add
@@ -2245,6 +2247,52 @@ llvm::Value *LLVMCodegen::generateTupleLiteral(std::shared_ptr<TupleLiteral> tup
         return m_builder->CreateLoad(tupleType, tupleAlloca, "tupleload");
     }
     return tupleAlloca;
+}
+
+llvm::Value* LLVMCodegen::generateIfExpression(std::shared_ptr<IfExpression> ifExpr, bool loadValue) {
+    llvm::Function *function = m_builder->GetInsertBlock()->getParent();
+
+    llvm::BasicBlock *thenBB = llvm::BasicBlock::Create(context, "then", function);
+    llvm::BasicBlock *elseBB = llvm::BasicBlock::Create(context, "else", function);
+    llvm::BasicBlock *mergeBB = llvm::BasicBlock::Create(context, "ifcont", function);
+
+    // Generate condition
+    llvm::Value *condValue = generateExpression(ifExpr->condition);
+    condValue = m_builder->CreateICmpNE(condValue, llvm::ConstantInt::getFalse(context), "ifcond");
+
+    // Create conditional branch
+    m_builder->CreateCondBr(condValue, thenBB, elseBB);
+
+    // Generate 'then' block
+    m_builder->SetInsertPoint(thenBB);
+    llvm::Value *thenValue = generateExpression(ifExpr->then_branch);
+    m_builder->CreateBr(mergeBB);
+    thenBB = m_builder->GetInsertBlock();
+
+    m_builder->SetInsertPoint(elseBB);
+    llvm::Value *elseValue = generateExpression(ifExpr->else_branch);
+    m_builder->CreateBr(mergeBB);
+    elseBB = m_builder->GetInsertBlock();
+
+    m_builder->SetInsertPoint(mergeBB);
+
+    llvm::Type *resultType = getLLVMType(ifExpr->inferred_type, ifExpr);
+    if (resultType->isVoidTy()) {
+        return nullptr;
+    }
+
+    // Create PHI node to select the correct value based on the branch taken
+    llvm::PHINode *phiNode = m_builder->CreatePHI(resultType, 2, "iftmp");
+    phiNode->addIncoming(thenValue, thenBB);
+    phiNode->addIncoming(elseValue, elseBB);
+    if (loadValue) {
+        return phiNode;
+    }
+
+    // Caller wants an address: spill the result to a temporary
+    llvm::Value *tmp = createEntryBlockAlloca(function, resultType, "iftmp.addr");
+    m_builder->CreateStore(phiNode, tmp);
+    return tmp;
 }
 
 llvm::Value *LLVMCodegen::generateArrayLiteral(

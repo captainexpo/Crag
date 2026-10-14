@@ -977,6 +977,20 @@ std::shared_ptr<Expression> Parser::parse_nud() {
             expr->col = t.column;
             return expr;
         }
+        case TokenType::IF: {
+            // If expression if (<cond>) <then> else <else>
+            consume(TokenType::LPAREN);
+            auto cond = parse_expression();
+            consume(TokenType::RPAREN);
+            auto then_branch = parse_expression();
+            std::shared_ptr<Expression> else_branch = nullptr;
+            consume(TokenType::ELSE);
+            else_branch = parse_expression();
+            expr = std::make_shared<IfExpression>(cond, then_branch, else_branch);
+            expr->line = t.line;
+            expr->col = t.column;
+            return expr;
+        }
         default:
             if (PREFIX_OPS.count(t.type)) {
                 constexpr int PREFIX_PRECEDENCE = 41;

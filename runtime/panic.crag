@@ -29,7 +29,7 @@ when @target_os == "macos"{
 
 extern const __stderrp: *File;
 
-pub fn __panic__(msg: *const u8, line: i32, col: i32) -> void @noprefix {
+pub fn __panic__(msg: *const u8, line: i32, col: i32) -> void @noprefix @noreturn {
   const stderr = __stderrp;
   fprintf(stderr, "PANIC: %s at line %d, col %d\n", msg, line, col);
   abort();

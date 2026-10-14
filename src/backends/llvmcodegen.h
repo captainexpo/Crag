@@ -130,6 +130,7 @@ class LLVMCodegen : public Backend {
     void generateBodies(std::shared_ptr<Module> module);             // 2b: function bodies, global var initializers
 
     void finished(); // Call once, after generateBodies() has run for every module
+    void verifyModule();
 
     const std::vector<AttributedCodeGenError> &errors() const {
         return m_errors;
@@ -287,6 +288,8 @@ class LLVMCodegen : public Backend {
 
     llvm::Value *generateArrayLiteral(const std::shared_ptr<ArrayLiteral> &arrayLit, bool loadValue);
     llvm::Value *generateTupleLiteral(std::shared_ptr<TupleLiteral> tupleLit, bool loadValue);
+
+    llvm::Value* generateIfExpression(std::shared_ptr<IfExpression> ifExpr, bool loadValue);
     llvm::Value *generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
                                    bool loadValue = true);
     llvm::Value *generateEnumAccess(const std::shared_ptr<EnumAccess> &enumAccess,

@@ -179,6 +179,7 @@ class TypeChecker {
     std::shared_ptr<Type> inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
                                             const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferTupleLiteral(const std::shared_ptr<TupleLiteral> &tl, const std::shared_ptr<Type> &expected);
+    std::shared_ptr<Type> inferIfExpression(const std::shared_ptr<IfExpression> &if_expr, const std::shared_ptr<Type> &expected);
     std::shared_ptr<Type> inferBinaryOp(const std::shared_ptr<BinaryOperation> &bin,
                                         const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferUnaryOp(const std::shared_ptr<UnaryOperation> &un);

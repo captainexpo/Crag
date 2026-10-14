@@ -102,6 +102,7 @@ struct ASTVisitor {
     virtual void visit(struct SwitchStmt &) {}
     virtual void visit(struct TryExpression &) {}
     virtual void visit(struct CatchExpression &) {}
+    virtual void visit(struct IfExpression &) {}
 };
 
 struct Type {
@@ -149,13 +150,11 @@ enum class NodeKind {
     TypeCast,
     AsmStmt,
     SwitchStmt,
-
     WhenBlock,
-
     FieldAccess,
     ModuleAccess,
     EnumAccess,
-
+    IfExpression,
     OffsetAccess,
     MethodCall,
     Dereference,
@@ -175,7 +174,6 @@ enum class NodeKind {
     TupleLiteral,
     Unknown,
 };
-
 
 struct ASTNode : std::enable_shared_from_this<ASTNode> {
     int line = 0;
@@ -782,7 +780,6 @@ struct UnionType : Type {
     }
 };
 
-
 struct TupleType : Type {
     TypeKind kind() const override { return TypeKind::Tuple; }
     std::vector<std::shared_ptr<Type>> elements;
@@ -891,7 +888,7 @@ struct ExternDeclaration : Declaration {
                       std::optional<std::string> et = std::nullopt) : declaration(std::move(d)), extern_name(std::move(en)), extern_type(std::move(et)) {};
 
     std::string str() const override {
-        return "extern "  + (extern_type == std::nullopt ? "" : *extern_type + " ") + (extern_name == std::nullopt ? "" : *extern_name + " ") + declaration->str();
+        return "extern " + (extern_type == std::nullopt ? "" : *extern_type + " ") + (extern_name == std::nullopt ? "" : *extern_name + " ") + declaration->str();
     }
 
     NodeKind kind() const override { return NodeKind::ExternDeclaration; }
@@ -951,6 +948,26 @@ struct TypeCast : public Expression {
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
+struct IfExpression : public Expression {
+    ExprPtr condition;
+    ExprPtr then_branch;
+    ExprPtr else_branch;
+    IfExpression(ExprPtr c, ExprPtr t, ExprPtr e = nullptr)
+        : condition(std::move(c)), then_branch(std::move(t)),
+          else_branch(std::move(e)) {}
+    std::string str() const override {
+        std::string result = "IfExpression(" + condition->toString() + " then " +
+                             then_branch->toString();
+        if (else_branch)
+            result += " else " + else_branch->toString();
+        result += ")";
+        return result;
+    }
+    NodeKind kind() const override { return NodeKind::IfExpression; }
+    void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
+};
+
 struct TypeExpression : public Expression {
     std::shared_ptr<Type> type;
     TypeExpression(std::shared_ptr<Type> t) : type(std::move(t)) {}
@@ -984,6 +1001,7 @@ struct Dereference : public Expression {
     void accept(ASTVisitor &v) override { v.visit(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
+
 struct FuncCall : public Expression {
     ExprPtr func;
     std::vector<ExprPtr> args;
@@ -1438,14 +1456,14 @@ struct FunctionDeclaration : public TypeDecl {
 
     FunctionDeclaration(std::string n, std::shared_ptr<FunctionType> t,
                         std::vector<std::string> params,
-                                                std::shared_ptr<Statement> b)
+                        std::shared_ptr<Statement> b)
         : type(std::move(t)), param_names(std::move(params)),
-                    body(std::move(b)) {
+          body(std::move(b)) {
         name = std::move(n);
     }
     std::string str() const override {
-                return "FunctionDeclaration(" + type->str() + ", " + name + "){" +
-                             (body ? body->toString() : " ;") + "}";
+        return "FunctionDeclaration(" + type->str() + ", " + name + "){" +
+               (body ? body->toString() : " ;") + "}";
     }
     NodeKind kind() const override { return NodeKind::FunctionDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
@@ -1568,7 +1586,6 @@ struct EnumDeclaration : public TypeDecl {
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
 };
-
 
 struct StructDeclaration : public TypeDecl {
     std::vector<std::pair<std::string, std::shared_ptr<Type>>> fields;
