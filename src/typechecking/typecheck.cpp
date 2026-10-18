@@ -218,6 +218,7 @@ std::optional<SymbolId> TypeChecker::lookupSymbolInScope(const std::string &name
 bool canImplicitCast(const std::shared_ptr<Type> &from, const std::shared_ptr<Type> &to) {
     if (!from || !to)
         return false;
+
     if (from->equals(to))
         return true;
 
@@ -1244,7 +1245,6 @@ void TypeChecker::checkVariableDeclaration(
         }
 
     } catch (const TypeCheckError &e) {
-
         m_errors.emplace_back(e);
         // Even if initializer has type errors, we still want to insert the variable into the symbol table, so we don't return early here
     }
@@ -2704,24 +2704,24 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
 std::shared_ptr<Type>
 TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
                              const std::shared_ptr<Type> &expected) {
-    std::shared_ptr<StructType> st;
-    std::shared_ptr<ArrayType> at;
-    std::shared_ptr<Type> _st;
+    std::shared_ptr<StructType> structType;
+    std::shared_ptr<ArrayType> arrayType;
+    std::shared_ptr<Type> tmp;
     if (auto mod_acc = std::dynamic_pointer_cast<ModuleAccess>(init->struct_type_expr)) {
         auto stype = inferModuleAccess(mod_acc);
-        st = std::dynamic_pointer_cast<StructType>(stype);
-        at = std::dynamic_pointer_cast<ArrayType>(stype);
+        structType = std::dynamic_pointer_cast<StructType>(stype);
+        arrayType = std::dynamic_pointer_cast<ArrayType>(stype);
     } else {
-        _st = inferExpression(init->struct_type_expr);
-        st = std::dynamic_pointer_cast<StructType>(_st);
-        at = std::dynamic_pointer_cast<ArrayType>(_st);
+        tmp = inferExpression(init->struct_type_expr);
+        structType = std::dynamic_pointer_cast<StructType>(tmp);
+        arrayType = std::dynamic_pointer_cast<ArrayType>(tmp);
     }
-    if (!st && !at) {
-        throw TypeCheckError(current_module, init, "Struct initializer with non-struct type: " + typeName(_st));
+    if (!structType && !arrayType) {
+        throw TypeCheckError(current_module, init, "Struct initializer with non-struct type: " + typeName(tmp));
     }
 
-    if (at) {
-        auto ptr_field_type = std::make_shared<PointerType>(resolveType(init, at->element_type));
+    if (arrayType) {
+        auto ptr_field_type = std::make_shared<PointerType>(resolveType(init, arrayType->element_type));
         auto len_field_type = std::make_shared<USize>();
 
         auto ptr_it = init->field_values.find("ptr");
@@ -2756,17 +2756,17 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
         if (all_are_const) {
             init->constant_evaluated = true;
         }
-        init->inferred_type = at;
-        return at;
+        init->inferred_type = arrayType;
+        return arrayType;
     }
 
     // Global variable initializers can be checked before struct declarations are finalized,
-    // which leaves `st` as a placeholder with no fields. Hydrate it from the declaration so
+    // which leaves st as a placeholder with no fields. Hydrate it from the declaration so
     // field lookup and casts use the actual struct layout.
-    if ((!st->complete || st->fields.empty()) && current_module && current_module->ast) {
+    if ((!structType->complete || structType->fields.empty()) && current_module && current_module->ast) {
         for (const auto &decl : current_module->ast->declarations) {
             auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl);
-            if (!sd || sd->name != st->name) {
+            if (!sd || sd->name != structType->name) {
                 continue;
             }
 
@@ -2777,9 +2777,9 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
                 fields.emplace_back(field.first, resolved_field_type);
             }
 
-            st->fields = std::move(fields);
-            st->methods = sd->methods;
-            st->complete = true;
+            structType->fields = std::move(fields);
+            structType->methods = sd->methods;
+            structType->complete = true;
             break;
         }
     }
@@ -2792,30 +2792,30 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
             m_const_eval.clearErrors();
         }
 
-        auto fieldTypeRaw = st->getFieldType(p.first);
+        auto fieldTypeRaw = structType->getFieldType(p.first);
         if (!fieldTypeRaw) {
             throw TypeCheckError(current_module, init,
                                  "Unknown field '" + p.first + "' in struct initializer for " +
-                                     st->name);
+                                     structType->name);
         }
 
         auto fieldType = resolveType(p.second, fieldTypeRaw);
         auto typeActual = inferExpression(p.second, fieldType);
         if (!typeActual)
-            throw TypeCheckError(current_module, init, "Failed to infer type of struct " + st->name + " field " + p.first + " initializer");
+            throw TypeCheckError(current_module, init, "Failed to infer type of struct " + structType->name + " field " + p.first + " initializer");
         if (!typeActual->equals(fieldType)) {
             if (canImplicitCast(typeActual, fieldType)) {
                 p.second = std::make_shared<TypeCast>(p.second, fieldType, CastType::Normal);
             } else {
-                throw TypeCheckError(current_module, init, "Struct " + st->name + " field " + p.first + " type mismatch: expected " + typeName(fieldType) + " got " + typeName(typeActual));
+                throw TypeCheckError(current_module, init, "Struct " + structType->name + " field " + p.first + " type mismatch: expected " + typeName(fieldType) + " got " + typeName(typeActual));
             }
         }
     }
     if (all_are_const) {
         init->constant_evaluated = true;
     }
-    init->inferred_type = st; // HACK: Fix error when struct type is module access
-    return st;
+    init->inferred_type = structType; // HACK: Fix error when struct type is module access
+    return structType;
 }
 
 ASTNodePtr TypeChecker::lookupConstVariableInModulePath(const std::vector<std::string> &module_path, const std::string &var_name) {

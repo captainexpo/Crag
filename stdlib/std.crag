@@ -10,6 +10,7 @@ pub import "math.crag"        as math;
 pub import "fs/fs.crag"       as fs;
 pub import "heap.crag"        as heap;
 pub import "testing.crag"     as testing;
+pub import "process.crag"      as process;
 
 pub import "libc/stdio.crag"  as cstdio;
 pub import "libc/stdlib.crag" as cstdlib;

@@ -1,4 +1,5 @@
 extern fn malloc(size: usize) -> *u8;
+extern fn free(ptr: *void) -> void;
 
 pub fn alloc_arr<T>(len: usize) -> []T {
     return slice(malloc(len * sizeof(T)) as *T, len);
@@ -6,6 +7,14 @@ pub fn alloc_arr<T>(len: usize) -> []T {
 
 pub fn alloc<T>() -> *T {
     return malloc(sizeof(T)) as *T;
+}
+
+pub fn free_arr<T>(arr: []T) {
+    free(arr.ptr as *void);
+}
+
+pub fn free<T>(ptr: *T) {
+    free(ptr as *void);
 }
 
 when @current_mod == @main_mod {

@@ -1,0 +1,20 @@
+import "heap.crag" as heap;
+
+extern let __argumentsp: **u8;
+extern let __argument_count: usize;
+
+extern fn strlen(s: *const u8) -> usize;
+
+pub fn args_alloc() -> []str {
+    let args_str: []str = heap.alloc_arr::<str>(__argument_count);
+    for (let i: usize = 0; i < __argument_count; i++) {
+        let arg_ptr: *u8 = __argumentsp[i];
+        let arg_len: usize = strlen(arg_ptr);
+        args_str[i] = newstr(arg_ptr, arg_len);
+    }
+    return args_str;
+}
+
+pub fn args_free(args: []str) {
+    heap.free_arr(args);
+}

@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
+#include <llvm/Analysis/CGSCCPassManager.h>
+#include <llvm/Analysis/LoopAnalysisManager.h>
 #include <llvm/BinaryFormat/Dwarf.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
@@ -19,12 +21,10 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
 #include <llvm/IR/Verifier.h>
-#include <llvm/Analysis/CGSCCPassManager.h>
-#include <llvm/Analysis/LoopAnalysisManager.h>
-#include <llvm/IR/PassManager.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/CommandLine.h>
@@ -1525,21 +1525,32 @@ llvm::GlobalVariable *LLVMCodegen::generateGlobalVariableSignature(
     bool isExtern = m_current_module && m_current_module->externLinkage.count(varDecl->name);
 
     if (isExtern) {
-        // Extern global variable declaration
         // Don't canonicalize name due to extern linkage
         llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
+
+        // An extern global with an initializer is a definition (like an extern fn with a body);
+        // without one it's just a declaration of a symbol defined elsewhere
+        llvm::Constant *initVal = nullptr;
+        if (varDecl->initializer) {
+            initVal = getConstantLiteralValue(varDecl->initializer);
+            if (!initVal)
+                throw CodeGenError(varDecl, "Extern global variable initializer must be a constant: " + varDecl->name);
+        }
+
         llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
             *m_llvm_module, varType, varDecl->is_const,
-            llvm::GlobalValue::ExternalLinkage, nullptr,
+            llvm::GlobalValue::ExternalLinkage, initVal,
             varDecl->name);
         CUR_SCOPE.set(varDecl->name, gVar, varType, varDecl->var_type);
         setSymValue(varDecl->symbol_id, gVar, varType, varDecl->var_type);
         return gVar;
     }
+
     llvm::Type *varType = getLLVMType(varDecl->var_type, varDecl);
     llvm::Constant *initVal = nullptr;
+
     bool has_const_init = false;
-    if (varDecl->initializer->constant_evaluated) {
+    if (varDecl->initializer != nullptr && varDecl->initializer->constant_evaluated) {
         auto ret = getConstantLiteralValue(varDecl->initializer);
         if (ret) {
             initVal = ret;
@@ -1552,7 +1563,7 @@ llvm::GlobalVariable *LLVMCodegen::generateGlobalVariableSignature(
     }
 
     llvm::GlobalVariable *gVar = new llvm::GlobalVariable(
-        *m_llvm_module, varType, false,
+        *m_llvm_module, varType, varDecl->is_const,
         llvm::GlobalValue::ExternalLinkage, initVal, canonicalizeNonexternName(varDecl->name));
     CUR_SCOPE.set(canonicalizeNonexternName(varDecl->name), gVar, varType, varDecl->var_type);
 
@@ -1691,9 +1702,7 @@ void LLVMCodegen::resolveUnionBody(
     const std::shared_ptr<UnionDeclaration> &unionDecl) {
     llvm::StructType *llvmUnion = m_unionTypes[unionDecl->name];
 
-    // Unions in LLVM are represented as a struct with a single field
-    // that is the size of the largest field in the union.
-    // We'll use an array of bytes (i8) to represent the union storage.
+    // Unions in LLVM are represented as a struct with a single field that is the size of the largest field in the union.
 
     size_t maxSize = 0;
     size_t maxAlign = 1;
@@ -2249,7 +2258,7 @@ llvm::Value *LLVMCodegen::generateTupleLiteral(std::shared_ptr<TupleLiteral> tup
     return tupleAlloca;
 }
 
-llvm::Value* LLVMCodegen::generateIfExpression(std::shared_ptr<IfExpression> ifExpr, bool loadValue) {
+llvm::Value *LLVMCodegen::generateIfExpression(std::shared_ptr<IfExpression> ifExpr, bool loadValue) {
     llvm::Function *function = m_builder->GetInsertBlock()->getParent();
 
     llvm::BasicBlock *thenBB = llvm::BasicBlock::Create(context, "then", function);

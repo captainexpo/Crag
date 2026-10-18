@@ -3,7 +3,6 @@
 // #include "src/module_resolver.h"
 // #include "src/typechecking/typecheck.h"
 
-#include <ios>
 #ifndef AST_H
 #define AST_H
 
@@ -441,7 +440,7 @@ struct PointerType : Type {
         : base(std::move(b)), pointer_const(pc) {}
 
     std::string str() const override {
-        return (pointer_const ? "const *" : "*") + base->str();
+        return (pointer_const ? "*const " : "*") + base->str();
     }
 
     bool equals(const std::shared_ptr<Type> &other) const override {
@@ -450,6 +449,7 @@ struct PointerType : Type {
             return false;
         return pointer_const == o->pointer_const && base->equals(o->base);
     }
+
     std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
         return std::make_shared<PointerType>(base->instantiate(gp_replace), pointer_const);
     }
