@@ -46,9 +46,13 @@ static DiagnosticSink toDiagnostics(const std::vector<AttributedCodeGenError> &e
 void initializeLLVM() {
     static bool initialized = false;
     if (!initialized) {
-        llvm::InitializeAllTargets();
-        llvm::InitializeAllAsmPrinters();
-        llvm::InitializeAllAsmParsers();
+        // llvm::InitializeAllTargets();
+        // llvm::InitializeAllAsmPrinters();
+        // llvm::InitializeAllAsmParsers();
+        // Initialize only the targets that we need for now
+        llvm::InitializeNativeTargetAsmParser();
+        llvm::InitializeNativeTargetAsmPrinter();
+        llvm::InitializeNativeTarget();
         initialized = true;
     }
 }

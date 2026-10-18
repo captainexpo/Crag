@@ -18,6 +18,7 @@
 
 # Build directories
 /build/
+/build-static/
 /out/
 /bin/
 /dist/

@@ -535,11 +535,18 @@ llvm::TargetMachine *LLVMCodegen::createTargetMachine() {
     // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl08.html
 
     auto targetTriple = m_options.target.targetTriple();
-    llvm::InitializeAllTargetInfos();
-    llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetMCs();
-    llvm::InitializeAllAsmParsers();
-    llvm::InitializeAllAsmPrinters();
+
+    LLVMInitializeX86TargetInfo();
+    LLVMInitializeX86Target();
+    LLVMInitializeX86TargetMC();
+    LLVMInitializeX86AsmParser();
+    LLVMInitializeX86AsmPrinter();
+
+    LLVMInitializeAArch64TargetInfo();
+    LLVMInitializeAArch64Target();
+    LLVMInitializeAArch64TargetMC();
+    LLVMInitializeAArch64AsmParser();
+    LLVMInitializeAArch64AsmPrinter();
 
     std::string errorStr;
     auto Target = llvm::TargetRegistry::lookupTarget(targetTriple, errorStr);

@@ -263,7 +263,7 @@ To build and run a terminal with the compiler in a Docker container:
 
 ```bash
 docker build -t crag .
-docker run --rm -it -v $(pwd):/work --entrypoint bash crag
+docker run --rm -it -v $(pwd):/work:Z --entrypoint bash crag
 ```
 
 Instead of docker, you can also use `podman` if you prefer.
@@ -278,7 +278,7 @@ This example will build a simple Crag program that runs the game `pong`. The sou
 cd examples/pong
 
 # make sure raylib is installed
-# on fedora: sudo dnf install raylib raylib-devel (this is what the Dockerfile does)
+# on fedora: sudo dnf install raylib raylib-devel (this is the linux distribution the Dockerfile uses)
 
 # build the program, it requires linking against libraylib for graphics and libmath
 crag ./main.crag -o pong -ORelease -lraylib -lm

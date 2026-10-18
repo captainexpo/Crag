@@ -23,6 +23,8 @@ add_executable(crag ${SRC_FILES})
 # Include the headers
 target_include_directories(crag PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+option(CRAG_STATIC "Link crag fully statically (needs static LLVM, glibc, libstdc++, zlib, zstd and libxml2)" OFF)
+
 if(NOT NO_LLVM)
     # LLVM compiler flags
     execute_process(
@@ -36,8 +38,16 @@ if(NOT NO_LLVM)
     target_compile_options(crag PRIVATE ${LLVM_CXXFLAGS_LIST})
 
     # LLVM linker flags for components
+    if(CRAG_STATIC)
+        set(LLVM_LINK_ARGS --link-static --ldflags --libs core support irreader passes x86 aarch64 --system-libs)
+        target_compile_options(crag PRIVATE -ffunction-sections -fdata-sections)
+        target_link_options(crag PRIVATE -static -Wl,--gc-sections)
+    else()
+        set(LLVM_LINK_ARGS --ldflags --libs core support irreader)
+    endif()
+
     execute_process(
-        COMMAND llvm-config --ldflags --libs core support irreader
+        COMMAND llvm-config ${LLVM_LINK_ARGS}
         OUTPUT_VARIABLE LLVM_LDFLAGS
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
