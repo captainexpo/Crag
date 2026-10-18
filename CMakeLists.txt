@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.30)
 
-project(Comp LANGUAGES CXX C)
+project(Comp VERSION 0.1.0 LANGUAGES CXX C)
 
 include(FetchContent)
 
@@ -107,6 +107,19 @@ set_source_files_properties(lib/runtime.o PROPERTIES GENERATED TRUE)
 add_library(runtime STATIC lib/runtime.o)
 set_property(TARGET runtime PROPERTY LINKER_LANGUAGE C)
 set_target_properties(runtime PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+
+# Packaging
+install(TARGETS crag RUNTIME DESTINATION .)
+install(TARGETS runtime ARCHIVE DESTINATION lib)
+install(DIRECTORY stdlib/ DESTINATION stdlib)
+
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" CRAG_PACKAGE_OS)
+set(CPACK_GENERATOR "ZIP")
+set(CPACK_PACKAGE_FILE_NAME "crag-v${PROJECT_VERSION}-${CMAKE_SYSTEM_PROCESSOR}-${CRAG_PACKAGE_OS}")
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+set(CPACK_PACKAGING_INSTALL_PREFIX "/crag-v${PROJECT_VERSION}")
+set(CPACK_STRIP_FILES ON)
+include(CPack)
 
 message(STATUS "CMAKE_CXX_FLAGS = ${CMAKE_CXX_FLAGS}")
 message(STATUS "CMAKE_CXX_FLAGS_DEBUG = ${CMAKE_CXX_FLAGS_DEBUG}")

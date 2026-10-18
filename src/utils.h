@@ -3,6 +3,8 @@
 #define UTILS_H
 
 #include <cstring>
+#include <filesystem>
+#include <optional>
 #include <string>
 //
 // #ifndef NDEBUG
@@ -25,6 +27,9 @@ void prettyError(int line, int col, const std::string &msg, const std::string &s
 void fail(const std::string &message);
 void warn(const std::string &message);
 void info(const std::string &message);
+
+// Directory containing the running crag executable
+std::optional<std::filesystem::path> executableDir();
 
 template <typename T_in, typename T_out>
 T_out bitcast(const T_in &in) {

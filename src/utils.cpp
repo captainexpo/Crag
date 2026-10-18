@@ -4,6 +4,10 @@
 #include <iostream>
 #include <sstream>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 void fail(const std::string &message) {
     std::cerr << "Fatal Error: " << message << "\n";
     exit(1);
@@ -15,6 +19,26 @@ void warn(const std::string &message) {
 
 void info(const std::string &message) {
     std::cout << "Info: " << message << "\n";
+}
+
+std::optional<std::filesystem::path> executableDir() {
+    std::error_code ec;
+#if defined(__APPLE__)
+    char execPath[1024];
+    uint32_t size = sizeof(execPath);
+    if (_NSGetExecutablePath(execPath, &size) != 0)
+        return std::nullopt;
+    auto path = std::filesystem::canonical(execPath, ec);
+#elif defined(__linux__)
+    auto path = std::filesystem::canonical("/proc/self/exe", ec);
+#else
+    return std::nullopt;
+#endif
+#if defined(__APPLE__) || defined(__linux__)
+    if (ec)
+        return std::nullopt;
+    return path.parent_path();
+#endif
 }
 
 std::string colorCodes[] = {

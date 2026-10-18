@@ -399,6 +399,15 @@ class ModuleResolver {
             }
         }
 
+        // Check next to the executable (unpacked release: crag, lib/, stdlib/)
+        if (auto exe_dir = executableDir()) {
+            std::filesystem::path stdlib_path = *exe_dir / "stdlib" / "std.crag";
+            if (std::filesystem::exists(stdlib_path)) {
+                info("Found stdlib next to executable: " + stdlib_path.string());
+                return stdlib_path.parent_path();
+            }
+        }
+
         // Otherwise, check for common install dir
 #if defined(__APPLE__)
         std::filesystem::path common_paths[] = {
@@ -428,7 +437,7 @@ class ModuleResolver {
                 return stdlib_path.parent_path();
             }
         }
-        warn("Could not find stdlib in common paths. Checked /usr/local/lib/crag/stdlib, /usr/lib/crag/stdlib, and ~/.local/lib/crag/stdlib");
+        warn("Could not find stdlib in common paths. Checked <crag dir>/stdlib, /usr/local/lib/crag/stdlib, /usr/lib/crag/stdlib, and ~/.local/lib/crag/stdlib");
         return std::nullopt;
     }
 

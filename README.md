@@ -271,7 +271,7 @@ Instead of docker, you can also use `podman` if you prefer.
 
 ## Building a Crag Program
 
-This example will build a simple Crag program that runs the game `pong`. The souce code is located in the `examples/pong` directory.
+This example will build a simple Crag program that runs the game `pong`. The source code is located in the `examples/pong` directory.
 
 ```bash
 # navigate to the example
