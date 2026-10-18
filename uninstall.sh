@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_NAME="Crag"
-LIB_NAME="crag"
+LIB_NAME="Crag"
 DATA_DIR="$HOME/.local/share/${LIB_NAME}"
 MANIFEST="${DATA_DIR}/manifest"
 PATH_MARKER="# added by ${REPO_NAME} installer"

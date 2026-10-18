@@ -1,0 +1,7 @@
+build/
+.cache/
+.git/
+.vscode/
+compile_commands.json
+tests/__pycache__/
+**/*.o

@@ -1,7 +1,7 @@
 # Crag
 
 > [!WARNING]
-> The Crag compiler is merely a recreational toy language and is not suitable for production code. Expect frequent breaking changes, incomplete features, spaghetti code, and informal commits. Contributions and feedback are welcome!
+> The Crag compiler is merely a recreational toy language and is not suitable for production code. Contributions and feedback are welcome!
 
 Crag is a systems programming language that is designed to be simple, similarly to C, but with more modern syntax and features, similar to Zig and Rust.
 
@@ -43,11 +43,9 @@ There are also some additional flags that can be used to control the compilation
 
 ## Syntax Examples
 
-A full syntax reference lives in [`docs/SYNTAX.md`](docs/SYNTAX.md).
-
 ### Hello World
 
-```crag
+```zig
 import "stdlib" as std;
 
 fn main() -> i32 {
@@ -58,7 +56,7 @@ fn main() -> i32 {
 
 ### Fibonacci
 
-```crag
+```zig
 fn fib(n: i32) -> i32 {
     let a: i32 = 0;
     let b: i32 = 1;
@@ -74,9 +72,9 @@ fn fib(n: i32) -> i32 {
 
 ### Modules and imports
 
-Module members are accessed with `.` (the old `::` form for module access has been removed). An import can also bring specific symbols or sub-modules directly into scope with a `{ ... }` list, and these lists can be nested:
+Module members are accessed with `.`. An import can also bring specific symbols or sub-modules directly into scope with a `{ ... }` list, and these lists can be nested:
 
-```crag
+```zig
 import "stdlib" as std { arraylist { ArrayList } };
 
 fn main() -> i32 {
@@ -93,7 +91,7 @@ fn main() -> i32 {
 
 Bare `Foo<T>` is only allowed where a type is expected. In an expression (a struct literal, a function call, a static method call), type arguments use the `::<T>` turbofish:
 
-```crag
+```zig
 struct Vec2<T> {
     x: T,
     y: T,
@@ -114,7 +112,7 @@ fn main() -> i32 {
 
 Methods take an explicit `self` parameter. Functions marked `static` don't take `self` and are called on the type: `Type.fn()`. On a generic struct, a static method declares its own type parameters.
 
-```crag
+```zig
 struct Node<T> {
     value: T,
     next: *Node<T>,
@@ -144,7 +142,7 @@ fn main() -> i32 {
 
 `T!E` is either a `T` or an error `E`. `return!` returns an error, `try` passes an error up to the caller, and `catch` supplies a fallback value. `|err|` captures the error value.
 
-```crag
+```zig
 enum MathError(i32) { DivisionByZero = 0 }
 
 fn divide(a: i32, b: i32) -> i32!MathError {
@@ -171,7 +169,7 @@ An error union can also be inspected by hand with `.is_err`, `.ok` and `.err`.
 
 ### Tuples and `if` expressions
 
-```crag
+```zig
 fn min_max(a: i32, b: i32) -> (i32, i32) {
     return if (a < b) (a, b) else (b, a);
 }
@@ -190,7 +188,7 @@ An `if` expression always needs an `else` branch.
 
 `str` is a native string type that carries its length. It supports `.len`, indexing and `==`, and it can be cast to `*const u8` to pass to C functions.
 
-```crag
+```zig
 import "stdlib" as std;
 
 fn is_even(x: i64) -> bool {
@@ -211,12 +209,35 @@ fn main() -> i32 {
 }
 ```
 
+## Architecture
+
+### Lexer/Tokenizer
+
+The lexer reads the source code and produces a list of tokens. It handles whitespace, comments, identifiers, keywords, literals, and operators. It can be found in `src/lexer.h`.
+
+### Parser
+
+The parser takes the list of tokens from the lexer and produces an abstract syntax tree (AST). It uses a recursive descent parsing approach, with operator precedence parsing for expressions. The parser can be found in `src/parser.h` and the ast node structs can be found in `src/ast/ast.h`.
+
+### Module resolver
+
+The module resolver runs the lexer and parser and resolves module imports and exports. It also handles the Crag standard library and any user-defined modules. The module resolver can be found in `src/module_resolver.h`
+
+### Semantic Analysis
+
+The semantic analysis phase takes the AST and performs type checking, scope resolution, and other semantic checks. It also builds symbol tables and resolves/instantiates types for generic functions and structs. The semantic analysis can be found in `src/typechecking/typechecker.h` (the typechecker/sema core), `src/typechecking/tables.h` (symbol tables), `src/typechecking/templates.cpp` (template/generic instantiation logic).
+
+### Code Generation
+
+The code generation phase takes the semantically analyzed AST and generates LLVM IR code. It uses the LLVM IR Builder C++ API to create modules, functions, basic blocks, and instructions. The code generation can be found in `src/backends/llvmcodegen.h`.
+
 ## Building the Compiler
 
 ### Requirements
 
-- CMake 3.10+
-- A C++20 compiler
+- CMake 3.30+
+- A C++26 compiler
+- LLVM 21+
 - LLVM development tools and libraries available through `llvm-config`
   - `llvm-config --cxxflags`
   - `llvm-config --ldflags --libs core support irreader`
@@ -236,7 +257,39 @@ Build outputs:
 - Compiler executable: `build/crag`
 - Runtime static library: `build/lib/libruntime.a`
 
+Alternatively, you can use the provided `Dockerfile` to build the compiler in a containerized environment.
+
+To build and run a terminal with the compiler in a Docker container:
+
+```bash
+docker build -t crag .
+docker run --rm -it -v $(pwd):/work --entrypoint bash crag
+```
+
+Instead of docker, you can also use `podman` if you prefer.
+
+
+## Building a Crag Program
+
+This example will build a simple Crag program that runs the game `pong`. The souce code is located in the `examples/pong` directory.
+
+```bash
+# navigate to the example
+cd examples/pong
+
+# make sure raylib is installed
+# on fedora: sudo dnf install raylib raylib-devel (this is what the Dockerfile does)
+
+# build the program, it requires linking against libraylib for graphics and libmath
+crag ./main.crag -o pong -ORelease -lraylib -lm
+
+# run the program
+./pong
+```
+
 ### Testing
+
+The test suite is located in the `tests` directory. It contains a variety of test cases in a custom format outlined in `tests/FORMAT.md`. The test suite is run by a Python script that compiles and runs each test case, checking the output against the expected output.
 
 To run the test suite, ensure you have Python 3 installed. From the repository root:
 

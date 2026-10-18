@@ -1,9 +1,9 @@
 #include "backend.h"
-#include "utils.h"
 #include "compiler.h"
+#include "utils.h"
 
-#include <argparse/argparse.hpp>
 #include <filesystem>
+
 #include <iostream>
 #include <memory>
 
@@ -236,11 +236,10 @@ Arguments parseArguments(int argc, char **argv) {
                 printHelp(argc, argv);
                 exit(1);
             }
-        }  else if (arg == "--nocstdlib") {
+        } else if (arg == "--nocstdlib") {
             // Pass --nostdlib to the backend to avoid linking against the C standard library (assumes the backend is clang or gcc)
             args.backend_args.push_back("-nostdlib");
-        }
-        else if (arg[0] == '-') {
+        } else if (arg[0] == '-') {
             if (arg[1] == 'l' || arg[1] == 'L' || arg[1] == 'W') {
                 args.backend_args.push_back(arg);
             } else {
@@ -276,6 +275,7 @@ int main(int argc, char **argv) {
     options.opt_level = args.opt;
     options.do_runtime_safety = !args.unsafe;
     options.target = Target(args.os, args.arch);
+    options.stdlib_path = args.stdlib_path;
 
     auto inputFilepath = args.input;
     auto outputFilepath = args.output;

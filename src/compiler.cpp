@@ -82,7 +82,7 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
 
     auto path = std::filesystem::path(raw_filepath);
     path = std::filesystem::absolute(path);
-    auto moduleResolver = ModuleResolver(path.parent_path());
+    auto moduleResolver = ModuleResolver(path.parent_path(), options);
     auto mod = moduleResolver.loadRoot(path.filename().string());
 
 #ifdef DBG_PRINT_AST

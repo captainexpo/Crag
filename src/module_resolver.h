@@ -1,4 +1,5 @@
 #pragma once
+#include "src/backend.h"
 #include <optional>
 #ifndef MODULE_RESOLVER_H
 #define MODULE_RESOLVER_H
@@ -47,8 +48,8 @@ inline std::string canonicalModuleName(const std::filesystem::path &abs_path) {
 
 class ModuleResolver {
   public:
-    explicit ModuleResolver(std::string base_path)
-        : m_base_path(std::move(base_path)) {
+    explicit ModuleResolver(std::string base_path, CompilerOptions options)
+        : m_base_path(std::move(base_path)), m_options(std::move(options)) {
         initializeBuiltinShortcuts();
         loadUserShortcuts();
     }
@@ -265,6 +266,8 @@ class ModuleResolver {
     std::unordered_map<std::string, std::filesystem::path> m_shortcut_base_dirs; // Base directory for each shortcut
     uint32_t m_next_module_id = 0;
 
+    CompilerOptions m_options;
+
     void initializeBuiltinShortcuts() {
         m_shortcuts["stdlib"] = "<STDLIB>/std.crag";
         m_shortcuts["string"] = "<STDLIB>/string.crag";
@@ -367,6 +370,14 @@ class ModuleResolver {
             if (std::filesystem::exists(stdlib_path)) {
                 info("Found stdlib at CRAGSTD path: " + stdlib_path.string());
                 return stdlib_path.parent_path();
+            }
+        }
+
+        if (m_options.stdlib_path != "") {
+            std::filesystem::path stdlib_path = m_options.stdlib_path;
+            if (std::filesystem::exists(stdlib_path / "std.crag")) {
+                info("Found stdlib at specified path: " + stdlib_path.string());
+                return stdlib_path;
             }
         }
 

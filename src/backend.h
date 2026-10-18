@@ -165,6 +165,7 @@ typedef struct {
     bool dump_ast_bsa;
     bool dump_ast_asa;
     Target target;
+    std::string stdlib_path;
 } CompilerOptions;
 
 class Module;
