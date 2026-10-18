@@ -7,6 +7,7 @@ REPO_NAME="Crag"
 BINARY_NAME="crag"
 BUILD_CMD="cmake --build build"
 BUILT_BINARY_PATH="build/${BINARY_NAME}"
+BUILT_RUNTIME_PATH="build/lib/libruntime.a"
 INSTALL_DIR="${CRAG_INSTALL_DIR:-$HOME/.local/bin}"
 DATA_DIR="$HOME/.local/share/${REPO_NAME}"
 MANIFEST="${DATA_DIR}/manifest"
@@ -40,11 +41,16 @@ eval "$BUILD_CMD" || error "Build failed"
 
 [ -f "$BUILT_BINARY_PATH" ] || error "Expected binary not found at ${BUILT_BINARY_PATH} — update BUILT_BINARY_PATH in this script"
 
+[ -f "$BUILT_RUNTIME_PATH" ] || error "Expected runtime library not found at ${BUILT_RUNTIME_PATH}"
+
 # Install
-mkdir -p "$INSTALL_DIR" "$DATA_DIR"
-cp "$BUILT_BINARY_PATH" "${INSTALL_DIR}/${BINARY_NAME}"
-chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
-info "Installed binary to ${INSTALL_DIR}/${BINARY_NAME}"
+# crag finds lib/libruntime.a and stdlib/ next to its own (symlink-resolved) executable,
+# so install the whole layout into LIB_DIR and symlink the binary onto PATH.
+mkdir -p "$INSTALL_DIR" "$DATA_DIR" "${LIB_DIR}/lib"
+cp "$BUILT_BINARY_PATH" "${LIB_DIR}/${BINARY_NAME}"
+chmod +x "${LIB_DIR}/${BINARY_NAME}"
+cp "$BUILT_RUNTIME_PATH" "${LIB_DIR}/lib/libruntime.a"
+info "Installed compiler and runtime to ${LIB_DIR}"
 
 if [ -d "$STDLIB_SRC" ]; then
   rm -rf "$STDLIB_DIR"
@@ -56,10 +62,15 @@ else
   STDLIB_DIR=""
 fi
 
+# Replaces a binary copied there by older versions of this script
+ln -sf "${LIB_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
+info "Linked ${INSTALL_DIR}/${BINARY_NAME} -> ${LIB_DIR}/${BINARY_NAME}"
+
 # Record to manifest
 {
   echo "binary=${INSTALL_DIR}/${BINARY_NAME}"
   echo "data_dir=${DATA_DIR}"
+  echo "lib_dir=${LIB_DIR}"
   echo "stdlib_dir=${STDLIB_DIR}"
 } > "$MANIFEST"
 

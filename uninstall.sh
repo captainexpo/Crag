@@ -19,18 +19,24 @@ while IFS='=' read -r key value; do
 done < "$MANIFEST"
 
 BINARY="${INFO[binary]:-}"
+LIB_DIR="${INFO[lib_dir]:-}"
 STDLIB_DIR="${INFO[stdlib_dir]:-}"
 PATH_RC="${INFO[path_rc]:-}"
 
-read -rp "This will remove ${BINARY:-the installed binary}, ${STDLIB_DIR:-no stdlib}, and ${DATA_DIR}. Continue? [y/N] " confirm
+read -rp "This will remove ${BINARY:-the installed binary}, ${LIB_DIR:-${STDLIB_DIR:-no stdlib}}, and ${DATA_DIR}. Continue? [y/N] " confirm
 [[ "$confirm" =~ ^[Yy]$ ]] || { info "Aborted."; exit 0; }
 
-if [ -n "$BINARY" ] && [ -f "$BINARY" ]; then
+# -L as well as -e: the binary is a symlink, possibly dangling
+if [ -n "$BINARY" ] && { [ -e "$BINARY" ] || [ -L "$BINARY" ]; }; then
   rm -f "$BINARY"
   info "Removed ${BINARY}"
 fi
 
-if [ -n "$STDLIB_DIR" ] && [ -d "$STDLIB_DIR" ]; then
+# Older installs recorded only stdlib_dir; newer ones put everything under lib_dir
+if [ -n "$LIB_DIR" ] && [ -d "$LIB_DIR" ]; then
+  rm -rf "$LIB_DIR"
+  info "Removed ${LIB_DIR}"
+elif [ -n "$STDLIB_DIR" ] && [ -d "$STDLIB_DIR" ]; then
   rm -rf "$STDLIB_DIR"
   info "Removed ${STDLIB_DIR}"
 fi
