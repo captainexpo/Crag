@@ -305,7 +305,7 @@ std::vector<Token> Lexer::tokenize() {
             val += get(); // consume 'x'
             while (isxdigit(peek()))
                 val += get();
-            tokens.push_back({TokenType::NUMBER, val, token_line, token_col});
+            tokens.push_back({TokenType::NUMBER, val, token_line, token_col, col});
             continue;
         }
         if (c == '0' && peek(1) == 'b') {
@@ -314,14 +314,14 @@ std::vector<Token> Lexer::tokenize() {
             val += get(); // consume 'b'
             while (peek() == '0' || peek() == '1')
                 val += get();
-            tokens.push_back({TokenType::NUMBER, val, token_line, token_col});
+            tokens.push_back({TokenType::NUMBER, val, token_line, token_col, col});
             continue;
         }
         if (isdigit(c)) {
             std::string val;
             while (isdigit(peek()) || peek() == '.')
                 val += get();
-            tokens.push_back({TokenType::NUMBER, val, token_line, token_col});
+            tokens.push_back({TokenType::NUMBER, val, token_line, token_col, col});
             continue;
         }
 
@@ -332,13 +332,13 @@ std::vector<Token> Lexer::tokenize() {
                 val += get();
 
             if (val == "_"){
-                tokens.push_back({TokenType::UNDERSCORE, val, token_line, token_col});
+                tokens.push_back({TokenType::UNDERSCORE, val, token_line, token_col, col});
                 continue;
             }
 
             TokenType type = keywords.count(val) ? keywords[val] : TokenType::ID;
 
-            tokens.push_back({type, val, token_line, token_col});
+            tokens.push_back({type, val, token_line, token_col, col});
             continue;
         }
 
@@ -347,7 +347,7 @@ std::vector<Token> Lexer::tokenize() {
             std::string val;
             while (isalnum(peek()) || peek() == '_')
                 val += get();
-            tokens.push_back({TokenType::ATTRIBUTE, val, token_line, token_col});
+            tokens.push_back({TokenType::ATTRIBUTE, val, token_line, token_col, col});
             continue;
         }
 
@@ -364,7 +364,7 @@ std::vector<Token> Lexer::tokenize() {
             }
             get(); // consume closing "
             val = convertStringEscapeCodes(val);
-            tokens.push_back({TokenType::STRING, val, token_line, token_col});
+            tokens.push_back({TokenType::STRING, val, token_line, token_col, col});
             continue;
         }
 
@@ -398,133 +398,133 @@ std::vector<Token> Lexer::tokenize() {
             } else
                 val += get();
             get(); // consume closing '
-            tokens.push_back({TokenType::CHAR, val, token_line, token_col});
+            tokens.push_back({TokenType::CHAR, val, token_line, token_col, col});
             continue;
         }
 
         // Operators and delimiters
         if (match("=="))
-            tokens.push_back({TokenType::EQ, "==", token_line, token_col});
+            tokens.push_back({TokenType::EQ, "==", token_line, token_col, col});
         else if (match("!="))
-            tokens.push_back({TokenType::NEQ, "!=", token_line, token_col});
+            tokens.push_back({TokenType::NEQ, "!=", token_line, token_col, col});
         else if (match("<="))
-            tokens.push_back({TokenType::LE, "<=", token_line, token_col});
+            tokens.push_back({TokenType::LE, "<=", token_line, token_col, col});
         else if (match(">="))
-            tokens.push_back({TokenType::GE, ">=", token_line, token_col});
+            tokens.push_back({TokenType::GE, ">=", token_line, token_col, col});
         else if (match("&&"))
-            tokens.push_back({TokenType::AND, "&&", token_line, token_col});
+            tokens.push_back({TokenType::AND, "&&", token_line, token_col, col});
         else if (match("||"))
-            tokens.push_back({TokenType::OR, "||", token_line, token_col});
+            tokens.push_back({TokenType::OR, "||", token_line, token_col, col});
         else if (match("+="))
-            tokens.push_back({TokenType::PLUS_ASSIGN, "+=", token_line, token_col});
+            tokens.push_back({TokenType::PLUS_ASSIGN, "+=", token_line, token_col, col});
         else if (match("-="))
-            tokens.push_back({TokenType::MINUS_ASSIGN, "-=", token_line, token_col});
+            tokens.push_back({TokenType::MINUS_ASSIGN, "-=", token_line, token_col, col});
         else if (match("*="))
-            tokens.push_back({TokenType::STAR_ASSIGN, "*=", token_line, token_col});
+            tokens.push_back({TokenType::STAR_ASSIGN, "*=", token_line, token_col, col});
         else if (match("/="))
-            tokens.push_back({TokenType::SLASH_ASSIGN, "/=", token_line, token_col});
+            tokens.push_back({TokenType::SLASH_ASSIGN, "/=", token_line, token_col, col});
         else if (match("%="))
-            tokens.push_back({TokenType::PERCENT_ASSIGN, "%=", token_line, token_col});
+            tokens.push_back({TokenType::PERCENT_ASSIGN, "%=", token_line, token_col, col});
         else if (match("<<="))
-            tokens.push_back({TokenType::SHL_ASSIGN, "<<=", token_line, token_col});
+            tokens.push_back({TokenType::SHL_ASSIGN, "<<=", token_line, token_col, col});
         else if (match(">>="))
-            tokens.push_back({TokenType::SHR_ASSIGN, ">>=", token_line, token_col});
+            tokens.push_back({TokenType::SHR_ASSIGN, ">>=", token_line, token_col, col});
         else if (match("&="))
-            tokens.push_back({TokenType::BAND_ASSIGN, "&=", token_line, token_col});
+            tokens.push_back({TokenType::BAND_ASSIGN, "&=", token_line, token_col, col});
         else if (match("|="))
-            tokens.push_back({TokenType::BOR_ASSIGN, "|=", token_line, token_col});
+            tokens.push_back({TokenType::BOR_ASSIGN, "|=", token_line, token_col, col});
         else if (match("^="))
-            tokens.push_back({TokenType::BXOR_ASSIGN, "^=", token_line, token_col});
+            tokens.push_back({TokenType::BXOR_ASSIGN, "^=", token_line, token_col, col});
         else if (match("<<"))
-            tokens.push_back({TokenType::SHL, "<<", token_line, token_col});
+            tokens.push_back({TokenType::SHL, "<<", token_line, token_col, col});
         else if (match(">>"))
-            tokens.push_back({TokenType::SHR, ">>", token_line, token_col});
+            tokens.push_back({TokenType::SHR, ">>", token_line, token_col, col});
         else if (match("->"))
-            tokens.push_back({TokenType::ARROW, "->", token_line, token_col});
+            tokens.push_back({TokenType::ARROW, "->", token_line, token_col, col});
         else if (match("=>"))
-            tokens.push_back({TokenType::EQ_ARROW, "=>", token_line, token_col});
+            tokens.push_back({TokenType::EQ_ARROW, "=>", token_line, token_col, col});
         else if (match("..."))
-            tokens.push_back({TokenType::TRIPLE_DOT, "...", token_line, token_col});
+            tokens.push_back({TokenType::TRIPLE_DOT, "...", token_line, token_col, col});
         else if (match("::"))
-            tokens.push_back({TokenType::DOUBLE_COLON, "::", token_line, token_col});
+            tokens.push_back({TokenType::DOUBLE_COLON, "::", token_line, token_col, col});
         else if (match("++"))
-            tokens.push_back({TokenType::INC, "++", token_line, token_col});
+            tokens.push_back({TokenType::INC, "++", token_line, token_col, col});
         else if (match("--"))
-            tokens.push_back({TokenType::DEC, "--", token_line, token_col});
+            tokens.push_back({TokenType::DEC, "--", token_line, token_col, col});
         else {
             char op = get();
             switch (op) {
                 case '?':
-                    tokens.push_back({TokenType::QUESTION, "?", token_line, token_col});
+                    tokens.push_back({TokenType::QUESTION, "?", token_line, token_col, col});
                     break;
                 case '~':
-                    tokens.push_back({TokenType::BNOT, "~", token_line, token_col});
+                    tokens.push_back({TokenType::BNOT, "~", token_line, token_col, col});
                     break;
                 case '=':
-                    tokens.push_back({TokenType::ASSIGN, "=", token_line, token_col});
+                    tokens.push_back({TokenType::ASSIGN, "=", token_line, token_col, col});
                     break;
                 case '+':
-                    tokens.push_back({TokenType::PLUS, "+", token_line, token_col});
+                    tokens.push_back({TokenType::PLUS, "+", token_line, token_col, col});
                     break;
                 case '-':
-                    tokens.push_back({TokenType::MINUS, "-", token_line, token_col});
+                    tokens.push_back({TokenType::MINUS, "-", token_line, token_col, col});
                     break;
                 case '*':
-                    tokens.push_back({TokenType::STAR, "*", token_line, token_col});
+                    tokens.push_back({TokenType::STAR, "*", token_line, token_col, col});
                     break;
                 case '/':
-                    tokens.push_back({TokenType::SLASH, "/", token_line, token_col});
+                    tokens.push_back({TokenType::SLASH, "/", token_line, token_col, col});
                     break;
                 case '%':
-                    tokens.push_back({TokenType::PERCENT, "%", token_line, token_col});
+                    tokens.push_back({TokenType::PERCENT, "%", token_line, token_col, col});
                     break;
                 case '<':
-                    tokens.push_back({TokenType::LT, "<", token_line, token_col});
+                    tokens.push_back({TokenType::LT, "<", token_line, token_col, col});
                     break;
                 case '>':
-                    tokens.push_back({TokenType::GT, ">", token_line, token_col});
+                    tokens.push_back({TokenType::GT, ">", token_line, token_col, col});
                     break;
                 case '!':
-                    tokens.push_back({TokenType::BANG, "!", token_line, token_col});
+                    tokens.push_back({TokenType::BANG, "!", token_line, token_col, col});
                     break;
                 case '&':
-                    tokens.push_back({TokenType::BAND, "&", token_line, token_col});
+                    tokens.push_back({TokenType::BAND, "&", token_line, token_col, col});
                     break;
                 case '|':
-                    tokens.push_back({TokenType::BOR, "|", token_line, token_col});
+                    tokens.push_back({TokenType::BOR, "|", token_line, token_col, col});
                     break;
                 case '^':
-                    tokens.push_back({TokenType::BXOR, "^", token_line, token_col});
+                    tokens.push_back({TokenType::BXOR, "^", token_line, token_col, col});
                     break;
                 case '(':
-                    tokens.push_back({TokenType::LPAREN, "(", token_line, token_col});
+                    tokens.push_back({TokenType::LPAREN, "(", token_line, token_col, col});
                     break;
                 case ')':
-                    tokens.push_back({TokenType::RPAREN, ")", token_line, token_col});
+                    tokens.push_back({TokenType::RPAREN, ")", token_line, token_col, col});
                     break;
                 case '{':
-                    tokens.push_back({TokenType::LBRACE, "{", token_line, token_col});
+                    tokens.push_back({TokenType::LBRACE, "{", token_line, token_col, col});
                     break;
                 case '}':
-                    tokens.push_back({TokenType::RBRACE, "}", token_line, token_col});
+                    tokens.push_back({TokenType::RBRACE, "}", token_line, token_col, col});
                     break;
                 case '[':
-                    tokens.push_back({TokenType::LBRACKET, "[", token_line, token_col});
+                    tokens.push_back({TokenType::LBRACKET, "[", token_line, token_col, col});
                     break;
                 case ']':
-                    tokens.push_back({TokenType::RBRACKET, "]", token_line, token_col});
+                    tokens.push_back({TokenType::RBRACKET, "]", token_line, token_col, col});
                     break;
                 case ',':
-                    tokens.push_back({TokenType::COMMA, ",", token_line, token_col});
+                    tokens.push_back({TokenType::COMMA, ",", token_line, token_col, col});
                     break;
                 case ':':
-                    tokens.push_back({TokenType::COLON, ":", token_line, token_col});
+                    tokens.push_back({TokenType::COLON, ":", token_line, token_col, col});
                     break;
                 case '.':
-                    tokens.push_back({TokenType::DOT, ".", token_line, token_col});
+                    tokens.push_back({TokenType::DOT, ".", token_line, token_col, col});
                     break;
                 case ';':
-                    tokens.push_back({TokenType::SEMICOLON, ";", token_line, token_col});
+                    tokens.push_back({TokenType::SEMICOLON, ";", token_line, token_col, col});
                     break;
                 default:
                     std::cerr << "Unexpected character: " << op << " at line " << token_line

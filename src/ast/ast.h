@@ -177,6 +177,9 @@ enum class NodeKind {
 struct ASTNode : std::enable_shared_from_this<ASTNode> {
     int line = 0;
     int col = 0;
+    int line_end = 0;
+    int col_end = 0;
+
     std::shared_ptr<Type> inferred_type = nullptr;
 
     uint64_t symbol_id = INT64_MAX; // For declarations and variable accesses
@@ -819,21 +822,28 @@ struct TupleType : Type {
     }
 };
 
+struct ExternInfo {
+    std::optional<std::string> extern_type;
+    bool is_extern;
+};
+
 struct FunctionType : Type {
     TypeKind kind() const override { return TypeKind::Function; }
     std::vector<std::shared_ptr<Type>> params;
+
+    ExternInfo extern_info;
+
     std::shared_ptr<Type> ret;
     bool variadic;
-    bool is_extern;
 
     FunctionType(std::vector<std::shared_ptr<Type>> p,
                  std::shared_ptr<Type> r,
-                 bool v = false, bool ie = false)
-        : params(std::move(p)), ret(std::move(r)), variadic(v), is_extern(ie) {}
+                 bool v = false, ExternInfo ei = {})
+        : params(std::move(p)), ret(std::move(r)), variadic(v), extern_info(ei) {}
 
     std::string str() const override {
         std::string result = "";
-        if (is_extern)
+        if (extern_info.is_extern)
             result += "extern ";
         result += "fn(";
         for (size_t i = 0; i < params.size(); ++i) {

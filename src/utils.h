@@ -6,22 +6,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
-//
-// #ifndef NDEBUG
-// #define ASSERT(condition, message)                                             \
-//     do {                                                                       \
-//         if (!(condition)) {                                                    \
-//             std::cerr << "Assertion `" #condition "` failed in " << __FILE__   \
-//                       << " line " << __LINE__ << ": " << message << std::endl; \
-//             std::terminate();                                                  \
-//         }                                                                      \
-//     } while (false)
-// #else
-// #define ASSERT(condition, message) \
-//     do {                           \
-//     } while (false)
-// #endif
-//
+
 void prettyError(int line, int col, const std::string &msg, const std::string &source, const std::string &filename = "unknown");
 
 void fail(const std::string &message);

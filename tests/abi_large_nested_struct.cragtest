@@ -22,8 +22,8 @@ struct Big {
     p2: *void,
 }
 
-extern fn make_big(seed: i32) -> Big;
-extern fn read_big_tex_h(v: Big) -> i32;
+extern "C" fn make_big(seed: i32) -> Big;
+extern "C" fn read_big_tex_h(v: Big) -> i32;
 
 fn main() -> i32 {
     let v: Big = make_big(0);

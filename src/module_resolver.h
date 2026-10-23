@@ -138,7 +138,7 @@ class ModuleResolver {
             if (auto f = std::dynamic_pointer_cast<FunctionDeclaration>(actualDecl)) {
                 if (f->is_pub)
                     module->exports[f->name] = f;
-                if (isExtern || f->type->is_extern || f->attributes.count("noprefix"))
+                if (isExtern || f->type->extern_info.is_extern || f->attributes.count("noprefix"))
                     module->externLinkage.insert(f->name);
             } else if (auto s =
                            std::dynamic_pointer_cast<StructDeclaration>(actualDecl)) {

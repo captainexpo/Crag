@@ -1,13 +1,15 @@
-import os
-import sys
-import subprocess
 import glob
+import os
 import re
-from enum import Enum
-from concurrent.futures import ProcessPoolExecutor
-from typing import Any, Optional
-from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import time
+from concurrent.futures import ProcessPoolExecutor
+from enum import Enum
+from pathlib import Path
+from typing import Any
+
 
 def color_text(text: Any, rgb: tuple[int, int, int]) -> str:
     text = str(text)
@@ -16,10 +18,6 @@ def color_text(text: Any, rgb: tuple[int, int, int]) -> str:
 
 
 def parse_test_file(text: str):
-    # Most tests assert their own expectations at runtime via std.testing.assert()
-    # and simply need to exit 0. BEGIN EXPECT ERR / END EXPECT ERR is kept for the
-    # handful of tests that intentionally fail to compile or panic, where there's
-    # no running program left to make assertions from.
     SECTION_NAME = re.compile(r"^NAME:\s*(.*)")
     SECTION_DESC = re.compile(r"^DESC:\s*(.*)")
     BEGIN_CODE = "BEGIN CODE"
@@ -36,14 +34,16 @@ def parse_test_file(text: str):
     desc = None
     code = []
     expect_err = []
-    args = [] # for ARGS: <arg case 1> | <arg case 2> | ...
+    args = []  # for ARGS: <arg case 1> | <arg case 2> | ...
 
     mode = None  # None, "code", "expect_err"
 
     for _line in lines:
-        line = _line[2:] if _line.startswith('//') else _line # skip the leading comment characters
+        line = (
+            _line.removeprefix("//")
+        )  # skip the leading comment characters
         if line.strip().startswith("REQUIRES:"):
-            reqs = line.strip()[len("REQUIRES:"):].split(",")
+            reqs = line.strip()[len("REQUIRES:") :].split(",")
             requires.extend(req.strip() for req in reqs)
             continue
         # REQUIRES_C: <file.c>[, <file.c>...] -- companion C file(s), compiled
@@ -52,11 +52,11 @@ def parse_test_file(text: str):
         # written in pure Crag, since the whole point is checking Crag's
         # generated code against the platform's actual C calling convention).
         if line.strip().startswith("REQUIRES_C:"):
-            reqs = line.strip()[len("REQUIRES_C:"):].split(",")
+            reqs = line.strip()[len("REQUIRES_C:") :].split(",")
             requires_c.extend(req.strip() for req in reqs)
             continue
         if line.strip().startswith("ARGS:"):
-            arg_cases = line.strip()[len("ARGS:"):].split("|")
+            arg_cases = line.strip()[len("ARGS:") :].split("|")
             args.extend(arg_case.strip() for arg_case in arg_cases)
             continue
 
@@ -101,10 +101,15 @@ def parse_test_file(text: str):
 
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
-COMP_CANDIDATES = [os.path.join(ROOT, "build", "crag"), os.path.join(ROOT, "crag"), os.path.join(ROOT, "build", "comp"), os.path.join(ROOT, "comp")]
+COMP_CANDIDATES = [
+    os.path.join(ROOT, "build", "crag"),
+    os.path.join(ROOT, "crag"),
+    os.path.join(ROOT, "build", "comp"),
+    os.path.join(ROOT, "comp"),
+]
 
 
-def find_compiler() -> Optional[str]:
+def find_compiler() -> str | None:
     for p in COMP_CANDIDATES:
         if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
@@ -155,7 +160,6 @@ def run_unit_test(
     with open(src_file, "w") as f:
         f.write(src_code)
     for req in required_files:
-
         # get only filename
         n = Path(req).name
 
@@ -181,13 +185,17 @@ def run_unit_test(
         try:
             cc_result = subprocess.run(
                 ["cc", "-c", req_c_path, "-o", str(obj_path)],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
         except FileNotFoundError:
             printc("No C compiler ('cc') found, skipping test.", C_YELLOW)
             return TestResult.SKIP, outs, 0
         if cc_result.returncode != 0:
-            printc(f"Failed to compile required C file '{req_c}':\n{cc_result.stderr}", C_RED)
+            printc(
+                f"Failed to compile required C file '{req_c}':\n{cc_result.stderr}",
+                C_RED,
+            )
             return TestResult.FAIL, outs, 0
         # crag's CLI only forwards -l/-L/-W-prefixed args to the linker, so a
         # bare .o path has to go through -Wl, to reach it.
@@ -256,8 +264,6 @@ def main():
     skipped = 0
     fails = []
     skips = []
-
-    import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdirname:
         tmp_path = Path(tmpdirname)

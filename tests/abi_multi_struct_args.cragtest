@@ -34,9 +34,9 @@ struct Big {
     p2: *void,
 }
 
-extern fn make_big(seed: i32) -> Big;
-extern fn combine_v2_and_color(pos: V2, tint: Color) -> i32;
-extern fn combine_big_v2_color(big: Big, extra: i32, pos: V2, tint: Color) -> i32;
+extern "C" fn make_big(seed: i32) -> Big;
+extern "C" fn combine_v2_and_color(pos: V2, tint: Color) -> i32;
+extern "C" fn combine_big_v2_color(big: Big, extra: i32, pos: V2, tint: Color) -> i32;
 
 fn main() -> i32 {
     let pos: V2 = V2{ x: 3, y: 4 };

@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
@@ -252,7 +251,6 @@ std::shared_ptr<Type> Parser::parse_non_error_type(bool top_level) {
 
     return t;
 }
-
 
 std::shared_ptr<TupleType> Parser::parse_tuple_type() {
     consume(TokenType::LPAREN);
@@ -503,7 +501,10 @@ std::shared_ptr<Declaration> Parser::parse_extern_declaration() {
             break;
         case TokenType::FN: {
             auto fn = parse_function_declaration();
-            fn->type->is_extern = true;
+            fn->type->extern_info = ExternInfo{
+                .extern_type = extern_type,
+                .is_extern = true,
+            };
             return std::make_shared<ExternDeclaration>(fn, extern_name, extern_type);
         }
         default:
@@ -513,10 +514,9 @@ std::shared_ptr<Declaration> Parser::parse_extern_declaration() {
                      peek().column);
 }
 
-
 std::shared_ptr<ImportTree> Parser::parse_import_tree() {
     auto name = consume(TokenType::ID).value;
-    if (match({TokenType::LBRACE})){
+    if (match({TokenType::LBRACE})) {
         std::vector<std::shared_ptr<ImportTree>> children;
         while (peek().type != TokenType::RBRACE) {
             children.push_back(parse_import_tree());
@@ -649,7 +649,7 @@ std::shared_ptr<StructDeclaration> Parser::parse_struct_declaration() {
             bool is_static = match({TokenType::STATIC});
             std::shared_ptr<FunctionDeclaration> method =
                 parse_function_declaration();
-            methods.insert({method->name, { method, is_static } });
+            methods.insert({method->name, {method, is_static}});
             continue;
         }
         std::string fname = consume(TokenType::ID).value;
@@ -1088,7 +1088,7 @@ Parser::parse_led(std::shared_ptr<Expression> left) {
                     expr->col = t.column;
                     return expr;
                 }
-                if (peek().type == TokenType::NUMBER){
+                if (peek().type == TokenType::NUMBER) {
                     if (peek().value.find('.') != std::string::npos) {
                         throw ParseError("Floating point numbers cannot be used as field names", peek().line, peek().column);
                     }
@@ -1457,7 +1457,7 @@ std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
     }
     consume(TokenType::RPAREN);
     std::shared_ptr<Type> return_type = std::make_shared<Void>();
-    if(match({TokenType::ARROW})){
+    if (match({TokenType::ARROW})) {
         return_type = parse_type();
     }
     auto func_type =
@@ -1503,7 +1503,9 @@ Parser::parse_parameter_def() {
 }
 
 std::shared_ptr<AsmStmt> Parser::parse_asm_statement() {
-    consume(TokenType::ASM);
+    auto start = consume(TokenType::ASM);
+    Token end;
+
     bool is_volatile = match({TokenType::VOLATILE});
 
     std::vector<AsmOperand> operands;
@@ -1594,8 +1596,13 @@ std::shared_ptr<AsmStmt> Parser::parse_asm_statement() {
         }
     }
 
-    consume(TokenType::RPAREN);
-    return std::make_shared<AsmStmt>(is_volatile, template_str, operands, options);
+    end = consume(TokenType::RPAREN);
+    auto a = std::make_shared<AsmStmt>(is_volatile, template_str, operands, options);
+    a->line = start.line;
+    a->col = start.column;
+    a->line_end = end.line;
+    a->col_end = end.column_end;
+    return a;
 }
 
 std::shared_ptr<Program> Parser::parse() {

@@ -1,7 +1,9 @@
 #include "llvmcodegen.h"
 #include "src/ast/ast.h"
 #include "src/typechecking/tables.h"
+#include "src/utils.h"
 #include <algorithm>
+#include <cassert>
 #include <filesystem>
 #include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
@@ -878,55 +880,52 @@ llvm::Value *LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &exp
     throw CodeGenError(expr, "Expression is not an lvalue: " + expr->str());
 }
 
-llvm::Value *
-LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
+llvm::Value * LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
                                 bool loadValue) {
     setDebugLocation(expr);
-    if (IS_INSTANCE(expr, BinaryOperation)) {
-        auto binOp = std::dynamic_pointer_cast<BinaryOperation>(expr);
-        return generateBinaryOp(binOp->left, binOp->right, binOp->op, loadValue);
+    if (auto trueExpr = std::dynamic_pointer_cast<BinaryOperation>(expr)) {
+        return generateBinaryOp(trueExpr->left, trueExpr->right, trueExpr->op, loadValue);
     }
-    if (IS_INSTANCE(expr, UnaryOperation)) {
-        auto unOp = std::dynamic_pointer_cast<UnaryOperation>(expr);
-        return generateUnaryOp(unOp, loadValue);
+    if (auto trueExpr = std::dynamic_pointer_cast<UnaryOperation>(expr)) {
+        return generateUnaryOp(trueExpr, loadValue);
     }
-    if (IS_INSTANCE(expr, TryExpression)) {
-        return generateTryExpr(std::dynamic_pointer_cast<TryExpression>(expr), loadValue);
+    if (auto trueExpr = std::dynamic_pointer_cast<TryExpression>(expr)) {
+        return generateTryExpr(trueExpr, loadValue);
     }
-    if (IS_INSTANCE(expr, CatchExpression)) {
-        return generateCatchExpr(std::dynamic_pointer_cast<CatchExpression>(expr), loadValue);
+    if (auto trueExpr = std::dynamic_pointer_cast<CatchExpression>(expr)) {
+        return generateCatchExpr(trueExpr, loadValue);
     }
-    if (IS_INSTANCE(expr, Literal)) {
-        return generateLiteral(std::dynamic_pointer_cast<Literal>(expr), loadValue);
+    if (auto trueExpr = std::dynamic_pointer_cast<Literal>(expr)) {
+        return generateLiteral(trueExpr, loadValue);
     }
-    if (IS_INSTANCE(expr, VarAccess)) {
-        return generateVarAccess(std::dynamic_pointer_cast<VarAccess>(expr),
+    if (auto trueExpr = std::dynamic_pointer_cast<VarAccess>(expr)) {
+        return generateVarAccess(trueExpr,
                                  loadValue);
     }
-    if (IS_INSTANCE(expr, EnumAccess)) {
-        return generateEnumAccess(std::dynamic_pointer_cast<EnumAccess>(expr),
+    if (auto trueExpr = std::dynamic_pointer_cast<EnumAccess>(expr)) {
+        return generateEnumAccess(trueExpr,
                                   loadValue);
     }
-    if (IS_INSTANCE(expr, FuncCall)) {
-        return generateFuncCall(std::dynamic_pointer_cast<FuncCall>(expr),
+    if (auto trueExpr = std::dynamic_pointer_cast<FuncCall>(expr)) {
+        return generateFuncCall(trueExpr,
                                 loadValue);
     }
-    if (IS_INSTANCE(expr, FieldAccess)) {
-        return generateFieldAccess(std::dynamic_pointer_cast<FieldAccess>(expr),
+    if (auto trueExpr = std::dynamic_pointer_cast<FieldAccess>(expr)) {
+        return generateFieldAccess(trueExpr,
                                    loadValue);
     }
-    if (IS_INSTANCE(expr, StructInitializer)) {
+    if (auto trueExpr = std::dynamic_pointer_cast<StructInitializer>(expr)) {
         return generateStructInitializer(
-            std::dynamic_pointer_cast<StructInitializer>(expr), loadValue);
+            trueExpr, loadValue);
     }
-    if (IS_INSTANCE(expr, OffsetAccess)) {
-        return generateOffsetAccess(std::dynamic_pointer_cast<OffsetAccess>(expr),
+    if (auto trueExpr = std::dynamic_pointer_cast<OffsetAccess>(expr)) {
+        return generateOffsetAccess(trueExpr,
                                     loadValue);
     }
-    if (IS_INSTANCE(expr, TypeCast)) {
-        return generateCast(std::dynamic_pointer_cast<TypeCast>(expr), loadValue);
+    if (auto trueExpr = std::dynamic_pointer_cast<TypeCast>(expr)) {
+        return generateCast(trueExpr, loadValue);
     }
-    if (IS_INSTANCE(expr, Dereference)) {
+    if (auto trueExpr = std::dynamic_pointer_cast<Dereference>(expr)) {
         auto deref = std::dynamic_pointer_cast<Dereference>(expr);
         llvm::Value *ptr = generateExpression(deref->pointer, true);
         if (m_options.opt_level == Debug && m_options.do_runtime_safety) {
@@ -940,30 +939,30 @@ LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
                                          "derefloadtmp");
         return ptr;
     }
-    if (IS_INSTANCE(expr, MethodCall)) {
-        return generateMethodCall(std::dynamic_pointer_cast<MethodCall>(expr),
-                                  loadValue);
+    if (auto trueExpr = std::dynamic_pointer_cast<MethodCall>(expr)) {
+        return generateMethodCall(trueExpr, loadValue);
     }
-    if (IS_INSTANCE(expr, ModuleAccess)) {
-        return generateModuleAccess(std::dynamic_pointer_cast<ModuleAccess>(expr),
+    if (auto trueExpr = std::dynamic_pointer_cast<ModuleAccess>(expr)) {
+        return generateModuleAccess(trueExpr,
                                     loadValue);
     }
-    if (IS_INSTANCE(expr, TypeExpression)) {
+    if (auto trueExpr = std::dynamic_pointer_cast<TypeExpression>(expr)) {
         throw CodeGenError(expr, "TypeExpression is not a runtime value");
     }
-    if (IS_INSTANCE(expr, ArrayLiteral)) {
-        return generateArrayLiteral(std::dynamic_pointer_cast<ArrayLiteral>(expr),
+    if (auto trueExpr = std::dynamic_pointer_cast<ArrayLiteral>(expr)) {
+        return generateArrayLiteral(trueExpr,
                                     loadValue);
     }
-    if (IS_INSTANCE(expr, TupleLiteral)) {
-        return generateTupleLiteral(std::dynamic_pointer_cast<TupleLiteral>(expr),
+    if (auto trueExpr = std::dynamic_pointer_cast<TupleLiteral>(expr)) {
+        return generateTupleLiteral(trueExpr,
                                     loadValue);
     }
-    if (IS_INSTANCE(expr, IfExpression)) {
-        return generateIfExpression(std::dynamic_pointer_cast<IfExpression>(expr), loadValue);
+    if (auto trueExpr = std::dynamic_pointer_cast<IfExpression>(expr)) {
+        return generateIfExpression(trueExpr, loadValue);
     }
     throw CodeGenError(expr, "Unknown expression type: " + expr->str());
 }
+
 std::string llvmTypeToString(llvm::Type *ty) {
     std::string str;
     llvm::raw_string_ostream rso(str);
@@ -1081,11 +1080,11 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
     llvm::FunctionType *fType =
         llvm::cast<llvm::FunctionType>(this->getLLVMType(func->type, func));
 
-    std::string fname = func->type->is_extern
+    std::string fname = func->type->extern_info.is_extern
                             ? (externDecl && externDecl->extern_name ? *externDecl->extern_name : func->name)
                             : canonicalizeNonexternName(func->name);
     if (auto *existingFn = m_llvm_module->getFunction(fname)) {
-        if (func->type->is_extern) {
+        if (func->type->extern_info.is_extern) {
             // Same underlying extern symbol may be declared by multiple modules
             CUR_SCOPE.set(fname, existingFn, existingFn->getFunctionType(), func->type);
             if (func->symbol_id != INVALID_SYMBOL_ID) {
@@ -1101,19 +1100,19 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
     std::vector<llvm::Type *> loweredParamTypes;
     llvm::Type *loweredReturnType = fType->getReturnType();
 
-    // For extern functions, apply ABI lowering for aggregates.
+    // For extern C functions, apply ABI lowering for aggregates.
     llvm::FunctionType *abiType = fType;
-    if (func->type->is_extern) {
+    if (func->type->extern_info.is_extern && (func->type->extern_info.extern_type == "C" || func->type->extern_info.extern_type == "C++")) {
         abiType = getExternABIFunctionType(func->type, func, usesSRet, byValParamFlags,
                                            loweredParamTypes, loweredReturnType);
     }
 
-    llvm::Function::LinkageTypes linkage = func->type->is_extern ? llvm::Function::ExternalLinkage : llvm::Function::ExternalLinkage;
+    llvm::Function::LinkageTypes linkage = func->type->extern_info.is_extern ? llvm::Function::ExternalLinkage : llvm::Function::ExternalLinkage;
 
     llvm::Function *function = llvm::Function::Create(
         abiType, linkage, fname, m_llvm_module.get());
 
-    if (func->type->is_extern) {
+    if (func->type->extern_info.is_extern) {
         unsigned abiIndex = 0;
         if (usesSRet) {
             llvm::Type *retTy = getLLVMType(func->type->ret, func);
@@ -1125,7 +1124,9 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
 
         for (size_t i = 0; i < func->type->params.size(); ++i, ++abiIndex) {
             llvm::Type *paramTy = getLLVMType(func->type->params[i], func);
-            if (i < byValParamFlags.size() && byValParamFlags[i]) {
+            // On ARM64, large composites are passed by pointer in an integer register
+            // (AAPCS indirect), not byval (which is x86-64 stack-passing semantics).
+            if (i < byValParamFlags.size() && byValParamFlags[i] && m_options.target.arch != ARM64) {
                 function->addParamAttr(abiIndex, llvm::Attribute::getWithByValType(context, paramTy));
                 unsigned paramAlign = m_llvm_module->getDataLayout().getABITypeAlign(paramTy).value();
                 function->addParamAttr(abiIndex, llvm::Attribute::getWithAlignment(context, llvm::Align(paramAlign)));
@@ -1146,7 +1147,7 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
     }
 
     if (std::find(func->attributes.begin(), func->attributes.end(), "weak") != func->attributes.end()) {
-        if (func->type->is_extern) {
+        if (func->type->extern_info.is_extern) {
             function->setLinkage(llvm::Function::WeakAnyLinkage);
         } else {
             throw CodeGenError(func, "Only extern functions can be marked as weak");
@@ -1650,10 +1651,12 @@ llvm::Value *LLVMCodegen::generateVariableDeclaration(
 
 std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> LLVMCodegen::generateStructMethods(
     const std::shared_ptr<StructDeclaration> &structDecl) {
+
     std::vector<std::pair<llvm::Function *, std::shared_ptr<FunctionDeclaration>>> methods;
     for (std::unordered_map<std::string, MethodInfo>::iterator iter = structDecl->methods.begin();
          iter != structDecl->methods.end(); ++iter) {
         auto method = iter->second;
+
         std::string mangledName = structDecl->name + "." + method.method_decl->name;
         method.method_decl->name = mangledName;
 
@@ -2455,6 +2458,10 @@ llvm::Value *LLVMCodegen::generateMethodCall(
         }
     }
 
+    if (structType == nullptr){
+        throw CodeGenError(methodCall, "Struct type is not a struct type in method call.");
+    }
+
     std::string mangledName =
         structType->name + "." + methodCall->method;
 
@@ -2507,11 +2514,11 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     bool isExtern = false;
     if (auto ft = std::dynamic_pointer_cast<FunctionType>(funcCall->func->inferred_type)) {
         sourceFuncType = ft;
-        isExtern = ft->is_extern;
+        isExtern = ft->extern_info.is_extern;
     } else if (auto fpt = std::dynamic_pointer_cast<PointerType>(funcCall->func->inferred_type)) {
         if (auto ft = std::dynamic_pointer_cast<FunctionType>(fpt->base)) {
             sourceFuncType = ft;
-            isExtern = ft->is_extern;
+            isExtern = ft->extern_info.is_extern;
         }
     } else {
         throw CodeGenError(funcCall, "Unable to determine function type for call: " + funcCall->func->inferred_type->str());
@@ -2535,7 +2542,7 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
             throw CodeGenError(funcCall, "Callee is a pointer, but not to a function type");
         }
         auto funcType = std::dynamic_pointer_cast<FunctionType>(ptrType->base);
-        if (funcType->is_extern) {
+        if (funcType->extern_info.is_extern && (funcType->extern_info.extern_type == "C" || funcType->extern_info.extern_type == "C++")) {
             funcTy = getExternABIFunctionType(funcType, funcCall, usesSRet, byValParamFlags,
                                               loweredParamTypes, loweredReturnType);
         } else {
@@ -2546,7 +2553,8 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
                                          funcCall->func->str() + " instead has type " + funcCall->func->inferred_type->str());
     }
 
-    if (isExtern && sourceFuncType && !usesSRet && byValParamFlags.empty() && loweredParamTypes.empty()) {
+    if (isExtern && sourceFuncType && !usesSRet && byValParamFlags.empty() && loweredParamTypes.empty() &&
+        (sourceFuncType->extern_info.extern_type == "C" || sourceFuncType->extern_info.extern_type == "C++")) {
         getExternABIFunctionType(sourceFuncType, funcCall, usesSRet, byValParamFlags,
                                  loweredParamTypes, loweredReturnType);
     }
@@ -2567,7 +2575,8 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
         llvm::Value *argVal = generateExpression(arg);
 
         // Apply ABI lowering/coercion for extern functions.
-        if (isExtern && sourceFuncType && argIdx < sourceFuncType->params.size()) {
+        if (isExtern && sourceFuncType && argIdx < sourceFuncType->params.size() &&
+            (sourceFuncType->extern_info.extern_type == "C" || sourceFuncType->extern_info.extern_type == "C++")) {
             llvm::Type *argType = argVal->getType();
 
             if (argIdx < byValParamFlags.size() && byValParamFlags[argIdx]) {
@@ -2619,7 +2628,7 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
 
         for (size_t i = 0; i < sourceFuncType->params.size(); ++i, ++abiIndex) {
             llvm::Type *paramTy = getLLVMType(sourceFuncType->params[i], funcCall);
-            if (i < byValParamFlags.size() && byValParamFlags[i]) {
+            if (i < byValParamFlags.size() && byValParamFlags[i] && m_options.target.arch != ARM64) {
                 callInst->addParamAttr(abiIndex, llvm::Attribute::getWithByValType(context, paramTy));
                 unsigned paramAlign = m_llvm_module->getDataLayout().getABITypeAlign(paramTy).value();
                 callInst->addParamAttr(abiIndex, llvm::Attribute::getWithAlignment(context, llvm::Align(paramAlign)));
@@ -2636,7 +2645,9 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
     }
 
     // If calling an extern function that returns a coerced struct, convert it back
-    if (isExtern && result && shouldCoerceForABI(funcTy->getReturnType())) {
+    if (isExtern && sourceFuncType &&
+        (sourceFuncType->extern_info.extern_type == "C" || sourceFuncType->extern_info.extern_type == "C++") &&
+        result && shouldCoerceForABI(funcTy->getReturnType())) {
         if (funcCall->inferred_type && IS_INSTANCE(funcCall->inferred_type, StructType)) {
             llvm::Type *structType = getLLVMType(funcCall->inferred_type, funcCall);
             if (structType->isStructTy()) {
@@ -3883,19 +3894,54 @@ llvm::FunctionType *LLVMCodegen::getExternABIFunctionType(const std::shared_ptr<
     return llvm::FunctionType::get(loweredReturnType, loweredParamTypes, funcType->variadic);
 }
 
+// Returns true if a struct is an AArch64 Homogeneous Float Aggregate (HFA)
+bool LLVMCodegen::isHFA(llvm::StructType *st, llvm::Type *&elementType, unsigned &count) {
+    count = 0;
+    elementType = nullptr;
+    for (unsigned i = 0; i < st->getNumElements(); ++i) {
+        llvm::Type *field = st->getElementType(i);
+        if (auto *nested = llvm::dyn_cast<llvm::StructType>(field)) {
+            llvm::Type *nestedElem = nullptr;
+            unsigned nestedCount = 0;
+            if (!isHFA(nested, nestedElem, nestedCount))
+                return false;
+            if (elementType && elementType != nestedElem)
+                return false;
+            elementType = nestedElem;
+            count += nestedCount;
+        } else if (field->isFloatTy() || field->isDoubleTy()) {
+            if (elementType && elementType != field)
+                return false;
+            elementType = field;
+            count++;
+        } else {
+            return false;
+        }
+        if (count > 4)
+            return false;
+    }
+    return elementType != nullptr && count >= 1 && count <= 4;
+}
+
 // ABI coercion helper functions
 bool LLVMCodegen::shouldCoerceForABI(llvm::Type *type) {
-    // Only coerce structs for extern functions
     if (!type->isStructTy()) {
         return false;
+    }
+
+    // On ARM64, HFAs <= 4 members must not be coerced to other stuff. All thanks to the llvm <3
+    if (m_options.target.arch == ARM64) {
+        llvm::Type *elemTy = nullptr;
+        unsigned count = 0;
+        if (isHFA(llvm::cast<llvm::StructType>(type), elemTy, count))
+            return false;
     }
 
     llvm::StructType *structType = llvm::cast<llvm::StructType>(type);
     llvm::DataLayout DL = m_llvm_module->getDataLayout();
     uint64_t size = DL.getTypeAllocSize(structType);
 
-    // Coerce structs that are 1, 2, 4, 8, or 16 bytes
-    // (following System V AMD64 ABI rules)
+    // Coerce structs that are 1, 2, 4, 8, or 16 bytes (System V AMD64 ABI)
     return size == 1 || size == 2 || size == 4 || size == 8 || size == 16;
 }
 

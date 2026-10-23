@@ -111,6 +111,7 @@ struct Token {
     std::string value;
     int line;
     int column;
+    int column_end;
 };
 
 class Lexer {

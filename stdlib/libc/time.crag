@@ -4,5 +4,5 @@ pub using time_t = i64;
 when @target_ptr_width == 32
 pub using time_t = i32;
 
-pub extern fn time(t: *time_t) -> time_t;
+pub extern "C" fn time(t: *time_t) -> time_t;
 

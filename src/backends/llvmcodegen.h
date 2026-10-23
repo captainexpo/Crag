@@ -363,6 +363,7 @@ class LLVMCodegen : public Backend {
 
     // ABI coercion helpers
     bool shouldCoerceForABI(llvm::Type *type);
+    static bool isHFA(llvm::StructType *st, llvm::Type *&elementType, unsigned &count);
     llvm::Type *getABICoercionType(llvm::Type *structType);
     llvm::Value *coerceToABI(llvm::Value *structValue, llvm::Type *structType);
     llvm::Value *coerceFromABI(llvm::Value *abiValue, llvm::Type *structType);

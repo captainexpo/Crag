@@ -12,7 +12,7 @@ struct Color {
     a: u8,
 }
 
-extern fn sum_color(c: Color) -> i32;
+extern "C" fn sum_color(c: Color) -> i32;
 
 fn main() -> i32 {
     // The struct literal is constructed directly in the call, not bound to a

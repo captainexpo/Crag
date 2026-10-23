@@ -10,7 +10,7 @@ struct V2 {
     y: f32,
 }
 
-extern fn make_v2(a: f32, b: f32) -> V2;
+extern "C" fn make_v2(a: f32, b: f32) -> V2;
 
 fn main() -> i32 {
     let v: V2 = make_v2(5.0, 7.0);

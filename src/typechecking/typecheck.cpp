@@ -33,7 +33,7 @@ void rebuildModuleMetadata(const std::shared_ptr<Module> &module) {
             if (f->is_pub) {
                 module->exports[f->name] = f;
             }
-            if (isExtern || f->type->is_extern || f->attributes.count("noprefix")) {
+            if (isExtern || f->type->extern_info.is_extern || f->attributes.count("noprefix")) {
                 module->externLinkage.insert(f->name);
             }
         } else if (auto s = std::dynamic_pointer_cast<StructDeclaration>(actualDecl)) {
@@ -593,7 +593,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
                 throw TypeCheckError(current_module, node, "Could not resolve one of the function parameter types in '" + ft->str() + "'");
             pts.push_back(pt);
         }
-        return std::make_shared<FunctionType>(pts, rt, ft->variadic, ft->is_extern);
+        return std::make_shared<FunctionType>(pts, rt, ft->variadic, ft->extern_info);
     }
     if (auto qt = std::dynamic_pointer_cast<QualifiedType>(t)) {
         if (qt->module_path.empty()) {
@@ -2372,6 +2372,11 @@ TypeChecker::inferMethodCall(const std::shared_ptr<MethodCall> &mc) {
     auto bt = inferExpression(mc->object);
     if (!bt)
         throw TypeCheckError(current_module, mc, "Failed to infer type of method call object");
+
+    if (mc->object->kind() == NodeKind::TypeExpression){
+        throw TypeCheckError(current_module, mc, "Cannot call a method on a type expression. Use use Struct.method::<T>() syntax.");
+    }
+
     auto st = std::dynamic_pointer_cast<StructType>(bt);
     if (!st) {
         auto pt = std::dynamic_pointer_cast<PointerType>(bt);
