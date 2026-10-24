@@ -1,12 +1,12 @@
 import "./libc/math.crag" as cmath;
 pub const PI: f64 = 3.141592653589793238;
 
-pub const sinf = &cmath.sinf;
-pub const cosf = &cmath.cosf;
-pub const sin = &cmath.sin;
-pub const cos = &cmath.cos;
-pub const atan2 = &cmath.atan2;
-pub const sqrt = &cmath.sqrt;
+pub extern "C" fn sinf (x: f32) -> f32;
+pub extern "C" fn cosf (x: f32) -> f32;
+pub extern "C" fn sin (x: f64) -> f64;
+pub extern "C" fn cos (x: f64) -> f64;
+pub extern "C" fn atan2 (x: f64) -> f64;
+pub extern "C" fn sqrt (x: f64) -> f64;
 
 pub fn max<T>(a: T, b: T) -> T{
     if (a > b) {

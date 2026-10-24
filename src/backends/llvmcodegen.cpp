@@ -1,7 +1,6 @@
 #include "llvmcodegen.h"
 #include "src/ast/ast.h"
 #include "src/typechecking/tables.h"
-#include "src/utils.h"
 #include <algorithm>
 #include <cassert>
 #include <filesystem>
@@ -1083,6 +1082,7 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
     std::string fname = func->type->extern_info.is_extern
                             ? (externDecl && externDecl->extern_name ? *externDecl->extern_name : func->name)
                             : canonicalizeNonexternName(func->name);
+
     if (auto *existingFn = m_llvm_module->getFunction(fname)) {
         if (func->type->extern_info.is_extern) {
             // Same underlying extern symbol may be declared by multiple modules
@@ -1107,7 +1107,7 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
                                            loweredParamTypes, loweredReturnType);
     }
 
-    llvm::Function::LinkageTypes linkage = func->type->extern_info.is_extern ? llvm::Function::ExternalLinkage : llvm::Function::ExternalLinkage;
+    llvm::Function::LinkageTypes linkage = func->type->extern_info.is_extern ? llvm::Function::ExternalLinkage : llvm::Function::InternalLinkage;
 
     llvm::Function *function = llvm::Function::Create(
         abiType, linkage, fname, m_llvm_module.get());
@@ -1329,7 +1329,7 @@ llvm::Value *LLVMCodegen::addGlobalVarInitializer(llvm::Value *var, std::shared_
         llvm::FunctionType *initFuncType =
             llvm::FunctionType::get(llvm::Type::getVoidTy(context), false);
         llvm::Function *initFunc = llvm::Function::Create(initFuncType,
-                                                          llvm::Function::ExternalLinkage,
+                                                          llvm::Function::InternalLinkage,
                                                           GLOBAL_VAR_INIT_FUNC_NAME, m_llvm_module.get());
         registerGlobalCtor(*m_llvm_module, initFunc, 65535);
 

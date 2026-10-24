@@ -17,7 +17,7 @@ when @target_os == "windows" {
 // (index 0=stdin, 1=stdout, 2=stderr)
 extern "C" fn __acrt_iob_func(idx: u32) -> *File;
 
-pub fn __panic__(msg: *const u8, line: i32, col: i32) -> void @noprefix {
+extern fn __panic__(msg: *const u8, line: i32, col: i32) -> void @noprefix {
     const stderr = __acrt_iob_func(2);
     fprintf(stderr, "PANIC: %s at line %d, col %d\n", msg, line, col);
     abort();
@@ -29,7 +29,7 @@ when @target_os == "macos"{
 
 extern "C" const __stderrp: *File;
 
-pub fn __panic__(msg: *const u8, line: i32, col: i32) -> void @noprefix @noreturn {
+extern fn __panic__(msg: *const u8, line: i32, col: i32) -> void @noprefix @noreturn {
   const stderr = __stderrp;
   fprintf(stderr, "PANIC: %s at line %d, col %d\n", msg, line, col);
   abort();
@@ -42,7 +42,7 @@ when @target_os == "linux" {
 extern "C" const stderr: *File;
 extern "C" const stdout: *File;
 
-pub fn __panic__(msg: *const u8, line: i32, col: i32) -> void @noprefix {
+extern fn __panic__(msg: *const u8, line: i32, col: i32) -> void @noprefix {
   fprintf(stderr, "PANIC: %s at line %d, col %d\n", msg, line, col);
   abort();
 }

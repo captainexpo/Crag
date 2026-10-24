@@ -7,7 +7,6 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -1119,6 +1118,12 @@ void TypeChecker::checkFunctionDeclaration(
         return;
     }
     fn->type = std::dynamic_pointer_cast<FunctionType>(resolveType(fn, fn->type));
+    if (fn->name == "main"){
+        fn->type->extern_info = {.extern_type = "C", .is_extern = true};
+        if (fn->symbol_id != INVALID_SYMBOL_ID) {
+            symbol_table.updateSymbolType(fn->symbol_id, fn->type);
+        }
+    }
     pushScope();
     for (size_t i = 0; i < fn->type->params.size(); ++i) {
         std::string pname =
