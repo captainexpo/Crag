@@ -1,6 +1,7 @@
 #include "llvmcodegen.h"
 #include "src/ast/ast.h"
 #include "src/typechecking/tables.h"
+#include "llvm/IR/CallingConv.h"
 #include <algorithm>
 #include <cassert>
 #include <filesystem>
@@ -1109,8 +1110,13 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
 
     llvm::Function::LinkageTypes linkage = func->type->extern_info.is_extern ? llvm::Function::ExternalLinkage : llvm::Function::InternalLinkage;
 
+
     llvm::Function *function = llvm::Function::Create(
         abiType, linkage, fname, m_llvm_module.get());
+
+    if (!func->type->extern_info.is_extern){
+        function->setCallingConv(llvm::CallingConv::Fast);
+    }
 
     if (func->type->extern_info.is_extern) {
         unsigned abiIndex = 0;
@@ -1145,6 +1151,9 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
     if (std::find(func->attributes.begin(), func->attributes.end(), "inline") != func->attributes.end()) {
         function->addFnAttr(llvm::Attribute::AlwaysInline);
     }
+    else if (std::find(func->attributes.begin(), func->attributes.end(), "noinline") != func->attributes.end()) {
+        function->addFnAttr(llvm::Attribute::NoInline);
+    }
 
     if (std::find(func->attributes.begin(), func->attributes.end(), "weak") != func->attributes.end()) {
         if (func->type->extern_info.is_extern) {
@@ -1153,6 +1162,7 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
             throw CodeGenError(func, "Only extern functions can be marked as weak");
         }
     }
+
 
     CUR_SCOPE.set(fname, function, fType, func->type);
     if (func->symbol_id != INVALID_SYMBOL_ID) {
@@ -2615,6 +2625,12 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
 
     llvm::CallInst *callInst = m_builder->CreateCall(funcTy, calleeValue, argsV,
                                                      funcTy->getReturnType() != llvm::Type::getVoidTy(context) ? "calltmp" : "");
+
+    // set fastcc attribute on call when function is not external
+    // TODO: have some more mediated agreement between this decision (maybe in the typechecker setting some flag)
+    if (!sourceFuncType->extern_info.is_extern){
+        callInst->setCallingConv(llvm::CallingConv::Fast);
+    }
 
     if (isExtern && sourceFuncType) {
         unsigned abiIndex = 0;

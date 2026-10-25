@@ -1224,13 +1224,7 @@ void TypeChecker::checkVariableDeclaration(
             if (var->is_const) {
                 m_const_eval.clearErrors();
                 auto evaluated = m_const_eval.evaluateVariableDeclaration(var);
-                if (!m_const_eval.ok()) {
-                    warn("Failed to evaluate initializer for const variable " + name +
-                         ": " + m_const_eval.errors().front().second);
-                    // for (const auto &e : m_const_eval.errors()) {
-                    //     throw TypeCheckError(current_module, e.first, e.second);
-                    // }
-                } else {
+                if (m_const_eval.ok()) {
                     var->initializer->constant_evaluated = true;
                 }
             }
