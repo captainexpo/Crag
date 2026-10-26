@@ -46,63 +46,63 @@ pub struct Camera3D {
 }
 
 
-pub extern fn InitWindow(width: i32, height: i32, title: *const u8) -> void;
-pub extern fn CloseWindow() -> void;
-pub extern fn WindowShouldClose() -> bool;
+pub extern "C" fn InitWindow(width: i32, height: i32, title: *const u8) -> void;
+pub extern "C" fn CloseWindow() -> void;
+pub extern "C" fn WindowShouldClose() -> bool;
 
-pub extern fn IsWindowReady() -> bool;
-pub extern fn IsWindowFullscreen() -> bool;
-pub extern fn ToggleFullscreen() -> void;
+pub extern "C" fn IsWindowReady() -> bool;
+pub extern "C" fn IsWindowFullscreen() -> bool;
+pub extern "C" fn ToggleFullscreen() -> void;
 
-pub extern fn SetTargetFPS(fps: i32) -> void;
-pub extern fn GetFPS() -> i32;
-pub extern fn GetFrameTime() -> f32;
-pub extern fn GetTime() -> f64;
+pub extern "C" fn SetTargetFPS(fps: i32) -> void;
+pub extern "C" fn GetFPS() -> i32;
+pub extern "C" fn GetFrameTime() -> f32;
+pub extern "C" fn GetTime() -> f64;
 
-pub extern fn GetScreenWidth() -> i32;
-pub extern fn GetScreenHeight() -> i32;
+pub extern "C" fn GetScreenWidth() -> i32;
+pub extern "C" fn GetScreenHeight() -> i32;
 
-pub extern fn GetMonitorCount() -> i32;
-pub extern fn GetMonitorWidth(monitor: i32) -> i32;
-pub extern fn GetMonitorHeight(monitor: i32) -> i32;
-pub extern fn GetMonitorRefreshRate(monitor: i32) -> i32;
+pub extern "C" fn GetMonitorCount() -> i32;
+pub extern "C" fn GetMonitorWidth(monitor: i32) -> i32;
+pub extern "C" fn GetMonitorHeight(monitor: i32) -> i32;
+pub extern "C" fn GetMonitorRefreshRate(monitor: i32) -> i32;
 
-pub extern fn BeginDrawing() -> void;
-pub extern fn EndDrawing() -> void;
+pub extern "C" fn BeginDrawing() -> void;
+pub extern "C" fn EndDrawing() -> void;
 
-pub extern fn ClearBackground(color: Color) -> void;
+pub extern "C" fn ClearBackground(color: Color) -> void;
 
-pub extern fn DrawPixel(x: i32, y: i32, color: Color) -> void;
-pub extern fn DrawLine( startX: i32, startY: i32, endX: i32, endY: i32, color: Color) -> void;
-pub extern fn DrawCircle( centerX: i32, centerY: i32, radius: f32, color: Color) -> void;
-pub extern fn DrawRectangle( posX: i32, posY: i32, width: i32, height: i32, color: Color) -> void;
-pub extern fn DrawRectangleRec(rec: Rectangle, color: Color) -> void;
-pub extern fn DrawText( text: *const u8, posX: i32, posY: i32, fontSize: i32, color: Color) -> void;
+pub extern "C" fn DrawPixel(x: i32, y: i32, color: Color) -> void;
+pub extern "C" fn DrawLine( startX: i32, startY: i32, endX: i32, endY: i32, color: Color) -> void;
+pub extern "C" fn DrawCircle( centerX: i32, centerY: i32, radius: f32, color: Color) -> void;
+pub extern "C" fn DrawRectangle( posX: i32, posY: i32, width: i32, height: i32, color: Color) -> void;
+pub extern "C" fn DrawRectangleRec(rec: Rectangle, color: Color) -> void;
+pub extern "C" fn DrawText( text: *const u8, posX: i32, posY: i32, fontSize: i32, color: Color) -> void;
 
-pub extern fn DrawLineEx(start: Vector2, end: Vector2, thick: f32, color: Color) -> void;
+pub extern "C" fn DrawLineEx(start: Vector2, end: Vector2, thick: f32, color: Color) -> void;
 
-pub extern fn MeasureText(text: *const u8, fontSize: i32) -> i32;
+pub extern "C" fn MeasureText(text: *const u8, fontSize: i32) -> i32;
 
-pub extern fn IsKeyPressed(key: i32) -> bool;
-pub extern fn IsKeyDown(key: i32) -> bool;
-pub extern fn IsKeyReleased(key: i32) -> bool;
+pub extern "C" fn IsKeyPressed(key: i32) -> bool;
+pub extern "C" fn IsKeyDown(key: i32) -> bool;
+pub extern "C" fn IsKeyReleased(key: i32) -> bool;
 
-pub extern fn IsMouseButtonPressed(button: i32) -> bool;
-pub extern fn IsMouseButtonDown(button: i32) -> bool;
-pub extern fn IsMouseButtonReleased(button: i32) -> bool;
+pub extern "C" fn IsMouseButtonPressed(button: i32) -> bool;
+pub extern "C" fn IsMouseButtonDown(button: i32) -> bool;
+pub extern "C" fn IsMouseButtonReleased(button: i32) -> bool;
 
-pub extern fn GetMouseX() -> i32;
-pub extern fn GetMouseY() -> i32;
-pub extern fn GetMousePosition() -> Vector2;
+pub extern "C" fn GetMouseX() -> i32;
+pub extern "C" fn GetMouseY() -> i32;
+pub extern "C" fn GetMousePosition() -> Vector2;
 
 
-pub extern fn BeginMode2D(camera: Camera2D) -> void;
-pub extern fn EndMode2D() -> void;
+pub extern "C" fn BeginMode2D(camera: Camera2D) -> void;
+pub extern "C" fn EndMode2D() -> void;
 
-pub extern fn BeginMode3D(camera: Camera3D) -> void;
-pub extern fn EndMode3D() -> void;
+pub extern "C" fn BeginMode3D(camera: Camera3D) -> void;
+pub extern "C" fn EndMode3D() -> void;
 
-pub extern fn WaitTime(s: f32) -> void;
+pub extern "C" fn WaitTime(s: f32) -> void;
 
 pub const LIGHTGRAY  = Color{ r: 200, g: 200, b: 200, a: 255 };
 pub const GRAY       = Color{ r: 130, g: 130, b: 130, a: 255 };

@@ -60,7 +60,7 @@ fn _exit(status: i32) -> void @inline @noprefix @noreturn {
 
 when @target_arch != "arm64" {
 
-fn _start() -> void @noprefix @naked @noreturn {
+extern fn _start() -> void @noprefix @naked @noreturn {
     asm volatile (
         "xor ebp, ebp\n"
         "mov edi, [rsp]\n"

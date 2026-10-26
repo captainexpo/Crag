@@ -1339,7 +1339,7 @@ llvm::Value *LLVMCodegen::addGlobalVarInitializer(llvm::Value *var, std::shared_
         llvm::FunctionType *initFuncType =
             llvm::FunctionType::get(llvm::Type::getVoidTy(context), false);
         llvm::Function *initFunc = llvm::Function::Create(initFuncType,
-                                                          llvm::Function::InternalLinkage,
+                                                          llvm::Function::ExternalLinkage,
                                                           GLOBAL_VAR_INIT_FUNC_NAME, m_llvm_module.get());
         registerGlobalCtor(*m_llvm_module, initFunc, 65535);
 

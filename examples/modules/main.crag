@@ -1,7 +1,7 @@
 import "other.crag" as Other;
 import "math.crag" as Math;
 
-extern fn printf(fmt: *u8, ...) -> i32;
+extern "C" fn printf(fmt: *u8, ...) -> i32;
 
 enum Hello(i32) {
     Test = 0,
