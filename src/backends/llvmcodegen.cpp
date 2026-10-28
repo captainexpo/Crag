@@ -342,7 +342,7 @@ void LLVMCodegen::generateTypeSkeletons(std::shared_ptr<Module> module) {
         }
     }
 
-    for (const auto &decl : module->ast->declarations) {
+    for (const auto &decl : module->typed_ast->declarations) {
         auto actualDecl = decl;
         if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
             actualDecl = externDecl->declaration;
@@ -374,7 +374,7 @@ void LLVMCodegen::generateStructBodies(std::shared_ptr<Module> module) {
         }
     }
 
-    for (const auto &decl : module->ast->declarations) {
+    for (const auto &decl : module->typed_ast->declarations) {
         auto actualDecl = decl;
         if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
             actualDecl = externDecl->declaration;
@@ -403,7 +403,7 @@ void LLVMCodegen::generateUnionAndEnumBodies(std::shared_ptr<Module> module) {
         }
     }
 
-    for (const auto &decl : module->ast->declarations) {
+    for (const auto &decl : module->typed_ast->declarations) {
         auto actualDecl = decl;
         if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
             actualDecl = externDecl->declaration;
@@ -441,7 +441,7 @@ void LLVMCodegen::generateSignatures(std::shared_ptr<Module> module) {
 
     auto &pending = m_pending_module_work[module.get()];
 
-    for (const auto &decl : module->ast->declarations) {
+    for (const auto &decl : module->typed_ast->declarations) {
         auto actualDecl = decl;
         std::shared_ptr<ExternDeclaration> externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl);
         if (externDecl) {
@@ -1187,7 +1187,8 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
         return function; // No body to generate
     }
 
-    m_scopeStack.push_back(Scope(CUR_SCOPE));
+    // Lookups walk the whole stack, so a new scope starts empty rather than copying the enclosing one
+    m_scopeStack.emplace_back();
     struct ScopePopper {
         std::vector<Scope> &stack;
         ~ScopePopper() {
@@ -3492,9 +3493,7 @@ llvm::Value *LLVMCodegen::generateStructInitializer(
 
 llvm::Value *
 LLVMCodegen::generateBlock(const std::shared_ptr<Block> &blockNode) {
-    auto parent_scope = !m_scopeStack.empty() ? std::make_shared<Scope>(CUR_SCOPE)
-                                              : std::make_shared<Scope>(nullptr);
-    m_scopeStack.push_back(*parent_scope);
+    m_scopeStack.emplace_back();
     llvm::Value *lastValue = nullptr;
     for (const auto &stmt : blockNode->statements) {
         if (m_builder->GetInsertBlock() && m_builder->GetInsertBlock()->getTerminator()) {

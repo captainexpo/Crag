@@ -13,14 +13,14 @@
 
 // TODO: FFS don't do this, but it's the easiest way to solve the conflict between the when blocks and the module resolver.
 void rebuildModuleMetadata(const std::shared_ptr<Module> &module) {
-    if (!module || !module->ast) {
+    if (!module || !module->typed_ast) {
         return;
     }
 
     module->exports.clear();
     module->externLinkage.clear();
 
-    for (const auto &decl : module->ast->declarations) {
+    for (const auto &decl : module->typed_ast->declarations) {
         bool isExtern = false;
         auto actualDecl = decl;
         if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
@@ -56,6 +56,21 @@ void rebuildModuleMetadata(const std::shared_ptr<Module> &module) {
             }
         }
     }
+}
+
+static ASTNodePtr cloneTopLevelDeclaration(const ASTNodePtr &decl) {
+    auto copy = cloneNode(decl);
+    auto actualDecl = copy;
+    if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(copy)) {
+        externDecl->declaration = cloneNode(externDecl->declaration);
+        actualDecl = externDecl->declaration;
+    }
+    if (auto sd = std::dynamic_pointer_cast<StructDeclaration>(actualDecl)) {
+        for (auto &[name, method] : sd->methods) {
+            method.method_decl = cloneNode(method.method_decl);
+        }
+    }
+    return copy;
 }
 
 TypeChecker::TypeChecker(CompilerOptions options) : m_const_eval(*new ConstEvaluator(this)) {
@@ -171,7 +186,7 @@ bool TypeChecker::insertSymbol(const std::string &name, SymbolKind kind,
 }
 
 void TypeChecker::ensureGlobalVariableVisible(const std::string &name) {
-    if (!current_module || !current_module->ast || currentScopes().empty()) {
+    if (!current_module || !current_module->typed_ast || currentScopes().empty()) {
         return;
     }
 
@@ -179,7 +194,7 @@ void TypeChecker::ensureGlobalVariableVisible(const std::string &name) {
         return;
     }
 
-    for (const auto &decl : current_module->ast->declarations) {
+    for (const auto &decl : current_module->typed_ast->declarations) {
         auto actualDecl = decl;
         if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
             actualDecl = externDecl->declaration;
@@ -574,12 +589,34 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTNode> &n
     }
     if (auto at = std::dynamic_pointer_cast<ArrayType>(t)) {
         auto bt = resolveType(node, at->element_type);
-        if (at->length_expr)
-            at->length_expr->inferred_type = inferExpression(at->length_expr);
-
         if (!bt)
             throw TypeCheckError(current_module, node, "Could not resolve array element type for '" + at->str() + "'");
-        return std::make_shared<ArrayType>(bt, at->length_expr, at->unsized);
+        if (at->unsized || !at->length_expr)
+            return std::make_shared<ArrayType>(bt, at->length_expr, at->unsized);
+        if (at->length) // Already resolved
+            return std::make_shared<ArrayType>(*at);
+
+        // Fold the length to a literal so types compare (and size) by value
+        auto length_expr = at->length_expr;
+        inferExpression(length_expr);
+        m_const_eval.clearErrors();
+        auto evaluated = m_const_eval.evaluateExpression(length_expr);
+        for (const auto &e : m_const_eval.errors())
+            throw TypeCheckError(current_module, e.first, e.second);
+        auto lit = evaluated ? std::dynamic_pointer_cast<Literal>(*evaluated) : nullptr;
+        if (!lit || !lit->lit_type || !lit->lit_type->isInteger())
+            throw TypeCheckError(current_module, at->length_expr, "Array length must be a constant integer expression");
+        if (auto v = std::get_if<int64_t>(&lit->value); v && *v < 0)
+            throw TypeCheckError(current_module, at->length_expr, "Array length cannot be negative");
+
+        auto len = getLitValue(lit);
+        auto i64 = std::make_shared<I64>();
+        auto len_lit = std::make_shared<Literal>(static_cast<int64_t>(len), i64);
+        len_lit->inferred_type = i64;
+        len_lit->constant_evaluated = true;
+        auto resolved = std::make_shared<ArrayType>(bt, len_lit, false);
+        resolved->length = len;
+        return resolved;
     }
     if (auto ft = std::dynamic_pointer_cast<FunctionType>(t)) {
         auto rt = resolveType(node, ft->ret);
@@ -746,12 +783,52 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
 
     symbol_table.insertModule(module);
 
+    // The parsed AST is never modified. Each top-level declaration is copied into typed_ast as it is
+    // registered, and all later checking annotates and rewrites those copies.
+    auto typed_ast = cloneNode(module->ast);
+    typed_ast->declarations.clear();
+    module->typed_ast = typed_ast;
+
+    // Worklist of parsed declarations, with taken `when` blocks spliced in
+    auto pending = module->ast->declarations;
+
     std::vector<std::shared_ptr<StructDeclaration>> struct_decls;
     std::vector<std::shared_ptr<UnionDeclaration>> union_decls;
 
     try {
-        for (int i = 0; i < module->ast->declarations.size(); ++i) {
-            auto decl = module->ast->declarations[i];
+        for (int i = 0; i < pending.size(); ++i) {
+            if (auto wb = std::dynamic_pointer_cast<WhenBlock>(pending[i])) {
+                auto cond_lit_opt = m_const_eval.evaluateExpression(wb->condition);
+                if (!m_const_eval.ok()) {
+                    for (const auto &err : m_const_eval.errors()) {
+                        m_errors.emplace_back(TypeCheckError(current_module, wb->condition, "Failed to evaluate when block condition: " + err.second));
+                    }
+                    throw TypeCheckError(current_module, wb, "Failed to evaluate condition for when block");
+                }
+                if (!cond_lit_opt) {
+                    for (const auto &err : m_const_eval.errors()) {
+                        m_errors.emplace_back(TypeCheckError(current_module, wb->condition, "Failed to evaluate when block condition: " + err.second));
+                    }
+                    throw TypeCheckError(current_module, wb, "Failed to evaluate condition for when block");
+                }
+                auto cond_lit = *cond_lit_opt;
+
+                if (auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit)) {
+                    if (bool_lit->lit_type->kind() != TypeKind::Bool) {
+                        throw TypeCheckError(current_module, wb, "When block condition is not a boolean");
+                    }
+                    bool condition_true = std::get<bool>(bool_lit->value);
+                    if (condition_true) {
+                        pending.insert(pending.begin() + i + 1, wb->body.begin(), wb->body.end());
+                    }
+                } else {
+                    throw TypeCheckError(current_module, wb, "When block condition is not a literal");
+                }
+                continue;
+            }
+
+            auto decl = cloneTopLevelDeclaration(pending[i]);
+            typed_ast->declarations.push_back(decl);
             auto actualDecl = decl;
             if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
                 actualDecl = externDecl->declaration;
@@ -796,13 +873,15 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     throw TypeCheckError(current_module, en, "Enum " + en->name + " has no base type");
                     return;
                 }
-                auto et = en->enum_type;
-                for (const auto &v : en->variants) {
-                    et->addVariant(v.first, v.second);
-
+                auto et = std::make_shared<EnumType>(en->name, en->base_type);
+                en->enum_type = et;
+                for (auto &v : en->variants) {
                     // infer type of variant value
                     std::shared_ptr<Expression> val = v.second;
                     auto i = inferExpression(val, en->base_type);
+                    v.second = std::dynamic_pointer_cast<Literal>(val);
+                    et->addVariant(v.first, v.second);
+
                     auto vtype = resolveType(en, i);
                     if (!vtype->equals(en->base_type)) {
                         throw TypeCheckError(current_module, v.second,
@@ -854,43 +933,10 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                 SymbolId aid;
                 insertSymbol(ta->name, SymbolKind::Type, alias_type, ta, &aid);
                 ta->symbol_id = aid;
-            } else if (auto wb = std::dynamic_pointer_cast<WhenBlock>(decl)) {
-                auto cond_lit_opt = m_const_eval.evaluateExpression(wb->condition);
-                if (!m_const_eval.ok()) {
-                    for (const auto &err : m_const_eval.errors()) {
-                        m_errors.emplace_back(TypeCheckError(current_module, wb->condition, "Failed to evaluate when block condition: " + err.second));
-                    }
-                    throw TypeCheckError(current_module, wb, "Failed to evaluate condition for when block");
-                }
-                if (!cond_lit_opt) {
-                    for (const auto &err : m_const_eval.errors()) {
-                        m_errors.emplace_back(TypeCheckError(current_module, wb->condition, "Failed to evaluate when block condition: " + err.second));
-                    }
-                    throw TypeCheckError(current_module, wb, "Failed to evaluate condition for when block");
-                }
-                auto cond_lit = *cond_lit_opt;
-
-                if (auto bool_lit = std::dynamic_pointer_cast<Literal>(cond_lit)) {
-                    if (bool_lit->lit_type->kind() != TypeKind::Bool) {
-                        throw TypeCheckError(current_module, wb, "When block condition is not a boolean");
-                    }
-                    bool condition_true = std::get<bool>(bool_lit->value);
-                    if (condition_true) {
-                        module->ast->declarations.insert(
-                            module->ast->declarations.begin() + i + 1, wb->body.begin(), wb->body.end());
-                        module->ast->declarations.erase(module->ast->declarations.begin() + i);
-                        i -= 1;
-                    } else {
-                        module->ast->declarations.erase(module->ast->declarations.begin() + i);
-                        i -= 1;
-                    }
-                } else {
-                    throw TypeCheckError(current_module, wb, "When block condition is not a literal");
-                }
             }
         }
 
-        for (const auto &decl : module->ast->declarations) {
+        for (const auto &decl : typed_ast->declarations) {
             auto actualDecl = decl;
             if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
                 actualDecl = externDecl->declaration;
@@ -911,11 +957,11 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
         // from the declaration list below.
         rebuildModuleMetadata(module);
 
-        // Remove templates from AST
-        module->ast->declarations.erase(
+        // Templates aren't emitted directly, only their instantiations
+        typed_ast->declarations.erase(
             std::remove_if(
-                module->ast->declarations.begin(),
-                module->ast->declarations.end(),
+                typed_ast->declarations.begin(),
+                typed_ast->declarations.end(),
                 [this](const std::shared_ptr<ASTNode> &decl) {
                     auto actualDecl = decl;
                     if (auto externDecl = std::dynamic_pointer_cast<ExternDeclaration>(decl)) {
@@ -929,7 +975,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
                     }
                     return false;
                 }),
-            module->ast->declarations.end());
+            typed_ast->declarations.end());
 
         for (const auto &sd : struct_decls) {
             checkStructDeclaration(sd);
@@ -937,7 +983,7 @@ void TypeChecker::check(std::shared_ptr<Module> module) {
         for (const auto &ud : union_decls) {
             checkUnionDeclaration(ud);
         }
-        for (const auto &decl : module->ast->declarations) {
+        for (const auto &decl : typed_ast->declarations) {
             try {
                 checkNode(decl);
             } catch (const TypeCheckError &e) {
@@ -1186,7 +1232,8 @@ void TypeChecker::checkVariableDeclaration(
                 var->var_type = init_type;
             }
 
-            if (var->is_const) {
+            // var_type may be shared with the parsed AST or another symbol, so copy before changing constness
+            if (var->is_const || var->var_type->is_const) {
                 var->var_type = var->var_type->instantiate();
             }
             var->var_type->is_const = var->is_const;
@@ -1322,13 +1369,14 @@ void TypeChecker::handleArrayLiteralAssignment(
 
     if (!arr_type->unsized) {
         arr_type->length_expr = len_lit;
-        arr_type->actualSize = final_len;
+        arr_type->length = final_len;
     }
 }
 
 void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
     if (!stmt)
         return;
+    stmt = cloneNode(stmt);
     if (auto block = std::dynamic_pointer_cast<Block>(stmt)) {
         pushScope();
         for (size_t i = 0; i < block->statements.size();) {
@@ -1494,9 +1542,11 @@ void TypeChecker::checkStatement(std::shared_ptr<Statement> &stmt) {
                 if (!case_lit_opt) {
                     throw TypeCheckError(current_module, case_expr, "Failed to evaluate switch case expression");
                 }
-                (*case_lit_opt)->constant_evaluated = true;
-                case_block.first[jdx] = *case_lit_opt;
-                case_block.first[jdx]->inferred_type = std::dynamic_pointer_cast<Literal>(*case_lit_opt)->lit_type;
+                // The evaluated value can be shared (enum variants, const globals), so take a copy
+                auto case_lit = cloneNode(*case_lit_opt);
+                case_lit->constant_evaluated = true;
+                case_lit->inferred_type = std::dynamic_pointer_cast<Literal>(case_lit)->lit_type;
+                case_block.first[jdx] = case_lit;
                 jdx++;
             }
             checkStatement(case_block.second);
@@ -1620,6 +1670,7 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
                              const std::shared_ptr<Type> &expected) {
     if (!expr)
         throw TypeCheckError(current_module, expr, "Cannot infer type of null expression");
+    expr = cloneNode(expr);
     if (auto va = std::dynamic_pointer_cast<VarAccess>(expr))
         return inferVarAccess(va);
     if (auto lit = std::dynamic_pointer_cast<Literal>(expr))
@@ -1738,7 +1789,10 @@ TypeChecker::inferExpression(std::shared_ptr<Expression> &expr,
         std::shared_ptr<EnumType> res;
         if (!va) {
             auto mod = std::dynamic_pointer_cast<ModuleAccess>(ea->enum_expr);
-            if (!mod) {
+            if (mod) {
+                mod = cloneNode(mod);
+                ea->enum_expr = mod;
+            } else {
                 if (auto fa = std::dynamic_pointer_cast<FieldAccess>(ea->enum_expr)) {
                     mod = tryModuleAccessChain(fa->base, fa->field);
                 }
@@ -1927,7 +1981,6 @@ std::shared_ptr<Type> TypeChecker::inferTupleLiteral(const std::shared_ptr<Tuple
     }
     std::vector<std::shared_ptr<Type>> element_types;
     for (size_t i = 0; i < tl->elements.size(); ++i) {
-        auto elem = tl->elements[i];
         std::shared_ptr<Type> expected_elem_type = nullptr;
         if (expected && expected->kind() == TypeKind::Tuple) {
             auto expected_tuple = std::static_pointer_cast<TupleType>(expected);
@@ -1935,7 +1988,7 @@ std::shared_ptr<Type> TypeChecker::inferTupleLiteral(const std::shared_ptr<Tuple
                 expected_elem_type = expected_tuple->elements[i];
             }
         }
-        auto elem_type = inferExpression(elem, expected_elem_type);
+        auto elem_type = inferExpression(tl->elements[i], expected_elem_type);
         element_types.push_back(elem_type);
     }
     auto tuple_type = std::make_shared<TupleType>(element_types);
@@ -2073,9 +2126,9 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
 
     std::shared_ptr<Type> elem_type = nullptr;
     for (int i = 0; i < al->elements.size(); ++i) {
-        auto el = al->elements[i];
         // Pass expected element type to each element
-        auto t = inferExpression(el, expected_elem ? expected_elem : elem_type);
+        auto t = inferExpression(al->elements[i], expected_elem ? expected_elem : elem_type);
+        auto el = al->elements[i];
         if (!t)
             throw TypeCheckError(current_module, al, "Failed to infer type of array literal element");
 
@@ -2537,8 +2590,7 @@ std::shared_ptr<Type> TypeChecker::inferFuncCall(const std::shared_ptr<FuncCall>
 }
 
 std::shared_ptr<Type> TypeChecker::inferErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
-    auto expr = std::dynamic_pointer_cast<Expression>(fa->base);
-    auto base = resolveType(expr, inferExpression(expr));
+    auto base = resolveType(fa->base, inferExpression(fa->base));
     if (!base) {
         throw TypeCheckError(current_module, fa, "Failed to infer type of error union field access base");
     }
@@ -2562,8 +2614,7 @@ std::shared_ptr<Type> TypeChecker::inferErrorUnionFieldAccess(const std::shared_
 }
 
 std::shared_ptr<Type> TypeChecker::inferArrayFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
-    auto expr = std::dynamic_pointer_cast<Expression>(fa->base);
-    auto base = inferExpression(expr);
+    auto base = inferExpression(fa->base);
     if (!base) {
         throw TypeCheckError(current_module, fa, "Failed to infer type of error union field access base");
     }
@@ -2584,8 +2635,8 @@ std::shared_ptr<Type> TypeChecker::inferArrayFieldAccess(const std::shared_ptr<F
 
 std::shared_ptr<Type>
 TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
-    if (auto baseExpr = std::dynamic_pointer_cast<Expression>(fa->base)) {
-        auto bt = resolveType(fa, inferExpression(baseExpr));
+    if (fa->base) {
+        auto bt = resolveType(fa, inferExpression(fa->base));
         if (!bt)
             throw TypeCheckError(current_module, fa, "Failed to infer type of field access base");
         auto st = std::dynamic_pointer_cast<StructType>(bt);
@@ -2663,20 +2714,25 @@ TypeChecker::inferFieldAccess(const std::shared_ptr<FieldAccess> &fa) {
             if (idx < 0 || idx >= tt->elements.size()) {
                 throw TypeCheckError(current_module, fa, "Tuple index out of bounds: " + std::to_string(idx) + " (tuple has " + std::to_string(tt->elements.size()) + " elements)");
             }
-            fa->inferred_type = resolveType(fa, tt->elements[idx]);
-            fa->inferred_type->is_const = bt->is_const;
+            auto elem_type = resolveType(fa, tt->elements[idx]);
+            if (elem_type->is_const != bt->is_const) {
+                // The element type is shared with the tuple type, so adjust constness on a copy
+                elem_type = elem_type->instantiate();
+                elem_type->is_const = bt->is_const;
+            }
+            fa->inferred_type = elem_type;
             return tt->elements[idx];
         }
         throw TypeCheckError(current_module, fa, "Field access on disallowed type: " + typeName(bt));
     }
-    throw TypeCheckError(current_module, fa->base, "FieldAccess base is not an expression: " + fa->base->str());
+    throw TypeCheckError(current_module, fa, "FieldAccess has no base expression");
 }
 
 std::shared_ptr<Type>
 TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
     // base could be expression or ASTNode
-    if (auto baseExpr = std::dynamic_pointer_cast<Expression>(oa->base)) {
-        auto bt = inferExpression(baseExpr);
+    if (oa->base) {
+        auto bt = inferExpression(oa->base);
         inferExpression(oa->index);
         if (!bt)
             throw TypeCheckError(current_module, oa, "Failed to infer type of offset access base");
@@ -2701,7 +2757,7 @@ TypeChecker::inferOffsetAccess(const std::shared_ptr<OffsetAccess> &oa) {
         }
         throw TypeCheckError(current_module, oa, "Offset access on non-array/pointer type: " + typeName(bt));
     } else {
-        throw TypeCheckError(current_module, oa->base, "OffsetAccess base is not an expression: " + oa->base->str());
+        throw TypeCheckError(current_module, oa, "OffsetAccess has no base expression");
     }
 }
 
@@ -2712,6 +2768,8 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
     std::shared_ptr<ArrayType> arrayType;
     std::shared_ptr<Type> tmp;
     if (auto mod_acc = std::dynamic_pointer_cast<ModuleAccess>(init->struct_type_expr)) {
+        mod_acc = cloneNode(mod_acc);
+        init->struct_type_expr = mod_acc;
         auto stype = inferModuleAccess(mod_acc);
         structType = std::dynamic_pointer_cast<StructType>(stype);
         arrayType = std::dynamic_pointer_cast<ArrayType>(stype);
@@ -2767,8 +2825,8 @@ TypeChecker::inferStructInit(const std::shared_ptr<StructInitializer> &init,
     // Global variable initializers can be checked before struct declarations are finalized,
     // which leaves st as a placeholder with no fields. Hydrate it from the declaration so
     // field lookup and casts use the actual struct layout.
-    if ((!structType->complete || structType->fields.empty()) && current_module && current_module->ast) {
-        for (const auto &decl : current_module->ast->declarations) {
+    if ((!structType->complete || structType->fields.empty()) && current_module && current_module->typed_ast) {
+        for (const auto &decl : current_module->typed_ast->declarations) {
             auto sd = std::dynamic_pointer_cast<StructDeclaration>(decl);
             if (!sd || sd->name != structType->name) {
                 continue;

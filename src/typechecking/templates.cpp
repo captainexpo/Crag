@@ -146,7 +146,7 @@ std::shared_ptr<Module> TypeChecker::instantiationModule(const std::shared_ptr<M
     synth->canon_name = origin->canon_name + ".__instantiations__";
     synth->name = synth->canon_name;
     synth->path = origin->path;
-    synth->ast = std::make_shared<Program>();
+    synth->typed_ast = std::make_shared<Program>();
     synth->imports = origin->imports;
     synth->externLinkage = origin->externLinkage;
     synth->source_code = origin->source_code;
@@ -368,7 +368,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
 
         ti->inferred_type = declCopy->type;
 
-        instantiationModule(current_module)->ast->declarations.push_back(declCopy);
+        instantiationModule(current_module)->typed_ast->declarations.push_back(declCopy);
 
         type_decl->instantiations[cache_key] = {ti->inferred_type, inst_id};
 
@@ -429,7 +429,7 @@ std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::infer
         m_expected_return_type = nullptr;
         checkStructDeclaration(declCopy);
         // std::cout << "TYP " << st->str() << "\n";
-        instantiationModule(current_module)->ast->declarations.push_back(declCopy);
+        instantiationModule(current_module)->typed_ast->declarations.push_back(declCopy);
 
         declCopy->symbol_id = inst_id;
         ti->inferred_type = st;

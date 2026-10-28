@@ -13,17 +13,15 @@ The language was created as a learning project to explore compiler design and im
 - Zig/Rust inspired syntax
 - C-like semantics
 - Manual memory management
-- Simple runtime safety checks (e.g. bounds checking, null pointer checks, division by zero)
-- Module system with `.` member access and selective imports
+- Runtime safety checks
+- Module system
 - Generics for functions and types
-- Structs with methods and static methods
-- Error unions (`T!E`) with `try` / `catch`
+- Structs with methods
+- Errors as values
 - Tuple types and tuple literals
-- `if` expressions
-- Native `str` type (pointer + length)
-- Function pointers, `switch`, enums, unions, type aliases and inline assembly
-- Small standard library (I/O, strings, `ArrayList`, arenas, math, random, time, testing, libc bindings)
-- Built on top of LLVM for code generation and optimization (bloated and slow, but it works)
+- Native `str` type
+- Small standard library
+- Built on top of LLVM for code generation and optimization
 
 ## Usage
 
@@ -35,7 +33,7 @@ The Crag compiler is a command-line tool that takes a Crag source file and compi
 
 There are also some additional flags that can be used to control the compilation process:
 
-- `-ODebug` (debug symbols, no optimization), `-ORelease` (no debug symbols, equivalent of -O3 optimization) - Optimization levels (default is `-ODebug`)
+- `-ODebug` (debug symbols, runtime safety, no optimization), `-ORelease` (no debug symbols or runtime safety, equivalent of -O3 optimization) - Optimization levels (default is `-ODebug`)
 - Any linker flags needed to link against other libraries (e.g. `-lm` to link against the math library)
 - `--unsafe` - Disable runtime safety checks.
 - `--emit-ir` - Emit LLVM IR instead of a native executable

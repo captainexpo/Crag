@@ -109,11 +109,11 @@ std::shared_ptr<Backend> compileModule(const std::string &raw_filepath, Compiler
 
 #if defined(DBG_PRINT_AST) || defined(NO_LLVM)
     std::cout << "after type checking:\n";
-    std::cout << mod->ast->toString();
+    std::cout << mod->typed_ast->toString();
 #else
     if (options.dump_ast_asa) {
         std::cout << "Dumping AST and exiting as requested by --dump-ast:\n";
-        std::cout << mod->ast->toString();
+        std::cout << mod->typed_ast->toString();
         return nullptr;
     }
 #endif

@@ -196,6 +196,9 @@ struct ASTNode : std::enable_shared_from_this<ASTNode> {
 
     virtual std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> generic_types = {}) const;
 
+    // Copies this node only; children (and types) are shared with the original.
+    virtual std::shared_ptr<ASTNode> shallowClone() const { return std::make_shared<ASTNode>(*this); }
+
     std::string locationStr() const {
         return "(line " + std::to_string(line) + ", col " + std::to_string(col) +
                ")";
@@ -208,6 +211,11 @@ struct ASTNode : std::enable_shared_from_this<ASTNode> {
         return str();
     }
 };
+
+template <typename T>
+std::shared_ptr<T> cloneNode(const std::shared_ptr<T> &node) {
+    return node ? std::dynamic_pointer_cast<T>(node->shallowClone()) : nullptr;
+}
 
 struct Statement : virtual ASTNode {};
 struct Expression : virtual ASTNode {};
@@ -462,7 +470,7 @@ struct ArrayType : Type {
     TypeKind kind() const override { return TypeKind::Array; }
     std::shared_ptr<Type> element_type;
     std::shared_ptr<Expression> length_expr;
-    size_t actualSize = 0; // Filled in during type checking for sized arrays
+    std::optional<uint64_t> length; // Value of length_expr, filled in during type checking for sized arrays
     bool unsized;
 
     ArrayType(std::shared_ptr<Type> b, std::shared_ptr<Expression> len, bool us)
@@ -487,12 +495,16 @@ struct ArrayType : Type {
             return false;
         if (unsized)
             return true;
-        // TODO: Better length expression comparison
+        if (length && o->length)
+            return *length == *o->length;
+        // Not yet type checked, so the only thing to go on is whether it's the same expression
         return length_expr == o->length_expr;
     }
     std::shared_ptr<Type> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override {
-        return std::make_shared<ArrayType>(element_type->instantiate(gp_replace),
-                                           length_expr, unsized);
+        auto copy = std::make_shared<ArrayType>(element_type->instantiate(gp_replace),
+                                                length_expr, unsized);
+        copy->length = length;
+        return copy;
     }
 };
 
@@ -903,6 +915,7 @@ struct ExternDeclaration : Declaration {
 
     NodeKind kind() const override { return NodeKind::ExternDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<ExternDeclaration>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -934,6 +947,7 @@ struct Program : ASTNode {
     }
     NodeKind kind() const override { return NodeKind::Program; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<Program>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -955,6 +969,7 @@ struct TypeCast : public Expression {
     }
     NodeKind kind() const override { return NodeKind::TypeCast; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<TypeCast>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -975,6 +990,7 @@ struct IfExpression : public Expression {
     }
     NodeKind kind() const override { return NodeKind::IfExpression; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<IfExpression>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -986,6 +1002,7 @@ struct TypeExpression : public Expression {
     }
     NodeKind kind() const override { return NodeKind::TypeExpression; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<TypeExpression>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -996,6 +1013,7 @@ struct VarAccess : public Expression {
     std::string str() const override { return "VarAccess(" + name + ")"; }
     NodeKind kind() const override { return NodeKind::VarAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<VarAccess>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1009,6 +1027,7 @@ struct Dereference : public Expression {
         return NodeKind::Dereference;
     };
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<Dereference>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1029,6 +1048,7 @@ struct FuncCall : public Expression {
     }
     NodeKind kind() const override { return NodeKind::FuncCall; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<FuncCall>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 struct MethodCall : public Expression {
@@ -1052,6 +1072,7 @@ struct MethodCall : public Expression {
     }
     NodeKind kind() const override { return NodeKind::MethodCall; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<MethodCall>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1064,6 +1085,7 @@ struct EnumAccess : public Access {
     std::string str() const override { return "EnumAccess(" + enum_expr->toString() + ":" + variant + ")"; }
     NodeKind kind() const override { return NodeKind::VarAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<EnumAccess>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1077,6 +1099,7 @@ struct FieldAccess : public Access {
     }
     NodeKind kind() const override { return NodeKind::FieldAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<FieldAccess>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1113,6 +1136,7 @@ struct TemplateInstantiation : public Expression {
     }
     NodeKind kind() const override { return NodeKind::TemplateInstantiation; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<TemplateInstantiation>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1131,6 +1155,7 @@ struct ModuleAccess : public Access {
     }
     NodeKind kind() const override { return NodeKind::ModuleAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<ModuleAccess>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1144,6 +1169,7 @@ struct OffsetAccess : public Expression {
     }
     NodeKind kind() const override { return NodeKind::OffsetAccess; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<OffsetAccess>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1159,6 +1185,7 @@ struct BinaryOperation : public Expression {
     }
     NodeKind kind() const override { return NodeKind::BinaryOp; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<BinaryOperation>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1173,6 +1200,7 @@ struct UnaryOperation : public Expression {
     }
     NodeKind kind() const override { return NodeKind::UnaryOp; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<UnaryOperation>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1186,6 +1214,7 @@ struct TryExpression : public Expression {
     }
     NodeKind kind() const override { return NodeKind::TryExpr; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<TryExpression>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1205,6 +1234,7 @@ struct CatchExpression : public Expression {
     }
     NodeKind kind() const override { return NodeKind::CatchExpr; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<CatchExpression>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1240,6 +1270,7 @@ struct Literal : public Expression {
     }
     NodeKind kind() const override { return NodeKind::Literal; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<Literal>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1265,6 +1296,7 @@ struct ArrayLiteral : public Expression {
     }
     NodeKind kind() const override { return NodeKind::Literal; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<ArrayLiteral>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1286,6 +1318,7 @@ struct TupleLiteral : public Expression {
     }
     NodeKind kind() const override { return NodeKind::TupleLiteral; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<TupleLiteral>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1312,6 +1345,7 @@ struct StructInitializer : public Expression {
     }
     NodeKind kind() const override { return NodeKind::StructInit; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<StructInitializer>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1344,6 +1378,7 @@ struct Block : public Statement {
     }
     NodeKind kind() const override { return NodeKind::Block; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<Block>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1364,6 +1399,7 @@ struct IfStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::IfStmt; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<IfStatement>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1383,6 +1419,7 @@ struct ForStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::ForStmt; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<ForStatement>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1397,6 +1434,7 @@ struct WhileStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::WhileStmt; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<WhileStatement>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1409,6 +1447,7 @@ struct ReturnStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::ReturnStmt; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<ReturnStatement>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1419,6 +1458,7 @@ struct BreakStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::BreakStatement; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<BreakStatement>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1429,6 +1469,7 @@ struct ContinueStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::ContinueStatement; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<ContinueStatement>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1440,6 +1481,7 @@ struct ExpressionStatement : public Statement {
     }
     NodeKind kind() const override { return NodeKind::ExpressionStatement; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<ExpressionStatement>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1453,6 +1495,7 @@ struct Assignment : public Statement {
     }
     NodeKind kind() const override { return NodeKind::Assignment; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<Assignment>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1477,6 +1520,7 @@ struct FunctionDeclaration : public TypeDecl {
     }
     NodeKind kind() const override { return NodeKind::FunctionDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<FunctionDeclaration>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
@@ -1496,6 +1540,7 @@ struct VariableDeclaration : Statement, Declaration {
     }
     NodeKind kind() const override { return NodeKind::VarDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<VariableDeclaration>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1540,6 +1585,7 @@ struct ImportDeclaration : Declaration {
     }
     NodeKind kind() const override { return NodeKind::ImportDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<ImportDeclaration>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
@@ -1592,6 +1638,7 @@ struct EnumDeclaration : public TypeDecl {
     }
     NodeKind kind() const override { return NodeKind::EnumDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<EnumDeclaration>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
@@ -1631,6 +1678,7 @@ struct StructDeclaration : public TypeDecl {
     }
     NodeKind kind() const override { return NodeKind::StructDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<StructDeclaration>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
@@ -1666,6 +1714,7 @@ struct UnionDeclaration : public TypeDecl {
 
     NodeKind kind() const override { return NodeKind::UnionDecl; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<UnionDeclaration>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
@@ -1684,6 +1733,7 @@ struct TypeAliasDeclaration : public TypeDecl {
 
     NodeKind kind() const override { return NodeKind::TypeAliasDeclaration; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<TypeAliasDeclaration>(*this); }
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 
     // std::shared_ptr<Type> *instantiate(const std::vector<std::shared_ptr<Type>> &type_args) override;
@@ -1731,6 +1781,7 @@ struct AsmStmt : public Statement {
 
     NodeKind kind() const override { return NodeKind::AsmStmt; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<AsmStmt>(*this); }
     std::string str() const override {
         std::string result = "AsmStmt(volatile: " + std::string(is_volatile ? "true" : "false") + ", template: \"" + template_str + "\", operands: [";
         for (const auto &op : operands) {
@@ -1755,6 +1806,7 @@ struct WhenBlock : public Declaration, public Statement { // Conditional compila
 
     NodeKind kind() const override { return NodeKind::WhenBlock; }
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<WhenBlock>(*this); }
     std::string str() const override {
         std::string result = "WhenBlock(condition: \"" + condition->str() + "\") {\n";
         for (const auto &node : body) {
@@ -1782,6 +1834,7 @@ struct SwitchStmt : public Statement {
     NodeKind kind() const override { return NodeKind::SwitchStmt; }
 
     void accept(ASTVisitor &v) override { v.visit(*this); }
+    std::shared_ptr<ASTNode> shallowClone() const override { return std::make_shared<SwitchStmt>(*this); }
 
     std::string str() const override {
         std::string result = "SwitchStmt(" + condition->toString() + ") {\n";

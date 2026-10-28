@@ -360,7 +360,7 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
     if (auto ea = std::dynamic_pointer_cast<EnumAccess>(expr)) {
         std::shared_ptr<Expression> baseExpr = ea;
         m_type_checker->inferExpression(baseExpr);
-        auto enumType = std::dynamic_pointer_cast<EnumType>(ea->inferred_type);
+        auto enumType = std::dynamic_pointer_cast<EnumType>(baseExpr->inferred_type);
         if (!enumType) {
             error(ea, "Enum access base is not an enum: " + ea->enum_expr->str());
             return std::nullopt;

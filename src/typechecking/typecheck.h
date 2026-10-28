@@ -69,6 +69,7 @@ class TypeChecker {
 
     // Entry point
     void check(std::shared_ptr<Module> module);
+
     ASTNodePtr lookupConstVariableInModulePath(const std::vector<std::string> &module_path,
                                                const std::string &var_name);
 
@@ -158,6 +159,7 @@ class TypeChecker {
     std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTNode> &node, const std::shared_ptr<Type> &t);
     std::shared_ptr<Module> resolveModulePath(std::shared_ptr<ASTNode> node, const std::vector<std::string> &path);
 
+    // checkStatement/inferExpression replace the node passed in
     void checkNode(const std::shared_ptr<ASTNode> &node);
     void checkStatement(std::shared_ptr<Statement> &stmt);
     void checkAsmStatement(const std::shared_ptr<AsmStmt> &asm_stmt);

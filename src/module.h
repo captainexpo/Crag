@@ -17,7 +17,8 @@ struct Module {
 
     uint32_t id;
 
-    std::shared_ptr<Program> ast;
+    std::shared_ptr<Program> ast;       // As parsed; never modified by the type checker
+    std::shared_ptr<Program> typed_ast; // Built by the type checker, consumed by codegen
 
     std::unordered_map<std::string, std::shared_ptr<ASTNode>> exports;
     std::unordered_map<std::string, std::shared_ptr<Module>> imports;

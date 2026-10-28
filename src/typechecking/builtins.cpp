@@ -6,9 +6,8 @@
 std::pair<std::shared_ptr<Type>, std::shared_ptr<Expression>> TypeChecker::expandSizeOf(const std::shared_ptr<FuncCall> &call) {
     assert(call->args.size() == 1);
     if (auto type_arg = std::dynamic_pointer_cast<TypeExpression>(call->args[0])) {
-        type_arg->type = resolveType(call, type_arg->type);
-        assert(type_arg != nullptr);
-        auto lit = std::make_shared<Literal>(static_cast<uint64_t>(getTypeSize(type_arg->type)), std::make_shared<USize>());
+        auto resolved = resolveType(call, type_arg->type);
+        auto lit = std::make_shared<Literal>(static_cast<uint64_t>(getTypeSize(resolved)), std::make_shared<USize>());
         lit->inferred_type = std::make_shared<USize>();
         return std::make_pair(std::make_shared<USize>(), lit);
     }
