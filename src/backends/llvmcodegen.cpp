@@ -880,8 +880,8 @@ llvm::Value *LLVMCodegen::generateAddress(const std::shared_ptr<Expression> &exp
     throw CodeGenError(expr, "Expression is not an lvalue: " + expr->str());
 }
 
-llvm::Value * LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
-                                bool loadValue) {
+llvm::Value *LLVMCodegen::generateExpression(const std::shared_ptr<Expression> &expr,
+                                             bool loadValue) {
     setDebugLocation(expr);
     if (auto trueExpr = std::dynamic_pointer_cast<BinaryOperation>(expr)) {
         return generateBinaryOp(trueExpr->left, trueExpr->right, trueExpr->op, loadValue);
@@ -1110,11 +1110,10 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
 
     llvm::Function::LinkageTypes linkage = func->type->extern_info.is_extern ? llvm::Function::ExternalLinkage : llvm::Function::InternalLinkage;
 
-
     llvm::Function *function = llvm::Function::Create(
         abiType, linkage, fname, m_llvm_module.get());
 
-    if (!func->type->extern_info.is_extern){
+    if (!func->type->extern_info.is_extern) {
         function->setCallingConv(llvm::CallingConv::Fast);
     }
 
@@ -1150,8 +1149,7 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
 
     if (std::find(func->attributes.begin(), func->attributes.end(), "inline") != func->attributes.end()) {
         function->addFnAttr(llvm::Attribute::AlwaysInline);
-    }
-    else if (std::find(func->attributes.begin(), func->attributes.end(), "noinline") != func->attributes.end()) {
+    } else if (std::find(func->attributes.begin(), func->attributes.end(), "noinline") != func->attributes.end()) {
         function->addFnAttr(llvm::Attribute::NoInline);
     }
 
@@ -1162,7 +1160,6 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
             throw CodeGenError(func, "Only extern functions can be marked as weak");
         }
     }
-
 
     CUR_SCOPE.set(fname, function, fType, func->type);
     if (func->symbol_id != INVALID_SYMBOL_ID) {
@@ -2469,7 +2466,7 @@ llvm::Value *LLVMCodegen::generateMethodCall(
         }
     }
 
-    if (structType == nullptr){
+    if (structType == nullptr) {
         throw CodeGenError(methodCall, "Struct type is not a struct type in method call.");
     }
 
@@ -2629,7 +2626,7 @@ LLVMCodegen::generateFuncCall(const std::shared_ptr<FuncCall> &funcCall,
 
     // set fastcc attribute on call when function is not external
     // TODO: have some more mediated agreement between this decision (maybe in the typechecker setting some flag)
-    if (!sourceFuncType->extern_info.is_extern){
+    if (!sourceFuncType->extern_info.is_extern) {
         callInst->setCallingConv(llvm::CallingConv::Fast);
     }
 
@@ -3938,7 +3935,6 @@ bool LLVMCodegen::isHFA(llvm::StructType *st, llvm::Type *&elementType, unsigned
     return elementType != nullptr && count >= 1 && count <= 4;
 }
 
-// ABI coercion helper functions
 bool LLVMCodegen::shouldCoerceForABI(llvm::Type *type) {
     if (!type->isStructTy()) {
         return false;
@@ -3952,12 +3948,11 @@ bool LLVMCodegen::shouldCoerceForABI(llvm::Type *type) {
             return false;
     }
 
-    llvm::StructType *structType = llvm::cast<llvm::StructType>(type);
-    llvm::DataLayout DL = m_llvm_module->getDataLayout();
-    uint64_t size = DL.getTypeAllocSize(structType);
+    uint64_t size = m_llvm_module->getDataLayout().getTypeAllocSize(type);
 
-    // Coerce structs that are 1, 2, 4, 8, or 16 bytes (System V AMD64 ABI)
-    return size == 1 || size == 2 || size == 4 || size == 8 || size == 16;
+    // Structs > 16 bytes are MEMORY class and go through sret/byval instead (isExternMemoryAggregateType).
+    // Empty structs are ignored by the C ABI.
+    return size > 0 && size <= 16;
 }
 
 // Determines which x86-64 SysV register class
@@ -4001,8 +3996,10 @@ llvm::Type *LLVMCodegen::getABICoercionType(llvm::Type *structType) {
         return structType;
     }
 
-    llvm::DataLayout DL = m_llvm_module->getDataLayout();
+    const llvm::DataLayout &DL = m_llvm_module->getDataLayout();
     uint64_t size = DL.getTypeAllocSize(structType);
+
+    if (size > 16 || size == 0) return structType;
 
     if (size == 1 || size == 2 || size == 4 || size == 8) {
         EightbyteClass cls = EightbyteClass::NONE;
@@ -4022,21 +4019,21 @@ llvm::Type *LLVMCodegen::getABICoercionType(llvm::Type *structType) {
         }
     }
 
-    if (size == 16) {
-        EightbyteClass cls0 = EightbyteClass::NONE, cls1 = EightbyteClass::NONE;
-        classifyEightbyteRange(structType, DL, 0, 0, 8, cls0);
-        classifyEightbyteRange(structType, DL, 0, 8, 16, cls1);
-        if (cls0 == EightbyteClass::INTEGER && cls1 == EightbyteClass::INTEGER) {
-            // Preserve the existing exact type for the (by far most common)
-            // all-integer 16-byte case, e.g. Crag's own `str` (ptr + len).
-            return llvm::VectorType::get(llvm::Type::getInt64Ty(context), 2, false);
+    // Each eightbyte becomes one scalar
+    auto eightbyteType = [&](uint64_t start) -> llvm::Type * {
+        uint64_t bytes = std::min<uint64_t>(8, size - start);
+        EightbyteClass cls = EightbyteClass::NONE;
+        classifyEightbyteRange(structType, DL, 0, start, start + 8, cls);
+        if (cls == EightbyteClass::SSE) {
+            return bytes <= 4 ? llvm::Type::getFloatTy(context) : llvm::Type::getDoubleTy(context);
         }
-        llvm::Type *t0 = (cls0 == EightbyteClass::SSE) ? llvm::Type::getDoubleTy(context) : llvm::Type::getInt64Ty(context);
-        llvm::Type *t1 = (cls1 == EightbyteClass::SSE) ? llvm::Type::getDoubleTy(context) : llvm::Type::getInt64Ty(context);
-        return llvm::StructType::get(context, {t0, t1});
-    }
+        return llvm::Type::getIntNTy(context, bytes * 8);
+    };
 
-    return structType;
+    if (size <= 8) {
+        return eightbyteType(0);
+    }
+    return llvm::StructType::get(context, {eightbyteType(0), eightbyteType(8)});
 }
 
 llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *structType) {
@@ -4045,13 +4042,21 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
     }
 
     llvm::Type *abiType = getABICoercionType(structType);
+
+    const llvm::DataLayout &DL = m_llvm_module->getDataLayout();
+
+    uint64_t structSize = DL.getTypeAllocSize(structType);
+    uint64_t abiSize = DL.getTypeAllocSize(abiType);
+
     // If the structValue originates from a load of a global variable,
     // avoid materializing a temporary and instead load the ABI-shaped
     // value directly from the global by bitcasting the global pointer.
     if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(structValue)) {
         llvm::Value *ptrOp = LI->getPointerOperand();
         if (ptrOp) {
-            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(ptrOp->stripPointerCasts())) {
+            if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(ptrOp->stripPointerCasts());
+                GV && abiSize <= structSize) {
+
                 llvm::PointerType *abiPtrTy = llvm::PointerType::getUnqual(context);
                 llvm::Value *abiPtr = m_builder->CreateBitCast(ptrOp, abiPtrTy, "abi.ptr");
                 return m_builder->CreateLoad(abiType, abiPtr, "abi.val");
@@ -4059,10 +4064,13 @@ llvm::Value *LLVMCodegen::coerceToABI(llvm::Value *structValue, llvm::Type *stru
         }
     }
 
-    // Fallback: allocate temporary for struct and perform the usual ABI coercion.
-    llvm::AllocaInst *structAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), structType, "struct_tmp");
+    // The ABI type can be larger than the struct so the temporary must be big enough for whichever is larger
+    llvm::Type *tmpTy = abiSize > structSize ? abiType : structType;
+
+    llvm::AllocaInst *structAlloca = createEntryBlockAlloca(getCurrentFunction(*m_builder), tmpTy, "struct_tmp");
     if (!structAlloca)
-        structAlloca = m_builder->CreateAlloca(structType, nullptr, "struct_tmp");
+        structAlloca = m_builder->CreateAlloca(tmpTy, nullptr, "struct_tmp");
+    structAlloca->setAlignment(std::max(DL.getABITypeAlign(abiType), DL.getABITypeAlign(structType)));
 
     m_builder->CreateStore(structValue, structAlloca);
 

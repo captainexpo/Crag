@@ -32,6 +32,7 @@ struct Arguments {
     bool no_runtime;
     bool dump_ast_bsa;
     bool dump_ast_asa;
+    bool emit_DWARF;
     OSTarget os;
     ArchTarget arch;
     EnvironmentTarget environment;
@@ -58,6 +59,7 @@ void printHelp(int argc, char **argv) {
     std::cout << "  -l<arg>, -L<arg>, -W<arg>    Pass <arg> to the backend as a linker or compiler flag\n";
     std::cout << "  --help or -h                 Show this help message\n";
     std::cout << "  --nocstdlib                  Do not link against the standard library (implies --no-runtime)\n";
+    std::cout << "  --no-emit-dwarf              Do not emit DWARF debug information\n";
 }
 
 Arguments parseArguments(int argc, char **argv) {
@@ -74,6 +76,7 @@ Arguments parseArguments(int argc, char **argv) {
     args.dump_ast_bsa = false;
     args.os = defaultOS();
     args.arch = defaultArch();
+    args.emit_DWARF = true;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -106,6 +109,9 @@ Arguments parseArguments(int argc, char **argv) {
                 printHelp(argc, argv);
                 exit(1);
             }
+
+        } else if (arg == "--no-emit-dwarf"){
+            args.emit_DWARF = false;
         } else if (arg == "--backend") {
             if (i + 1 < argc) {
                 args.backend = argv[++i];
@@ -259,6 +265,7 @@ int main(int argc, char **argv) {
     options.do_runtime_safety = !args.unsafe;
     options.target = Target(args.os, args.arch);
     options.stdlib_path = args.stdlib_path;
+    options.emitDWARF = args.emit_DWARF;
 
     auto inputFilepath = args.input;
     auto outputFilepath = args.output;

@@ -1,5 +1,6 @@
 #pragma once
 #include "src/typechecking/tables.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/TargetParser/Triple.h"
 #ifndef IR_H
@@ -24,7 +25,7 @@ class DIFile;
 class DIScope;
 class DIType;
 class TargetMachine;
-}
+} // namespace llvm
 
 struct LoopInfo {
     llvm::BasicBlock *breakBB;
@@ -90,20 +91,21 @@ class Scope {
     std::shared_ptr<Scope> m_parent;
 };
 
-
 class LLVMCodegen : public Backend {
   public:
     LLVMCodegen(std::string module_name, ModuleResolver moduleResolver, CompilerOptions options)
-        :  m_module_resolver(moduleResolver), m_options(options) {
-                m_builder = std::make_unique<llvm::IRBuilder<>>(context);
+        : m_module_resolver(moduleResolver), m_options(options) {
+        m_builder = std::make_unique<llvm::IRBuilder<>>(context);
 
-                m_llvm_module = std::make_unique<llvm::Module>(module_name, context);
+        m_llvm_module = std::make_unique<llvm::Module>(module_name, context);
+
         m_scopeStack.push_back(Scope(nullptr));
-        m_emit_debug = (options.opt_level == Debug);
+        m_emit_debug = (options.opt_level == Debug && options.emitDWARF);
 
         llvm::Triple triple(options.target.targetTriple());
 
         m_llvm_module->setTargetTriple(triple);
+        m_llvm_module->setDataLayout(m_llvm_module->getTargetTriple().computeDataLayout());
 
         if (options.do_runtime_safety)
             emitBuiltinDeclarations();
@@ -206,11 +208,10 @@ class LLVMCodegen : public Backend {
     std::unordered_map<std::string, llvm::DIType *> m_di_type_cache;
     std::unordered_map<std::string, llvm::DIFile *> m_di_file_cache;
 
-
     const std::string RUNTIME_PANIC_FUNC_NAME = "__panic__";
     const std::string GLOBAL_VAR_INIT_FUNC_NAME = "__global_var_init__";
 
-    llvm::Value* addGlobalVarInitializer(llvm::Value* var, std::shared_ptr<Expression> initializer);
+    llvm::Value *addGlobalVarInitializer(llvm::Value *var, std::shared_ptr<Expression> initializer);
 
     // Initializes the LLVM target machine for the host triple
     llvm::TargetMachine *createTargetMachine();
@@ -254,10 +255,10 @@ class LLVMCodegen : public Backend {
     llvm::Value *generateStatement(const std::shared_ptr<Statement> &stmt);
 
     llvm::Function *generateFunctionDefinition(std::shared_ptr<FunctionDeclaration> funcDecl,
-                                              std::shared_ptr<ExternDeclaration> externDecl = nullptr);
+                                               std::shared_ptr<ExternDeclaration> externDecl = nullptr);
     llvm::Function *generateFunctionBody(std::shared_ptr<FunctionDeclaration> funcDecl, llvm::Function *function);
 
-    llvm::Value* generateVariableDeclaration(
+    llvm::Value *generateVariableDeclaration(
         const std::shared_ptr<VariableDeclaration> &varDecl);
 
     llvm::GlobalVariable *generateGlobalVariableSignature(
@@ -289,7 +290,7 @@ class LLVMCodegen : public Backend {
     llvm::Value *generateArrayLiteral(const std::shared_ptr<ArrayLiteral> &arrayLit, bool loadValue);
     llvm::Value *generateTupleLiteral(std::shared_ptr<TupleLiteral> tupleLit, bool loadValue);
 
-    llvm::Value* generateIfExpression(std::shared_ptr<IfExpression> ifExpr, bool loadValue);
+    llvm::Value *generateIfExpression(std::shared_ptr<IfExpression> ifExpr, bool loadValue);
     llvm::Value *generateVarAccess(const std::shared_ptr<VarAccess> &varAccess,
                                    bool loadValue = true);
     llvm::Value *generateEnumAccess(const std::shared_ptr<EnumAccess> &enumAccess,
@@ -300,7 +301,7 @@ class LLVMCodegen : public Backend {
                                     bool loadValue = true);
     llvm::Value *generateFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue = true);
 
-    llvm::Value* generateTupleFieldAccess(const std::shared_ptr<FieldAccess>& fieldAccess, bool loadValue);
+    llvm::Value *generateTupleFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
     llvm::Value *generateErrorUnionFieldAccess(const std::shared_ptr<FieldAccess> &fieldAccess, bool loadValue);
     llvm::Value *generateTryExpr(const std::shared_ptr<TryExpression> &tryExpr, bool loadValue);
     llvm::Value *generateCatchExpr(const std::shared_ptr<CatchExpression> &catchExpr, bool loadValue);
@@ -320,16 +321,16 @@ class LLVMCodegen : public Backend {
         bool loadValue = true);
     llvm::Value *generateUnionInitializer(std::shared_ptr<StructInitializer> unionInit, bool loadValue);
     llvm::Value *generateBlock(const std::shared_ptr<Block> &blockNode);
-    llvm::Value* generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt);
-    llvm::Value* generateWhileStatement(const std::shared_ptr<WhileStatement> &whileStmt);
-    llvm::Value* generateForStatement(const std::shared_ptr<ForStatement> &forStmt);
-    llvm::Value* generateReturnStatement(const std::shared_ptr<ReturnStatement> &retStmt);
-    llvm::Value* generateExpressionStatement(const std::shared_ptr<ExpressionStatement> &exprStmt);
-    llvm::Value* generateAsmStatement(const std::shared_ptr<AsmStmt> &asmStmt);
-    llvm::Value* generateSwitchStatement(const std::shared_ptr<SwitchStmt> &switchStmt);
+    llvm::Value *generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt);
+    llvm::Value *generateWhileStatement(const std::shared_ptr<WhileStatement> &whileStmt);
+    llvm::Value *generateForStatement(const std::shared_ptr<ForStatement> &forStmt);
+    llvm::Value *generateReturnStatement(const std::shared_ptr<ReturnStatement> &retStmt);
+    llvm::Value *generateExpressionStatement(const std::shared_ptr<ExpressionStatement> &exprStmt);
+    llvm::Value *generateAsmStatement(const std::shared_ptr<AsmStmt> &asmStmt);
+    llvm::Value *generateSwitchStatement(const std::shared_ptr<SwitchStmt> &switchStmt);
 
-    llvm::Value* materializeAggregate(llvm::Value* abiValue, llvm::StructType* structType);
-    llvm::Value* buildErrorUnionValue(const std::shared_ptr<ErrorUnionType> &euType,
+    llvm::Value *materializeAggregate(llvm::Value *abiValue, llvm::StructType *structType);
+    llvm::Value *buildErrorUnionValue(const std::shared_ptr<ErrorUnionType> &euType,
                                       llvm::Value *okVal,
                                       llvm::Value *errVal,
                                       bool isErr,
@@ -341,7 +342,7 @@ class LLVMCodegen : public Backend {
         unsigned isErrIndex;
     };
     ErrorUnionLayout getErrorUnionLayout(const std::shared_ptr<ErrorUnionType> &euType) const;
-    llvm::Value* createStructFieldAccess(llvm::StructType *structType,
+    llvm::Value *createStructFieldAccess(llvm::StructType *structType,
                                          llvm::Value *basePtr,
                                          unsigned fieldIndex,
                                          llvm::Type *fieldType,
@@ -349,7 +350,7 @@ class LLVMCodegen : public Backend {
                                          bool loadValue);
     void emitDefaultReturn(const std::shared_ptr<FunctionDeclaration> &funcDecl);
     void emitLoop(const std::function<void()> &emitInit,
-                  const std::function<llvm::Value*()> &emitCondition,
+                  const std::function<llvm::Value *()> &emitCondition,
                   const std::function<void()> &emitBody,
                   const std::function<void()> &emitIncrement,
                   bool hasIncrement,
@@ -370,7 +371,9 @@ class LLVMCodegen : public Backend {
 
     // simplified x86-64 SysV eightbyte register-class classification, used so getABICoercionType() picks a
     // floating-point-compatible coercion type (float/double) for structs made entirely of float/double fields
-    enum class EightbyteClass { NONE, INTEGER, SSE };
+    enum class EightbyteClass { NONE,
+                                INTEGER,
+                                SSE };
     void classifyEightbyteRange(llvm::Type *ty, const llvm::DataLayout &DL, uint64_t baseOffset,
                                 uint64_t rangeStart, uint64_t rangeEnd, EightbyteClass &cls);
 
