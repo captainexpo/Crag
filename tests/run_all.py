@@ -46,11 +46,7 @@ def parse_test_file(text: str):
             reqs = line.strip()[len("REQUIRES:") :].split(",")
             requires.extend(req.strip() for req in reqs)
             continue
-        # REQUIRES_C: <file.c>[, <file.c>...] -- companion C file(s), compiled
-        # once with `cc -c` and linked in via -Wl,<path.o>. For tests that need
-        # to call into *real* extern C code (ABI regression tests can't be
-        # written in pure Crag, since the whole point is checking Crag's
-        # generated code against the platform's actual C calling convention).
+
         if line.strip().startswith("REQUIRES_C:"):
             reqs = line.strip()[len("REQUIRES_C:") :].split(",")
             requires_c.extend(req.strip() for req in reqs)
@@ -231,9 +227,6 @@ def run_unit_test(
 
     if result.returncode != 0:
         if not test_file_data["expect_err"].strip():
-            # No EXPECT ERR block: this test proves itself via std.testing.assert()
-            # calls at runtime, so a nonzero exit means an assertion failed (or the
-            # program crashed) rather than an expected failure.
             printc(
                 f"Assertions failed / execution crashed:\nStdout:{result.stdout}\nStderr:\n{result.stderr}",
                 C_RED,
@@ -265,6 +258,11 @@ def main():
     fails = []
     skips = []
 
+    longest_test_name = 0
+    for i in TEST_FILES:
+        s = i.split("/")[-1]
+        longest_test_name = max(longest_test_name, len(s))
+
     with tempfile.TemporaryDirectory() as tmpdirname:
         tmp_path = Path(tmpdirname)
         # Create executor once
@@ -276,21 +274,20 @@ def main():
             }
 
             total_time = 0.0
-            total_tests = len(futures)
             # Process results
             for future in futures:
                 test_path = futures[future]
 
                 result, out, time = future.result()
                 if result == TestResult.PASS:
-                    print(color_text(".", C_GREEN), end="", flush=True)
+                    print(test_path.split("/")[-1].ljust(longest_test_name+5," "), color_text("PASS", C_GREEN))
                     passed += 1
                 elif result == TestResult.FAIL:
-                    print(color_text("F", C_RED), end="", flush=True)
+                    print(test_path.split("/")[-1].ljust(longest_test_name+5," "), color_text("FAIL", C_RED))
                     failed += 1
                     fails.extend([test_path] + out)
                 else:
-                    print(color_text("S", C_YELLOW), end="", flush=True)
+                    print(test_path.split("/")[-1].ljust(longest_test_name+5," "), color_text("SKIP", C_YELLOW))
                     skipped += 1
                     skips.extend([test_path] + out)
                 total_time += time
