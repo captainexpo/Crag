@@ -4001,24 +4001,6 @@ llvm::Type *LLVMCodegen::getABICoercionType(llvm::Type *structType) {
 
     if (size > 16 || size == 0) return structType;
 
-    if (size == 1 || size == 2 || size == 4 || size == 8) {
-        EightbyteClass cls = EightbyteClass::NONE;
-        classifyEightbyteRange(structType, DL, 0, 0, size, cls);
-        if (cls == EightbyteClass::SSE) {
-            return size <= 4 ? llvm::Type::getFloatTy(context) : llvm::Type::getDoubleTy(context);
-        }
-        switch (size) {
-            case 1:
-                return llvm::Type::getInt8Ty(context);
-            case 2:
-                return llvm::Type::getInt16Ty(context);
-            case 4:
-                return llvm::Type::getInt32Ty(context);
-            case 8:
-                return llvm::Type::getInt64Ty(context);
-        }
-    }
-
     // Each eightbyte becomes one scalar
     auto eightbyteType = [&](uint64_t start) -> llvm::Type * {
         uint64_t bytes = std::min<uint64_t>(8, size - start);
