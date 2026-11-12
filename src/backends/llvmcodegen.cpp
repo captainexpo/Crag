@@ -1274,7 +1274,7 @@ llvm::Function *LLVMCodegen::generateFunctionBody(std::shared_ptr<FunctionDeclar
         m_error_union_return_type = nullptr;
     }
     generateStatement(func->body);
-    if (m_builder->GetInsertBlock()->getTerminator() == nullptr) {
+    if (m_builder->GetInsertBlock()->getTerminatorOrNull() == nullptr) {
         emitDefaultReturn(func);
     }
     m_error_union_return_type = nullptr;
@@ -2391,7 +2391,7 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
         auto constarr = m_llvm_module->getGlobalVariable(name, true);
 
         m_builder->CreateMemCpy(rawArrPtr, llvm::MaybeAlign(), constarr, llvm::MaybeAlign(),
-                                arrayLit->defined_len * m_llvm_module->getDataLayout().getTypeAllocSize(elemType));
+                                arrayLit->defined_len * (uint64_t)(m_llvm_module->getDataLayout().getTypeAllocSize(elemType)));
 
     } else {
         m_builder->CreateMemSet(rawArrPtr, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0), m_llvm_module->getDataLayout().getTypeAllocSize(rawArrayLLVMType), llvm::MaybeAlign());
@@ -3078,7 +3078,7 @@ llvm::Value *LLVMCodegen::generateCatchExpr(const std::shared_ptr<CatchExpressio
         okVal = createStructFieldAccess(euStructType, basePtr, layout.okIndex, okLLVMType, "ok", true);
     }
     llvm::BasicBlock *okEndBB = m_builder->GetInsertBlock();
-    bool okBranches = !okEndBB->getTerminator();
+    bool okBranches = !okEndBB->getTerminatorOrNull();
     if (okBranches) {
         m_builder->CreateBr(mergeBB);
     }
@@ -3094,7 +3094,7 @@ llvm::Value *LLVMCodegen::generateCatchExpr(const std::shared_ptr<CatchExpressio
     }
     llvm::Value *handlerVal = generateExpression(catchExpr->handler);
     llvm::BasicBlock *errEndBB = m_builder->GetInsertBlock();
-    bool errBranches = !errEndBB->getTerminator();
+    bool errBranches = !errEndBB->getTerminatorOrNull();
     if (errBranches) {
         m_builder->CreateBr(mergeBB);
     }
@@ -3531,7 +3531,7 @@ LLVMCodegen::generateBlock(const std::shared_ptr<Block> &blockNode) {
     m_scopeStack.emplace_back();
     llvm::Value *lastValue = nullptr;
     for (const auto &stmt : blockNode->statements) {
-        if (m_builder->GetInsertBlock() && m_builder->GetInsertBlock()->getTerminator()) {
+        if (m_builder->GetInsertBlock() && m_builder->GetInsertBlock()->getTerminatorOrNull()) {
             goto found_terminator;
         }
         if (std::dynamic_pointer_cast<ReturnStatement>(stmt)) {
@@ -3577,7 +3577,7 @@ LLVMCodegen::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
     m_builder->SetInsertPoint(thenBB);
     llvm::Value *thenV = generateStatement(ifStmt->then_branch);
     // Only branch to merge if the then block is not already terminated
-    if (!m_builder->GetInsertBlock()->getTerminator()) {
+    if (!m_builder->GetInsertBlock()->getTerminatorOrNull()) {
         mergeBB = llvm::BasicBlock::Create(context, "ifcont", theFunction);
         m_builder->CreateBr(mergeBB);
     }
@@ -3586,7 +3586,7 @@ LLVMCodegen::generateIfStatement(const std::shared_ptr<IfStatement> &ifStmt) {
     if (ifStmt->else_branch)
         llvm::Value *elseV = generateStatement(ifStmt->else_branch);
     // Only branch to merge if the else block is not already terminated
-    if (!m_builder->GetInsertBlock()->getTerminator()) {
+    if (!m_builder->GetInsertBlock()->getTerminatorOrNull()) {
         if (!mergeBB) {
             mergeBB = llvm::BasicBlock::Create(context, "ifcont", theFunction);
         }
@@ -3819,7 +3819,7 @@ void LLVMCodegen::emitLoop(const std::function<void()> &emitInit,
     if (emitBody) {
         emitBody();
     }
-    if (!m_builder->GetInsertBlock()->getTerminator()) {
+    if (!m_builder->GetInsertBlock()->getTerminatorOrNull()) {
         m_builder->CreateBr(hasIncrement ? inc_block : cond_block);
     }
 
@@ -4339,7 +4339,7 @@ llvm::Value *LLVMCodegen::generateSwitchStatement(const std::shared_ptr<SwitchSt
         m_builder->SetInsertPoint(caseBB);
         generateStatement(caseBlock.second);
 
-        if (!m_builder->GetInsertBlock()->getTerminator()) {
+        if (!m_builder->GetInsertBlock()->getTerminatorOrNull()) {
             m_builder->CreateBr(mergeBlock);
         }
         for (const auto &expr : exprs) {
@@ -4361,7 +4361,7 @@ llvm::Value *LLVMCodegen::generateSwitchStatement(const std::shared_ptr<SwitchSt
     if (switchStmt->default_case) {
         generateStatement(switchStmt->default_case);
     }
-    if (!m_builder->GetInsertBlock()->getTerminator()) {
+    if (!m_builder->GetInsertBlock()->getTerminatorOrNull()) {
         m_builder->CreateBr(mergeBlock);
     }
     m_builder->SetInsertPoint(mergeBlock);
