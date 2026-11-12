@@ -39,7 +39,7 @@ if(NOT NO_LLVM)
 
     # LLVM linker flags for components
     if(CRAG_STATIC)
-        set(LLVM_LINK_ARGS --link-static --ldflags --libs core support irreader passes x86 aarch64 --system-libs)
+        set(LLVM_LINK_ARGS --link-static --ldflags --libs core support irreader passes x86 aarch64 webassembly --system-libs)
         target_compile_options(crag PRIVATE -ffunction-sections -fdata-sections)
         target_link_options(crag PRIVATE -static -Wl,--gc-sections)
     else()

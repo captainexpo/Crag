@@ -20,9 +20,23 @@ pub fn println<T>(value: T) -> void {
 }
 
 pub fn print<T>(value: T) -> void {
-    let s = string.tostring(value);
-    for (let i: usize = 0; i < s.len; i++) {
-        cstdio.putchar(s[i]);
+    when builtin.TypeID:Array == typeid(value) {
+        print("{");
+        for (let i: usize = 0; i < value.len; i++) {
+            let v = value[i];
+            print(v);
+            if (i < value.len - 1) {
+                print(", ");
+            }
+        }
+        print("}");
+        return;
+    }
+    when builtin.TypeID:Array != typeid(value) {
+        let s = string.tostring(value);
+        for (let i: usize = 0; i < s.len; i++) {
+            cstdio.putchar(s[i]);
+        }
     }
 }
 

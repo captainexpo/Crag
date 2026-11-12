@@ -29,6 +29,7 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Passes/PassBuilder.h>
+#include <llvm/Support/Alignment.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
@@ -38,6 +39,7 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/TargetParser/Host.h>
+#include <llvm/TargetParser/Triple.h>
 #include <memory>
 #include <unordered_map>
 
@@ -550,8 +552,14 @@ llvm::TargetMachine *LLVMCodegen::createTargetMachine() {
     LLVMInitializeAArch64AsmParser();
     LLVMInitializeAArch64AsmPrinter();
 
+    LLVMInitializeWebAssemblyTargetInfo();
+    LLVMInitializeWebAssemblyTarget();
+    LLVMInitializeWebAssemblyTargetMC();
+    LLVMInitializeWebAssemblyAsmParser();
+    LLVMInitializeWebAssemblyAsmPrinter();
+
     std::string errorStr;
-    auto Target = llvm::TargetRegistry::lookupTarget(targetTriple, errorStr);
+    auto Target = llvm::TargetRegistry::lookupTarget(llvm::Triple(targetTriple), errorStr);
 
     // Print an error and exit if we couldn't find the requested target.
     // This generally occurs if we've forgotten to initialise the
@@ -1139,21 +1147,21 @@ llvm::Function *LLVMCodegen::generateFunctionDefinition(std::shared_ptr<Function
         }
     }
 
-    if (std::find(func->attributes.begin(), func->attributes.end(), "noreturn") != func->attributes.end()) {
+    if (std::find(func->attributes.begin(), func->attributes.end(), FunctionAttribute::NORETURN) != func->attributes.end()) {
         function->addFnAttr(llvm::Attribute::NoReturn);
     }
 
-    if (std::find(func->attributes.begin(), func->attributes.end(), "naked") != func->attributes.end()) {
+    if (std::find(func->attributes.begin(), func->attributes.end(), FunctionAttribute::NAKED) != func->attributes.end()) {
         function->addFnAttr(llvm::Attribute::Naked);
     }
 
-    if (std::find(func->attributes.begin(), func->attributes.end(), "inline") != func->attributes.end()) {
+    if (std::find(func->attributes.begin(), func->attributes.end(), FunctionAttribute::INLINE) != func->attributes.end()) {
         function->addFnAttr(llvm::Attribute::AlwaysInline);
-    } else if (std::find(func->attributes.begin(), func->attributes.end(), "noinline") != func->attributes.end()) {
+    } else if (std::find(func->attributes.begin(), func->attributes.end(), FunctionAttribute::NOINLINE) != func->attributes.end()) {
         function->addFnAttr(llvm::Attribute::NoInline);
     }
 
-    if (std::find(func->attributes.begin(), func->attributes.end(), "weak") != func->attributes.end()) {
+    if (std::find(func->attributes.begin(), func->attributes.end(), FunctionAttribute::WEAK) != func->attributes.end()) {
         if (func->type->extern_info.is_extern) {
             function->setLinkage(llvm::Function::WeakAnyLinkage);
         } else {
@@ -1357,6 +1365,7 @@ llvm::Value *LLVMCodegen::addGlobalVarInitializer(llvm::Value *var, std::shared_
     return initVal;
 }
 
+// Returns nullptr if no constant can be gotten
 llvm::Constant *LLVMCodegen::getConstantLiteralValue(const std::shared_ptr<ASTNode> &literal) {
     auto resolveSymbolConstant = [&](const std::string &name,
                                      const std::shared_ptr<Module> &module = nullptr) -> llvm::Constant * {
@@ -1516,8 +1525,9 @@ llvm::Constant *LLVMCodegen::getConstantLiteralValue(const std::shared_ptr<ASTNo
         llvm::Constant *dataConstant = llvm::ConstantArray::get(dataArrayType, elementValues);
 
         auto dataGlobalName = "arrlit" + std::to_string(globalVals++);
+        // Writable: this also backs non-const globals, whose elements can be assigned at runtime
         auto dataGlobal = new llvm::GlobalVariable(
-            *m_llvm_module, dataArrayType, true, llvm::GlobalValue::PrivateLinkage,
+            *m_llvm_module, dataArrayType, false, llvm::GlobalValue::PrivateLinkage,
             dataConstant, dataGlobalName);
         llvm::Constant *zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
         llvm::Constant *indices[] = {zero, zero};
@@ -2153,28 +2163,28 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
 
     if (IS_INSTANCE(lit->inferred_type, I32)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(32, tryGetConstValue<int64_t>(lit)));
+                                      llvm::APInt(32, tryGetConstValue<int64_t>(lit), /*isSigned=*/true, /*implicitTrunc=*/true));
     } else if (IS_INSTANCE(lit->inferred_type, I16)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(16, tryGetConstValue<int64_t>(lit)));
+                                      llvm::APInt(16, tryGetConstValue<int64_t>(lit), /*isSigned=*/true, /*implicitTrunc=*/true));
     } else if (IS_INSTANCE(lit->inferred_type, I8)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(8, tryGetConstValue<int64_t>(lit)));
+                                      llvm::APInt(8, tryGetConstValue<int64_t>(lit), /*isSigned=*/true, /*implicitTrunc=*/true));
     } else if (IS_INSTANCE(lit->inferred_type, I64)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(64, tryGetConstValue<int64_t>(lit)));
+                                      llvm::APInt(64, tryGetConstValue<int64_t>(lit), /*isSigned=*/true, /*implicitTrunc=*/true));
     } else if (IS_INSTANCE(lit->inferred_type, U8)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(8, tryGetConstValue<uint64_t>(lit)));
+                                      llvm::APInt(8, tryGetConstValue<uint64_t>(lit), /*isSigned=*/false, /*implicitTrunc=*/true));
     } else if (IS_INSTANCE(lit->inferred_type, U16)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(16, tryGetConstValue<uint64_t>(lit)));
+                                      llvm::APInt(16, tryGetConstValue<uint64_t>(lit), /*isSigned=*/false, /*implicitTrunc=*/true));
     } else if (IS_INSTANCE(lit->inferred_type, U32)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(32, tryGetConstValue<uint64_t>(lit)));
+                                      llvm::APInt(32, tryGetConstValue<uint64_t>(lit), /*isSigned=*/false, /*implicitTrunc=*/true));
     } else if (IS_INSTANCE(lit->inferred_type, U64)) {
         return llvm::ConstantInt::get(context,
-                                      llvm::APInt(64, tryGetConstValue<uint64_t>(lit)));
+                                      llvm::APInt(64, tryGetConstValue<uint64_t>(lit), /*isSigned=*/false, /*implicitTrunc=*/true));
     } else if (IS_INSTANCE(lit->inferred_type, F32)) {
         return llvm::ConstantFP::get(m_builder->getFloatTy(),
                                      tryGetConstValue<double>(lit));
@@ -2190,12 +2200,12 @@ llvm::Value *LLVMCodegen::generateLiteral(const std::shared_ptr<Literal> &lit,
         unsigned bits = m_llvm_module->getDataLayout().getPointerSizeInBits();
         return llvm::ConstantInt::get(
             context,
-            llvm::APInt(bits, tryGetConstValue<uint64_t>(lit)));
+            llvm::APInt(bits, tryGetConstValue<uint64_t>(lit), /*isSigned=*/false, /*implicitTrunc=*/true));
     } else if (IS_INSTANCE(lit->inferred_type, ISize)) {
         unsigned bits = m_llvm_module->getDataLayout().getPointerSizeInBits();
         return llvm::ConstantInt::get(
             context,
-            llvm::APInt(bits, tryGetConstValue<int64_t>(lit)));
+            llvm::APInt(bits, tryGetConstValue<int64_t>(lit), /*isSigned=*/true, /*implicitTrunc=*/true));
     } else if (IS_INSTANCE(lit->inferred_type, PointerType)) {
         if (std::holds_alternative<uint64_t>(lit->value)) {
             int intVal = tryGetConstValue<uint64_t>(lit);
@@ -2335,13 +2345,12 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
 
     auto ptrTy = llvm::PointerType::getUnqual(context);
     auto i64Ty = llvm::Type::getInt64Ty(context);
-    llvm::FunctionCallee mallocFn = m_llvm_module->getOrInsertFunction(
-        "malloc", llvm::FunctionType::get(ptrTy, {i64Ty}, false));
-    uint64_t elemAllocSize = m_llvm_module->getDataLayout().getTypeAllocSize(elemType);
-    llvm::Value *rawArrPtr = m_builder->CreateCall(
-        mallocFn,
-        {llvm::ConstantInt::get(i64Ty, arrayLit->defined_len * elemAllocSize)},
-        "array_literal_data");
+
+    auto rawArrayLLVMType = llvm::ArrayType::get(elemType, arrayLit->defined_len);
+    llvm::Value *rawArrPtr = createEntryBlockAlloca(
+        getCurrentFunction(*m_builder),
+        rawArrayLLVMType,
+        "array_lit");
 
     // declare void @llvm.memset.p0.i64(ptr writeonly captures(none), i8, i64, i1 immarg) #1
     auto memsetFunction = m_llvm_module->getOrInsertFunction(
@@ -2353,20 +2362,49 @@ llvm::Value *LLVMCodegen::generateArrayLiteral(
             false));
 
     // Zero out the array memory using memset
-    m_builder->CreateCall(memsetFunction, {rawArrPtr,
-                                           llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0),
-                                           llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len * (size_t)(m_llvm_module->getDataLayout().getTypeAllocSize(elemType))),
-                                           llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 0)});
+    // m_builder->CreateCall(memsetFunction, {rawArrPtr,
+    //                                        llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0),
+    //                                        llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), arrayLit->defined_len * (size_t)(m_llvm_module->getDataLayout().getTypeAllocSize(elemType))),
+    //                                        llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), 0)});
 
-    // Store elements in array using correct GEP (2 indices for array)
-    for (int i = 0; i < numElements; i++) {
-        llvm::Value *elemVal = generateExpression(arrayLit->elements[i]);
-        llvm::Value *elemPtr = m_builder->CreateGEP(
-            arrayLitType,
-            rawArrPtr,
-            {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
-             llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i)});
-        m_builder->CreateStore(elemVal, elemPtr);
+    if (arrayLit->constant_evaluated && arrayLit->len == arrayLit->defined_len) {
+
+        // Build global array from this array
+        std::vector<llvm::Constant *> constantElements;
+        for (auto elem : arrayLit->elements) {
+            auto constant = getConstantLiteralValue(elem);
+
+            assert(constant->getType() == rawArrayLLVMType->getElementType());
+
+            if (!constant) {
+                throw CodeGenError(arrayLit, "Unable to get literal constant for element: " + elem->str());
+            }
+            constantElements.push_back(constant);
+        }
+        std::string name = canonicalizeNonexternName("const_arr_" + std::to_string(m_llvm_module->global_size()));
+        m_llvm_module->insertGlobalVariable(new llvm::GlobalVariable(
+            rawArrayLLVMType,
+            true,
+            llvm::Function::InternalLinkage,
+            llvm::ConstantArray::get(rawArrayLLVMType, constantElements),
+            name));
+        auto constarr = m_llvm_module->getGlobalVariable(name, true);
+
+        m_builder->CreateMemCpy(rawArrPtr, llvm::MaybeAlign(), constarr, llvm::MaybeAlign(),
+                                arrayLit->defined_len * m_llvm_module->getDataLayout().getTypeAllocSize(elemType));
+
+    } else {
+        m_builder->CreateMemSet(rawArrPtr, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0), m_llvm_module->getDataLayout().getTypeAllocSize(rawArrayLLVMType), llvm::MaybeAlign());
+        // Store elements in array using correct GEP (2 indices for array)
+        for (int i = 0; i < numElements; i++) {
+            llvm::Value *elemVal = generateExpression(arrayLit->elements[i]);
+            llvm::Value *elemPtr = m_builder->CreateGEP(
+                arrayLitType,
+                rawArrPtr,
+                {llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i)});
+            m_builder->CreateStore(elemVal, elemPtr);
+        }
     }
 
     // Allocate struct { ptr, i64 }
@@ -3680,7 +3718,7 @@ llvm::Value *LLVMCodegen::buildErrorUnionValue(const std::shared_ptr<ErrorUnionT
 }
 
 void LLVMCodegen::emitDefaultReturn(const std::shared_ptr<FunctionDeclaration> &funcDecl) {
-    if (funcDecl->attributes.find("noreturn") != funcDecl->attributes.end()) {
+    if (funcDecl->attributes.count(FunctionAttribute::NOMANGLE) != 0) {
         m_builder->CreateUnreachable();
         return;
     }
@@ -3999,7 +4037,8 @@ llvm::Type *LLVMCodegen::getABICoercionType(llvm::Type *structType) {
     const llvm::DataLayout &DL = m_llvm_module->getDataLayout();
     uint64_t size = DL.getTypeAllocSize(structType);
 
-    if (size > 16 || size == 0) return structType;
+    if (size > 16 || size == 0)
+        return structType;
 
     // Each eightbyte becomes one scalar
     auto eightbyteType = [&](uint64_t start) -> llvm::Type * {

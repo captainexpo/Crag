@@ -178,6 +178,8 @@ class TypeChecker {
     std::shared_ptr<Type> inferDereference(const std::shared_ptr<Dereference> &d);
     std::shared_ptr<Type> inferLiteral(const std::shared_ptr<Literal> &lit,
                                        const std::shared_ptr<Type> &expected = nullptr);
+    void markConstantArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
+                                  const std::shared_ptr<Type> &elem_type);
     std::shared_ptr<Type> inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
                                             const std::shared_ptr<Type> &expected = nullptr);
     std::shared_ptr<Type> inferTupleLiteral(const std::shared_ptr<TupleLiteral> &tl, const std::shared_ptr<Type> &expected);

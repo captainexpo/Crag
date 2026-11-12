@@ -28,7 +28,7 @@ The language was created as a learning project to explore compiler design and im
 The Crag compiler is a command-line tool that takes a Crag source file and compiles it to an executable. The basic usage is as follows:
 
 ```bash
-./crag <source_file.crag> -o <output_executable>
+crag <source_file.crag> -o <output_executable>
 ```
 
 There are also some additional flags that can be used to control the compilation process:
@@ -38,6 +38,18 @@ There are also some additional flags that can be used to control the compilation
 - `--unsafe` - Disable runtime safety checks.
 - `--emit-ir` - Emit LLVM IR instead of a native executable
 - `--dump-ast [asa|bsa]` - Dump the abstract syntax tree (AST) in either before semantic analysis (BSA) or after semantic analysis (ASA) form. This is useful for debugging and understanding how the compiler processes the source code.
+
+### Wasm compilation
+
+Crag supports Web Assembly compilation via LLVM.
+
+To compile for wasm, run the following command:
+
+```bash
+crag <input file> -c -o <output file> -ORelease --target-arch wasm64 --target-vendor unknown --target-os unknown --target-environment unknown
+```
+
+(Make sure that all exported functions are marked `extern` with the `nomangle` attribute)
 
 ## Syntax Examples
 

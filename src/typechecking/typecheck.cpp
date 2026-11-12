@@ -32,7 +32,7 @@ void rebuildModuleMetadata(const std::shared_ptr<Module> &module) {
             if (f->is_pub) {
                 module->exports[f->name] = f;
             }
-            if (isExtern || f->type->extern_info.is_extern || f->attributes.count("noprefix")) {
+            if (isExtern || f->type->extern_info.is_extern || f->attributes.count(FunctionAttribute::NOMANGLE)) {
                 module->externLinkage.insert(f->name);
             }
         } else if (auto s = std::dynamic_pointer_cast<StructDeclaration>(actualDecl)) {
@@ -2035,6 +2035,55 @@ std::shared_ptr<Type> TypeChecker::inferIfExpression(const std::shared_ptr<IfExp
     }
 }
 
+// The const evaluator's table is keyed by bare name, so a local can shadow a const of the
+// same name; only expressions that don't reference variables are safe to fold here.
+// TODO: Key Constant evaluator by SymbolId or something similar
+static bool isClosedConstantExpression(const ExprPtr &expr) {
+    if (std::dynamic_pointer_cast<Literal>(expr))
+        return true;
+    if (auto un = std::dynamic_pointer_cast<UnaryOperation>(expr))
+        return un->op != "&" && isClosedConstantExpression(un->operand);
+    if (auto bin = std::dynamic_pointer_cast<BinaryOperation>(expr))
+        return isClosedConstantExpression(bin->left) && isClosedConstantExpression(bin->right);
+    if (auto cast = std::dynamic_pointer_cast<TypeCast>(expr))
+        return isClosedConstantExpression(cast->expr);
+    return false;
+}
+
+void TypeChecker::markConstantArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
+                                           const std::shared_ptr<Type> &elem_type) {
+    if (al->elements.empty())
+        return;
+
+    auto resolved_elem = resolveType(al, elem_type);
+    std::vector<ExprPtr> folded;
+    folded.reserve(al->elements.size());
+    for (const auto &elem : al->elements) {
+        if (!isClosedConstantExpression(elem))
+            return;
+
+        m_const_eval.clearErrors();
+        auto result = m_const_eval.evaluateExpression(elem);
+        auto lit = result ? std::dynamic_pointer_cast<Literal>(*result) : nullptr;
+        bool usable = m_const_eval.ok() && lit && lit->lit_type->equals(resolved_elem);
+        m_const_eval.clearErrors();
+        if (!usable)
+            return;
+
+        // Copy, since the evaluator can hand back the element's own node
+        auto folded_lit = std::make_shared<Literal>(lit->value, resolved_elem);
+        folded_lit->line = elem->line;
+        folded_lit->col = elem->col;
+        folded_lit->inferred_type = resolved_elem;
+        folded_lit->constant_evaluated = true;
+        folded.push_back(folded_lit);
+    }
+
+    // Codegen lowers constant arrays from literals only, so replace the elements with their values
+    al->elements = std::move(folded);
+    al->constant_evaluated = true;
+}
+
 std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<ArrayLiteral> &al,
                                                      const std::shared_ptr<Type> &expected) {
     auto expected_arr = std::dynamic_pointer_cast<ArrayType>(expected);
@@ -2073,17 +2122,10 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
         }
     }
 
-    if (final_len < 0 && !al->elements.empty()) {
-        final_len = static_cast<int64_t>(al->elements.size());
-    }
+    if (final_len < 0 && !al->elements.empty()) final_len = static_cast<int64_t>(al->elements.size());
 
-    if (al->elements.empty() && !expected_arr) {
-        throw TypeCheckError(current_module, al, "Cannot infer type of empty array literal");
-    }
-
-    if (!expected_arr && al->elements.empty()) {
-        throw TypeCheckError(current_module, al, "Cannot infer type of empty array literal");
-    }
+    if (al->elements.empty() && !expected_arr) throw TypeCheckError(current_module, al, "Cannot infer type of empty array literal");
+    if (!expected_arr && al->elements.empty()) throw TypeCheckError(current_module, al, "Cannot infer type of empty array literal");
 
     if (expected_arr && static_cast<int64_t>(al->elements.size()) > final_len) {
         throw TypeCheckError(current_module, al,
@@ -2110,6 +2152,7 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
         al->defined_len = static_cast<size_t>(final_len);
         auto resolved = resolveType(al, expected_arr);
         al->inferred_type = resolved;
+        markConstantArrayLiteral(al, expected_elem);
         return resolved;
     }
 
@@ -2127,6 +2170,7 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
     std::shared_ptr<Type> elem_type = nullptr;
     for (int i = 0; i < al->elements.size(); ++i) {
         // Pass expected element type to each element
+
         auto t = inferExpression(al->elements[i], expected_elem ? expected_elem : elem_type);
         auto el = al->elements[i];
         if (!t)
@@ -2151,11 +2195,13 @@ std::shared_ptr<Type> TypeChecker::inferArrayLiteral(const std::shared_ptr<Array
             }
         }
     }
+
     auto i64 = std::make_shared<I64>();
     auto arrSizeLit = std::make_shared<Literal>(static_cast<int64_t>(al->elements.size()), i64);
     arrSizeLit->inferred_type = i64;
     auto at = std::make_shared<ArrayType>(elem_type, arrSizeLit, false);
     al->inferred_type = resolveType(al, at);
+    markConstantArrayLiteral(al, elem_type);
     return at;
 }
 

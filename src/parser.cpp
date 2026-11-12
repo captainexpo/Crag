@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
@@ -1462,10 +1463,16 @@ std::shared_ptr<FunctionDeclaration> Parser::parse_function_declaration() {
     }
     auto func_type =
         std::make_shared<FunctionType>(param_types, return_type, variadic);
-    std::set<std::string> attributes;
+    std::set<FunctionAttribute> attributes;
     while (peek().type == TokenType::ATTRIBUTE) {
         std::string attr_name = consume(TokenType::ATTRIBUTE).value;
-        attributes.insert(attr_name);
+
+        auto attr = funcAttrFromStr(attr_name);
+        if (attr == std::nullopt){
+            throw ParseError("Unknown attribute: " + attr_name, peek(-1).line, peek(-1).column);
+        }
+
+        attributes.insert(*attr);
     }
     std::shared_ptr<Statement> body = nullptr;
     if (match({TokenType::SEMICOLON})) {

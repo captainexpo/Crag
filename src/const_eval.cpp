@@ -350,9 +350,15 @@ std::optional<ExprPtr> ConstEvaluator::evaluateExpression(const ExprPtr &expr) {
                 return std::nullopt;
             }
             constExpr->constant_evaluated = true;
+            // Values folded here are new nodes that never went through type inference
+            auto arrayType = std::dynamic_pointer_cast<ArrayType>(arrayLit->inferred_type);
+            if (!constExpr->inferred_type && arrayType) {
+                constExpr->inferred_type = arrayType->element_type;
+            }
             constElements.push_back(constExpr);
         }
         auto evaluated = std::make_shared<ArrayLiteral>(constElements);
+        evaluated->defined_len = arrayLit->defined_len;
         evaluated->constant_evaluated = true;
         return evaluated;
     }

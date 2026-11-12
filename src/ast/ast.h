@@ -1499,11 +1499,23 @@ struct Assignment : public Statement {
     std::shared_ptr<ASTNode> instantiate(std::vector<std::shared_ptr<Type>> gp_replace = {}) const override;
 };
 
+
+enum class FunctionAttribute {
+    INLINE,
+    NOMANGLE,
+    NORETURN,
+    NAKED,
+    NOINLINE,
+    WEAK,
+};
+
+std::optional<FunctionAttribute> funcAttrFromStr(std::string attr);
+
 struct FunctionDeclaration : public TypeDecl {
     std::shared_ptr<FunctionType> type;
     std::vector<std::string> param_names;
     std::shared_ptr<Statement> body;
-    std::set<std::string> attributes;
+    std::set<FunctionAttribute> attributes;
 
     std::vector<uint64_t> param_symbols;
 

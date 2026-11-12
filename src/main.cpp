@@ -1,5 +1,5 @@
-#include "backend.h"
 #include "compiler.h"
+#include "src/backend.h"
 #include "utils.h"
 
 #include <filesystem>
@@ -37,6 +37,7 @@ struct Arguments {
     ArchTarget arch;
     EnvironmentTarget environment;
     VendorTarget vendor;
+    CompileStep compile_stop_at;
 };
 
 void printHelp(int argc, char **argv) {
@@ -77,6 +78,7 @@ Arguments parseArguments(int argc, char **argv) {
     args.os = defaultOS();
     args.arch = defaultArch();
     args.emit_DWARF = true;
+    args.compile_stop_at = CompileStep::EXECUTABLE;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -154,6 +156,8 @@ Arguments parseArguments(int argc, char **argv) {
                     args.os = MacOS;
                 } else if (os_arg == "windows") {
                     args.os = Windows;
+                } else if (os_arg == "unknown"){
+                    args.os = UnknownOS;
                 } else {
                     std::cerr << "Error: Invalid value for --target-os. Expected 'linux', 'macos', or 'windows'.\n";
                     printHelp(argc, argv);
@@ -173,6 +177,10 @@ Arguments parseArguments(int argc, char **argv) {
                     args.arch = X86;
                 } else if (arch_arg == "arm64") {
                     args.arch = ARM64;
+                } else if (arch_arg == "wasm32") {
+                    args.arch = WASM32;
+                } else if (arch_arg == "wasm64") {
+                    args.arch = WASM64;
                 } else {
                     std::cerr << "Error: Invalid value for --target-arch. Expected 'x86_64', 'x86', or 'arm64'.\n";
                     printHelp(argc, argv);
@@ -213,6 +221,8 @@ Arguments parseArguments(int argc, char **argv) {
                     args.environment = ELF;
                 } else if (env_arg == "eabi") {
                     args.environment = EABI;
+                } else if (env_arg == "wasm") {
+                    args.environment = WASM;
                 } else if (env_arg == "unknown") {
                     args.environment = UnknownEnvironment;
                 } else {
@@ -229,7 +239,10 @@ Arguments parseArguments(int argc, char **argv) {
             // Pass --nostdlib to the backend to avoid linking against the C standard library (assumes the backend is clang or gcc)
             args.backend_args.push_back("-nostdlib");
         } else if (arg[0] == '-') {
-            if (arg[1] == 'l' || arg[1] == 'L' || arg[1] == 'W') {
+            if (arg[1] == 'c') {
+                args.compile_stop_at = CompileStep::OBJECT;
+            }
+            else if (arg[1] == 'l' || arg[1] == 'L' || arg[1] == 'W') {
                 args.backend_args.push_back(arg);
             } else {
                 std::cerr << "Error: Unknown option " << arg << "\n";
@@ -263,9 +276,10 @@ int main(int argc, char **argv) {
     options.dump_ast_asa = args.dump_ast_asa;
     options.opt_level = args.opt;
     options.do_runtime_safety = !args.unsafe;
-    options.target = Target(args.os, args.arch);
+    options.target = Target(args.os, args.arch, args.vendor,  args.environment);
     options.stdlib_path = args.stdlib_path;
     options.emitDWARF = args.emit_DWARF;
+    options.compile_stop_at = args.compile_stop_at;
 
     auto inputFilepath = args.input;
     auto outputFilepath = args.output;
@@ -306,9 +320,13 @@ int main(int argc, char **argv) {
     } else {
         fs::path objectFilePath = outputPath;
         try {
-            objectFilePath.replace_extension(".o");
+            if (options.compile_stop_at != CompileStep::OBJECT){
+                objectFilePath.replace_extension(".o");
+            }
             codegen->emitObjectToFile(objectFilePath.string());
             std::cout << "Emitted object file to " << objectFilePath << "\n";
+
+            if (options.compile_stop_at == CompileStep::OBJECT) goto compile_finished;
 
             codegen->compileObjectFileToExecutable(objectFilePath.string(),
                                                    outputPath,
@@ -320,6 +338,7 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+compile_finished:
 
     return 0;
 }

@@ -300,3 +300,13 @@ bool typeContainsGeneric(const std::shared_ptr<Type> &t) {
     }
     return false;
 }
+
+std::optional<FunctionAttribute> funcAttrFromStr(std::string attr){
+    if (attr == "inline") return FunctionAttribute::INLINE;
+    if (attr == "nomangle") return FunctionAttribute::NOMANGLE;
+    if (attr == "noreturn") return FunctionAttribute::NORETURN;
+    if (attr == "naked") return FunctionAttribute::NAKED;
+    if (attr == "noinline") return FunctionAttribute::NOINLINE;
+    if (attr == "weak") return FunctionAttribute::WEAK;
+    return std::nullopt;
+}

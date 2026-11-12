@@ -1,6 +1,6 @@
 extern fn main() -> i32;
 
-extern "C" fn __global_var_init__() -> void @noprefix @weak {
+extern "C" fn __global_var_init__() -> void @nomangle @weak {
     return;
 }
 
@@ -14,7 +14,7 @@ pub extern "C" let __environp: *const u8 = null;
 pub extern "C" let __argumentsp: **u8 = null;
 pub extern "C" let __argument_count: usize = 0;
 
-extern fn __main_setup(argc: i32, argv: **u8, envp: *const u8) -> i32 @noprefix {
+extern fn __main_setup(argc: i32, argv: **u8, envp: *const u8) -> i32 @nomangle {
 
     __environp = envp;
     __argumentsp = argv;
@@ -32,7 +32,7 @@ extern fn __main_setup(argc: i32, argv: **u8, envp: *const u8) -> i32 @noprefix 
 
 when @target_arch == "arm64" {
 
-extern fn _start() -> void @noprefix @naked @noreturn {
+extern fn _start() -> void @nomangle @naked @noreturn {
     asm volatile (
         "mov x29, #0\n"
         "ldr x0, [sp]\n"
@@ -46,7 +46,7 @@ extern fn _start() -> void @noprefix @naked @noreturn {
     );
 }
 
-fn _exit(status: i32) -> void @inline @noprefix @noreturn {
+fn _exit(status: i32) -> void @inline @nomangle @noreturn {
     asm volatile (
         "mov x16, #1\n"
         "orr x16, x16, #0x2000000\n"
@@ -60,7 +60,7 @@ fn _exit(status: i32) -> void @inline @noprefix @noreturn {
 
 when @target_arch != "arm64" {
 
-extern fn _start() -> void @noprefix @naked @noreturn {
+extern fn _start() -> void @nomangle @naked @noreturn {
     asm volatile (
         "xor ebp, ebp\n"
         "mov edi, [rsp]\n"
@@ -75,7 +75,7 @@ extern fn _start() -> void @noprefix @naked @noreturn {
     );
 }
 
-fn _exit(status: i32) -> void @inline @noprefix @noreturn {
+fn _exit(status: i32) -> void @inline @nomangle @noreturn {
     asm volatile (
         "mov rax, 60\n"
         "syscall\n",

@@ -26,6 +26,8 @@ enum ArchTarget {
     X86_64,
     X86,
     ARM64,
+    WASM32,
+    WASM64,
     UnknownArch
 };
 
@@ -40,6 +42,7 @@ enum EnvironmentTarget {
     MSVC,
     EABI,
     ELF,
+    WASM,
     UnknownEnvironment
 };
 
@@ -122,6 +125,10 @@ struct Target {
                 return "x86";
             case ARM64:
                 return "arm64";
+            case WASM32:
+                return "wasm32";
+            case WASM64:
+                return "wasm64";
             default:
                 return "unknown";
         }
@@ -148,26 +155,21 @@ struct Target {
                 return "eabi";
             case ELF:
                 return "elf";
+            case WASM:
+                return "wasm";
             default:
                 return "unknown";
         }
     }
 
     std::string targetTriple() {
-        return archToString() + "-" + vendorToString() + "-" + osToString() + "-" + environmentToString();
+        auto o = archToString() + "-" + vendorToString() + "-" + osToString();
+        if (environment != UnknownEnvironment) o += "-" + environmentToString();
+        return o;
     }
 };
 
-typedef struct {
-    BackendType backend;
-    OptLevel opt_level;
-    bool do_runtime_safety;
-    bool dump_ast_bsa;
-    bool dump_ast_asa;
-    Target target;
-    std::string stdlib_path;
-    bool emitDWARF;
-} CompilerOptions;
+
 
 class Module;
 
@@ -194,5 +196,24 @@ class CodeGenError : public std::exception {
     ASTNodePtr m_node;
     std::string m_msg;
 };
+
+enum class CompileStep {
+    PARSE,
+    TYPECHECK,
+    OBJECT,
+    EXECUTABLE
+};
+
+typedef struct {
+    BackendType backend;
+    OptLevel opt_level;
+    bool do_runtime_safety;
+    bool dump_ast_bsa;
+    bool dump_ast_asa;
+    Target target;
+    std::string stdlib_path;
+    bool emitDWARF;
+    CompileStep compile_stop_at;
+} CompilerOptions;
 
 #endif
